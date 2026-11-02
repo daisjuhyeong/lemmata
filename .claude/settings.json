@@ -1,0 +1,14 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "filesystem": { "denyRead": ["~/.ssh", "~/.aws"] },
+    "network": {
+      "allowedDomains": ["github.com", "api.github.com", "pypi.org", "files.pythonhosted.org",
+        "registry.npmjs.org", "api.openalex.org", "api.crossref.org", "export.arxiv.org", "dblp.org"]
+    }
+  },
+  "permissions": {
+    "deny": ["Read(./.env)", "Read(./.env.*)", "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(rm -rf:*)"],
+    "ask": ["Bash(git push:*)"]
+  }
+}
