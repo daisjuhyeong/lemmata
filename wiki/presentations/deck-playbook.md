@@ -18,8 +18,10 @@ Reference deck: `raw/decks/2026-11-03-1st-deck/` (27 main slides). Published cop
 | 3차 | 15–16 | 서비스 런칭 & IR (weeks 11–14: 사용자 테스트, 비즈니스 모델, 피치 덱) | traction, business model, lean canvas, market and competitor analysis, the ask | 2–4 and 6 | build details |
 
 Grading (syllabus): problem definition 10, solution design 30, presentation materials and delivery 50.
-Pace: about 45 seconds a slide; a 10-minute talk is 12–15 slides, a live demo counts as 2 slides. If a task card gives
-both a slide count and a time that disagree, ask.
+
+**Current focus (Juhyeong, 2026-11-03): only the 1차 presentation matters now, planned as a 30-minute talk.** Slide count
+is not a constraint; depth is. Inside the 1차 deck, 2차 and 3차 appear only as a clear plan of *how* they will be done
+(what gets built, measured and shown, with gates and dates), not as drafted decks.
 
 ## 1. Story (the order Juhyeong wants for 1차; reuse steps 1–3 as a 1-slide recap in later decks)
 1. **Why I came up with this.** A concrete moment from his own research, in his words (e.g. 113 commits in 2 weeks with

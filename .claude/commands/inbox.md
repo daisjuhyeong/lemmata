@@ -12,6 +12,7 @@ Check Juhyeong's answers in Slack and act on them. Follow CLAUDE.md and wiki/age
    to a blocked question). Anything unclear → post one short clarifying question in that thread and leave it open.
 5. Record it in the report file: add `answer:` (his words, verbatim), `answered_at:`, and set `status: resolved`.
    Append one line to wiki/log.md.
-6. Hand the work back to the agent that asked (named in owner_agent) with the answer, and let it continue its task card.
-   Approval never extends beyond what the report asked for.
+6. If approved and the report has `next_agent` and `next_task`, run that agent on that task card (set the card's status to
+   in-progress). Otherwise hand the answer back to the agent that asked (owner_agent) and let it continue.
+   `거절` → run nothing; `수정: …` → pass his change along with the task. Approval never extends beyond what was asked.
 7. Finish with a short summary of what was resolved and what is still waiting.
