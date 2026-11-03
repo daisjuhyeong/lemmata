@@ -4,6 +4,7 @@
   python3 tools/report/slack.py flush    # post wiki/reports/outbox/*.md, move them to wiki/reports/sent/YYYY-MM/
   python3 tools/report/slack.py digest   # daily summary from wiki/log.md + reports sent today + open questions
   python3 tools/report/slack.py test     # one test message
+  python3 tools/report/slack.py open     # print how many approval/blocked reports still wait for an answer
 
 Webhook URL: $LEMMATA_SLACK_WEBHOOK, else ~/.config/lemmata/slack_webhook. With neither, messages are printed only.
 Run as a Claude Code hook it must never fail the session, so every error is printed and the exit code is 0.
@@ -78,6 +79,9 @@ def render(path):
         links.insert(0, f"{REPO}/blob/{branch()}/{meta['task']}")
     if links:
         out.append('링크: ' + ' | '.join(links[:3]))
+    if kind in ('approval', 'blocked'):
+        out.append('_이 스레드에 답장: `승인` / `수정: …` / `거절: …` / `답: …`_')
+    out.append(f'`R-{path.stem}`')
     return '\n'.join(out)
 
 
@@ -92,16 +96,21 @@ def flush():
             shutil.move(str(f), dest / f.name)
 
 
+def open_reports():
+    found = []
+    for f in sorted(SENT.glob('*/*.md')) if SENT.exists() else []:
+        meta, _ = parse(f)
+        if meta.get('report_type') in ('approval', 'blocked') and meta.get('status') != 'resolved':
+            found.append(f)
+    return found
+
+
 def digest():
     today = dt.date.today().isoformat()
     log = [l for l in LOG.read_text().splitlines() if l.startswith(today)] if LOG.exists() else []
     sent = sorted((SENT / today[:7]).glob(f'{today}*.md')) if (SENT / today[:7]).exists() else []
     waiting = [f for f in sorted(OUTBOX.glob('*.md')) if f.name != 'README.md'] if OUTBOX.exists() else []
-    opened = []
-    for f in sorted(SENT.glob('*/*.md')) if SENT.exists() else []:
-        meta, _ = parse(f)
-        if meta.get('report_type') in ('approval', 'blocked') and meta.get('status') != 'resolved':
-            opened.append(f)
+    opened = open_reports()
     out = [f'*[일일 요약] {today}*', f'• 작업 기록 {len(log)}건, 보고 {len(sent)}건 전송, 미전송 {len(waiting)}건']
     for l in log[:8]:
         parts = [p.strip() for p in l.split('|')]
@@ -115,7 +124,8 @@ def digest():
 if __name__ == '__main__':
     try:
         cmd = sys.argv[1] if len(sys.argv) > 1 else 'flush'
-        {'flush': flush, 'digest': digest, 'test': lambda: post('*[테스트]* Lemmata 보고 채널 연결 확인')}[cmd]()
+        {'flush': flush, 'digest': digest, 'open': lambda: print(len(open_reports())),
+         'test': lambda: post('*[테스트]* Lemmata 보고 채널 연결 확인')}[cmd]()
     except Exception as e:
         print(f'[slack] {e}', file=sys.stderr)
     sys.exit(0)

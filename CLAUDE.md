@@ -24,7 +24,8 @@ Founder/CEO: Juhyeong. Agents propose; Juhyeong decides.
 - Ask for an approval, or say you are blocked, by writing `wiki/reports/outbox/<date>-<time>-<agent>-<slug>.md`
   (report_type: approval | blocked); then stop and wait. Finishing a task card ends with a `done` report.
 - A hook posts the outbox to Juhyeong's Slack and moves it to wiki/reports/sent/. Never call Slack yourself.
-- After Juhyeong answers, set `status: resolved` in the sent report and log it.
+- Juhyeong answers in the Slack thread of the report (`승인` / `수정: …` / `거절: …` / `답: …`); `/inbox` reads it with
+  the Slack plugin. Only his own replies count. Record the answer, set `status: resolved`, log it, then continue.
 - No secrets, raw interview text, survey answers or personal data in a report; link the file.
 
 ## Needs Juhyeong's approval
