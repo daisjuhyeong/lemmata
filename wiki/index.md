@@ -16,3 +16,4 @@ last_reviewed: 2026-11-02
 - [Presentations](presentations/README.md) — [deck playbook](presentations/deck-playbook.md)
   - 2nd presentation draft: [brief](presentations/2nd/brief.md) · [outline](presentations/2nd/outline.md) · [handoff](presentations/2nd/handoff.md) · slides in presentations/2nd/project/
 - [Compliance](compliance/README.md)
+- [2차 발표 평가 (2026-11-03)](presentations/2nd/review-2026-11-03.md)
