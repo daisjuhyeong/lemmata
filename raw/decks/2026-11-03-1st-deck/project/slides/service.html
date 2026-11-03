@@ -1,0 +1,16 @@
+<section id="service" data-transition="none" style="background:#FFFFFF;color:#1B1B1B;font-family:'IBM Plex Sans KR', Arial, sans-serif;padding:96px 120px 140px;display:flex;flex-direction:column;gap:40px">
+<p style="position:absolute;top:56px;right:120px;font-size:24px;color:#999999">04 통합</p><h2 style="font-family:'IBM Plex Sans KR', Arial, sans-serif;font-size:52px;font-weight:600;line-height:1.2;color:#1B1B1B">서비스 구성: 데스크톱 앱 + 저장소 안의 기록</h2>
+<div style="display:flex;align-items:center;gap:20px">
+<div style="flex:1;border:1.5px solid #1B1B1B;padding:22px 24px;display:flex;flex-direction:column;gap:6px"><p style="font-size:28px;font-weight:600">Lemmata 앱</p><p style="font-size:24px;line-height:1.4;color:#666666">Tauri 2, Mac 먼저<br>지도, 알림, 판정, 타임라인<br>엔진 내장, 폴더 감시</p></div><p style="font-size:32px;color:#999999">→</p>
+<div style="flex:1;border:1.5px solid #2A7354;padding:22px 24px;display:flex;flex-direction:column;gap:6px"><p style="font-size:28px;font-weight:600">.lemmata/ 폴더</p><p style="font-size:24px;line-height:1.4;color:#666666">연구 저장소 안, git으로 관리<br>그래프, 판정, 확정한 연결, 이벤트</p></div><p style="font-size:32px;color:#999999">→</p>
+<div style="flex:1;border:1.5px solid #1B1B1B;padding:22px 24px;display:flex;flex-direction:column;gap:6px"><p style="font-size:28px;font-weight:600">Claude Code 플러그인</p><p style="font-size:24px;line-height:1.4;color:#666666">/lemmata check<br>의미 검사 결과를 .lemmata/에 기록<br>사용자 본인의 플랜으로 실행</p></div>
+</div>
+<div style="width:760px;border:1.5px solid #D4D4D4;padding:22px 24px;display:flex;flex-direction:column;gap:6px"><p style="font-size:28px;font-weight:600">웹사이트</p><p style="font-size:24px;line-height:1.4;color:#666666">랜딩, 문서, 공개 논문으로 만든 리포트 갤러리 (정적 호스팅)</p></div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:64px;border-top:1px solid #D4D4D4;padding-top:24px">
+<div style="flex:1"><p style="font-size:26px;line-height:1.5;color:#1B1B1B;"><b>왜 앱인가</b></p><p style="font-size:24px;line-height:1.5;color:#666666;">저장소, LaTeX, 서버 결과가 PC에 있음. 미공개 원고가 PC 밖으로 나가지 않음. Tauri 설치본 약 8.6MB (Electron 244MB)</p></div>
+<div style="flex:1"><p style="font-size:26px;line-height:1.5;color:#1B1B1B;"><b>지켜야 할 조건</b></p><p style="font-size:24px;line-height:1.5;color:#666666;">제3자 앱은 Claude 구독 로그인 제공 불가 → AI는 사용자 Claude Code나 API 키로. Overleaf Git은 유료 기능 → 폴더, zip도 지원</p></div>
+</div>
+<div style="position:absolute;left:120px;right:120px;bottom:52px;display:flex;justify-content:space-between;align-items:baseline"><p style="font-size:24px;color:#8A8A8A">출처: Claude Agent SDK 문서, Overleaf 문서, Tauri vs Electron 벤치마크(2026.7)</p><p style="font-size:24px;color:#8A8A8A">23</p></div>
+<aside>서비스 형태는 데스크톱 앱입니다. 코드 저장소와 LaTeX 폴더, 서버에서 받은 결과가 모두 연구자 PC에 있고, 미공개 원고를 서버로 보내고 싶지 않기 때문입니다. 앱은 Tauri로 만들어 가볍게 하고 Mac부터 시작합니다. 모든 상태는 연구 저장소 안 .lemmata 폴더에 git으로 남기 때문에, 어떤 OS나 어떤 에이전트를 써도 같은 기록을 봅니다. AI 점검은 사용자가 자기 Claude Code에서 플러그인으로 돌립니다. 제3자 앱이 Claude 구독 로그인을 제공하는 건 약관상 안 되기 때문입니다. Overleaf Git 연동은 유료 기능이라 폴더나 zip으로도 받습니다.</aside>
+</section>

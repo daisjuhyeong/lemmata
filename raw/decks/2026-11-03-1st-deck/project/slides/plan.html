@@ -1,0 +1,19 @@
+<section id="plan" data-transition="none" style="background:#FFFFFF;color:#1B1B1B;font-family:'IBM Plex Sans KR', Arial, sans-serif;padding:96px 120px 140px;display:flex;flex-direction:column;gap:40px">
+<p style="position:absolute;top:56px;right:120px;font-size:24px;color:#999999">04 통합</p><h2 style="font-family:'IBM Plex Sans KR', Arial, sans-serif;font-size:52px;font-weight:600;line-height:1.2;color:#1B1B1B">검증 계획과 일정</h2>
+<div style="display:flex;gap:72px">
+<div style="width:900px;display:flex;flex-direction:column;gap:16px">
+<p style="font-size:24px;line-height:1.5;color:#666666;">가설 (통과 기준은 제안값)</p>
+<table style="font-family:'IBM Plex Sans KR', Arial, sans-serif;font-size:24px;color:#1B1B1B">
+<tr><th style="width:12%"></th><th style="width:62%">내용</th><th style="width:26%">기준</th></tr>
+<tr><td><b>H1</b></td><td>최근 1년, 코드나 실험을 바꾼 뒤 논문에 옛 결과가 남은 적이 있다</td><td>응답자 ≥ 50%</td></tr>
+<tr><td><b>H2</b></td><td>무엇을 다시 볼지 기억이나 메모로 파악한다</td><td>응답자 ≥ 60%</td></tr>
+<tr><td><b>H3</b></td><td>변경 사슬이 붙은 알림을 단순 알림보다 더 믿는다</td><td>B 선택 ≥ 70%</td></tr>
+<tr><td><b>H4</b></td><td>알람이 실제로 다시 봐야 했던 것을 가리킨다</td><td>113 커밋 재현, 정밀도 ≥ 0.8</td></tr>
+</table>
+<p style="font-size:24px;line-height:1.5;color:#666666;">방법: 설문 n ≥ 60, 인터뷰 12–15명 (고려대 ML 연구실, 해외, 기타)</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column"><p style="font-size:24px;line-height:1.5;color:#666666;">일정</p><div style="display:flex;gap:20px;padding:14px 0;border-bottom:1px solid #D4D4D4"><p style="width:150px;font-size:26px;font-weight:600;color:#2A7354">1차 (지금)</p><p style="flex:1;font-size:26px;line-height:1.4">프로토타입을 내 연구로 검증, 설문과 인터뷰 시작</p></div><div style="display:flex;gap:20px;padding:14px 0;border-bottom:1px solid #D4D4D4"><p style="width:150px;font-size:26px;font-weight:600;color:#1B1B1B">2차</p><p style="flex:1;font-size:26px;line-height:1.4">Mac 앱 MVP (0, 1단계). 113개 커밋을 재현해 알람 정밀도 측정, 인터뷰 12명</p></div><div style="display:flex;gap:20px;padding:14px 0;border-bottom:1px solid #D4D4D4"><p style="width:150px;font-size:26px;font-weight:600;color:#1B1B1B">3차</p><p style="flex:1;font-size:26px;line-height:1.4">Claude Code 플러그인, 설치 파일, 랜딩. 시범 연구자 10명, IR</p></div><div style="display:flex;gap:20px;padding:14px 0;border-bottom:1px solid #D4D4D4"><p style="width:150px;font-size:26px;font-weight:600;color:#1B1B1B">이후</p><p style="flex:1;font-size:26px;line-height:1.4">모바일(읽기 전용), 팀 동기화, 호스팅 버전(API 키)</p></div></div>
+</div>
+<div style="position:absolute;left:120px;right:120px;bottom:52px;display:flex;justify-content:space-between;align-items:baseline"><p style="font-size:24px;color:#8A8A8A">설문 문항은 H1–H3에 맞춰 설계, 응답은 LLM-wiki에 기록하되 해석은 직접</p><p style="font-size:24px;color:#8A8A8A">25</p></div>
+<aside>검증 계획입니다. 방향을 바꾼 만큼 가설도 다시 세웠습니다. H1, H2는 문제가 진짜인지, 즉 코드를 바꾼 뒤 논문에 옛 결과가 남은 경험이 있는지, 그리고 무엇을 다시 볼지 기억에 의존하는지입니다. H3은 변경 사슬을 보여 주는 알림을 더 믿는지, H4는 알람이 정말 다시 봐야 했던 것을 가리키는지인데, 이건 제 저장소의 커밋 113개를 그대로 재현해서 측정합니다. 기준값은 아직 제안값입니다. 일정은 2차에 Mac 앱 MVP와 정밀도 측정, 3차에 플러그인과 시범 사용자 10명입니다.</aside>
+</section>

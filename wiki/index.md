@@ -13,5 +13,6 @@ last_reviewed: 2026-11-02
 - [Agents and handoff protocol](agents/handoff-protocol.md)
 - [Sprints](sprints/README.md) — [task card template](sprints/task-card-template.md)
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md)
-- [Presentations](presentations/README.md)
+- [Presentations](presentations/README.md) — [deck playbook](presentations/deck-playbook.md)
+  - 2nd presentation draft: [brief](presentations/2nd/brief.md) · [outline](presentations/2nd/outline.md) · [handoff](presentations/2nd/handoff.md) · slides in presentations/2nd/project/
 - [Compliance](compliance/README.md)

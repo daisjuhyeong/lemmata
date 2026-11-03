@@ -1,0 +1,22 @@
+<section id="whycc" data-transition="none" style="background:#FFFFFF;color:#1B1B1B;font-family:'IBM Plex Sans KR', Arial, sans-serif;padding:96px 120px 140px;display:flex;flex-direction:column;gap:40px">
+<p style="position:absolute;top:56px;right:120px;font-size:24px;color:#999999">03 개발</p><h2 style="font-family:'IBM Plex Sans KR', Arial, sans-serif;font-size:52px;font-weight:600;line-height:1.2;color:#1B1B1B">왜 로컬 LLM이 아니라 Claude Code 에이전트인가</h2>
+<div style="display:flex;gap:72px">
+<div style="width:1000px;display:flex;flex-direction:column;gap:24px">
+<table style="font-family:'IBM Plex Sans KR', Arial, sans-serif;font-size:26px;color:#1B1B1B">
+<tr><th style="width:22%"></th><th style="width:39%">로컬 LLM</th><th style="width:39%">Claude Code 에이전트</th></tr>
+<tr><td><b>무엇의 문제</b></td><td>추론을 어디서 하나</td><td>모델 + 도구 + 반복 루프</td></tr>
+<tr><td><b>동작</b></td><td>한 번 답하고 끝</td><td>실행, 관찰, 수정을 끝까지 반복</td></tr>
+<tr><td><b>파일, 셸</b></td><td>스스로는 못 함</td><td>직접 읽고 실행</td></tr>
+<tr><td><b>긴 작업</b></td><td>7–14B: 긴 문서 누락, 규칙 이탈</td><td>여러 단계에 걸쳐 규칙 유지</td></tr>
+<tr><td><b>제약</b></td><td>내 RAM, GPU</td><td>플랜 사용 한도</td></tr>
+</table>
+<p style="font-size:26px;line-height:1.5;color:#666666;">예: "학습 스크립트 shape 오류 고치고 다시 돌려 줘" → 로컬 LLM은 수정안을 보여 주고, 에이전트는 파일을 고치고 다시 실행해 결과까지 보고</p>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:32px">
+<div><p style="font-size:28px;line-height:1.5;color:#1B1B1B;"><b>Mac mini는 사무실과 손</b></p><p style="font-size:26px;line-height:1.5;color:#666666;">모델을 돌리지 않음. 추론은 Anthropic 서버의 Opus, Sonnet, 실행은 Mac mini. 에이전트 8명 = 같은 Claude에 준 지시 파일 8개</p></div>
+<div><p style="font-size:28px;line-height:1.5;color:#1B1B1B;"><b>로컬 모델은 보조로만</b></p><p style="font-size:26px;line-height:1.5;color:#666666;">인터뷰 녹취 익명화, 위키 임베딩 검색처럼 좁고 사적이고 양이 많은 일</p></div>
+</div>
+</div>
+<div style="position:absolute;left:120px;right:120px;bottom:52px;display:flex;justify-content:space-between;align-items:baseline"><p style="font-size:24px;color:#8A8A8A">서브에이전트는 새 모델이 아니라 별도 컨텍스트에서 돌아가는 같은 Claude</p><p style="font-size:24px;color:#8A8A8A">20</p></div>
+<aside>왜 로컬 LLM이 아니라 Claude Code 에이전트를 쓰는지 말씀드리겠습니다. 로컬 LLM은 추론을 어디서 하느냐의 문제이고, 에이전트는 모델에 도구와 반복 루프를 붙인 구조입니다. 로컬 LLM은 질문에 한 번 답하고 끝나지만, 에이전트는 파일을 읽고 명령을 실행하고 결과를 보고 다시 고치는 과정을 끝까지 합니다. 제 서비스는 긴 원고와 저장소를 정확히 읽고 규칙을 지켜야 하는데, 7에서 14B 로컬 모델은 여기서 누락과 규칙 이탈이 쌓였습니다. 그래서 Mac mini는 모델을 돌리지 않고 에이전트가 일하는 사무실 역할만 하고, 로컬 모델은 인터뷰 익명화 같은 좁은 일에만 씁니다.</aside>
+</section>
