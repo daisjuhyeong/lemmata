@@ -10,7 +10,7 @@ last_reviewed: 2026-11-02
 - [Decisions (ADRs)](decisions/README.md) — [ADR template](decisions/ADR-000-template.md)
 - [Architecture](architecture/README.md)
 - [Design](design/README.md)
-- [Agents and handoff protocol](agents/handoff-protocol.md)
+- [Agents and handoff protocol](agents/handoff-protocol.md) — [reporting to Slack](agents/reporting.md) · [outbox](reports/outbox/README.md)
 - [Sprints](sprints/README.md) — [task card template](sprints/task-card-template.md)
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md)
 - [Presentations](presentations/README.md) — [deck playbook](presentations/deck-playbook.md)

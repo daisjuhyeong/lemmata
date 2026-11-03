@@ -1,14 +1,61 @@
 {
   "sandbox": {
     "enabled": true,
-    "filesystem": { "denyRead": ["~/.ssh", "~/.aws"] },
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws"
+      ]
+    },
     "network": {
-      "allowedDomains": ["github.com", "api.github.com", "pypi.org", "files.pythonhosted.org",
-        "registry.npmjs.org", "api.openalex.org", "api.crossref.org", "export.arxiv.org", "dblp.org"]
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "api.openalex.org",
+        "api.crossref.org",
+        "export.arxiv.org",
+        "dblp.org",
+        "hooks.slack.com"
+      ]
     }
   },
   "permissions": {
-    "deny": ["Read(./.env)", "Read(./.env.*)", "Bash(git push --force:*)", "Bash(git push -f:*)", "Bash(rm -rf:*)"],
-    "ask": ["Bash(git push:*)"]
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(rm -rf:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/report/slack.py\" flush",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/report/slack.py\" flush",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

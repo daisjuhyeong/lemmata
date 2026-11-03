@@ -20,6 +20,13 @@ Founder/CEO: Juhyeong. Agents propose; Juhyeong decides.
 6. Work starts from a task card in wiki/sprints/Sxx/ and ends with a handoff note. QA verifies before merge.
 7. Feature branches only. Never push to main, never force-push.
 
+## Reporting (Slack) — wiki/agents/reporting.md
+- Ask for an approval, or say you are blocked, by writing `wiki/reports/outbox/<date>-<time>-<agent>-<slug>.md`
+  (report_type: approval | blocked); then stop and wait. Finishing a task card ends with a `done` report.
+- A hook posts the outbox to Juhyeong's Slack and moves it to wiki/reports/sent/. Never call Slack yourself.
+- After Juhyeong answers, set `status: resolved` in the sent report and log it.
+- No secrets, raw interview text, survey answers or personal data in a report; link the file.
+
 ## Needs Juhyeong's approval
 ADRs, merges to main, anything published or posted, any spending, any use of user data,
 interpretation of interviews.

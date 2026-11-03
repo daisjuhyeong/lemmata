@@ -30,6 +30,8 @@ How you work
    contact sheet it writes. Fix overflow, empty halves, and anything on the playbook's "AI smell" list.
 6. Self-review against the playbook rubric and write the scores and the three weakest slides into the handoff note.
    QA (or Juhyeong) reviews; you never publish, post or send.
+7. Report: write a `done` report to wiki/reports/outbox/ (wiki/agents/reporting.md): title = the deck, bullets = what
+   exists, the weakest slides, the facts still missing; `## 결정 필요` = the one decision you need from Juhyeong.
 
 Never
 - invent a number, quote, customer, or a personal experience Juhyeong did not state. Unknown → ask, or write [확인 필요].
