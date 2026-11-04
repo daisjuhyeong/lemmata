@@ -1,0 +1,1439 @@
+{
+ "schema": "rmap.graph/1",
+ "scanned_at": "2026-11-04T15:00:00+09:00",
+ "nodes": [
+  {
+   "id": "thesis",
+   "kind": "thesis",
+   "layer": 0,
+   "repo": "paper",
+   "name": "Thesis",
+   "detail": "Tiny transformers can match larger baselines",
+   "loc": {
+    "path": "main.tex",
+    "line": 7,
+    "end_line": 9
+   },
+   "hash": "sha256:2863229379aa76de93620451ec65b270760a0b41971bad0d1c74f340f1cb4786",
+   "attrs": {
+    "text": "We ask whether a small transformer matches larger baselines on forecasting"
+   }
+  },
+  {
+   "id": "rq:RQ1",
+   "kind": "rq",
+   "layer": 1,
+   "repo": "paper",
+   "name": "RQ1",
+   "detail": "Does a small model match larger ones?",
+   "loc": {
+    "path": "main.tex",
+    "line": 13,
+    "end_line": null
+   },
+   "hash": "sha256:9cb32e2736f577956d3dd9f0958bc86dc9bf08c827e9aede9a28145753e9d731",
+   "attrs": {
+    "text": "Does a small model match larger ones?"
+   }
+  },
+  {
+   "id": "rq:RQ2",
+   "kind": "rq",
+   "layer": 1,
+   "repo": "paper",
+   "name": "RQ2",
+   "detail": "How sensitive is it to hyperparameters?",
+   "loc": {
+    "path": "main.tex",
+    "line": 13,
+    "end_line": null
+   },
+   "hash": "sha256:fa25bb7d4f9a48bda132ab74fa62ae731ee270719473450497760463e3d460d5",
+   "attrs": {
+    "text": "How sensitive is it to hyperparameters?"
+   }
+  },
+  {
+   "id": "tex:app:extra",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "App. A Extra results",
+   "detail": "Extra results",
+   "loc": {
+    "path": "appendix.tex",
+    "line": 1,
+    "end_line": 3
+   },
+   "hash": "sha256:d30051b0c6c78529ddfb1e8ea7667fa12229dba73931300e20866ab5e0f75e66",
+   "attrs": {
+    "tex_label": "app:extra",
+    "level": 1,
+    "number": "A",
+    "in_appendix": true,
+    "title": "Extra results"
+   }
+  },
+  {
+   "id": "tex:app:hparams",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "App. B Hyperparameters",
+   "detail": "Hyperparameters",
+   "loc": {
+    "path": "appendix.tex",
+    "line": 4,
+    "end_line": 10
+   },
+   "hash": "sha256:89dba75c4989564361ab7d4edb0224cc56bf6dc3f7762190db7c2794b5c12191",
+   "attrs": {
+    "tex_label": "app:hparams",
+    "level": 1,
+    "number": "B",
+    "in_appendix": true,
+    "title": "Hyperparameters"
+   }
+  },
+  {
+   "id": "tex:sec:concl",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§6 Conclusion",
+   "detail": "Conclusion",
+   "loc": {
+    "path": "main.tex",
+    "line": 61,
+    "end_line": 63
+   },
+   "hash": "sha256:2a12fd6a95aa8e0ac96e0c8d664df211bb8e51b87b47980b6caac7a31bccdff1",
+   "attrs": {
+    "tex_label": "sec:concl",
+    "level": 1,
+    "number": "6",
+    "in_appendix": false,
+    "title": "Conclusion"
+   }
+  },
+  {
+   "id": "tex:sec:intro",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§1 Introduction",
+   "detail": "Introduction",
+   "loc": {
+    "path": "main.tex",
+    "line": 11,
+    "end_line": 14
+   },
+   "hash": "sha256:6a4003f3e1163282dcff01c17de4629303a76ed5c64b307388219c10659cd138",
+   "attrs": {
+    "tex_label": "sec:intro",
+    "level": 1,
+    "number": "1",
+    "in_appendix": false,
+    "title": "Introduction"
+   }
+  },
+  {
+   "id": "tex:sec:method",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§3 Method",
+   "detail": "Method",
+   "loc": {
+    "path": "main.tex",
+    "line": 19,
+    "end_line": 29
+   },
+   "hash": "sha256:6b793b1a4c6e4898290a914412930be864c719c6a9f1e8ea5d81d63929530822",
+   "attrs": {
+    "tex_label": "sec:method",
+    "level": 1,
+    "number": "3",
+    "in_appendix": false,
+    "title": "Method"
+   }
+  },
+  {
+   "id": "tex:sec:related",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§2 Related work",
+   "detail": "Related work",
+   "loc": {
+    "path": "main.tex",
+    "line": 15,
+    "end_line": 18
+   },
+   "hash": "sha256:c4384d66fc1b98ac1bb8e146bdaa05a856b4ca3d73da9458f3dc3d6c64a2db8d",
+   "attrs": {
+    "tex_label": "sec:related",
+    "level": 1,
+    "number": "2",
+    "in_appendix": false,
+    "title": "Related work"
+   }
+  },
+  {
+   "id": "tex:sec:results",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§5 Results",
+   "detail": "Results",
+   "loc": {
+    "path": "main.tex",
+    "line": 34,
+    "end_line": 60
+   },
+   "hash": "sha256:30b6e0c6271ce9ab6f018efe9fa6fdaacef88fa82f3ae67179fb6d5245d01e76",
+   "attrs": {
+    "tex_label": "sec:results",
+    "level": 1,
+    "number": "5",
+    "in_appendix": false,
+    "title": "Results"
+   }
+  },
+  {
+   "id": "tex:sec:setup",
+   "kind": "section",
+   "layer": 2,
+   "repo": "paper",
+   "name": "§4 Experimental setup",
+   "detail": "Experimental setup",
+   "loc": {
+    "path": "main.tex",
+    "line": 30,
+    "end_line": 33
+   },
+   "hash": "sha256:47d24185bc4969ad5898d42907291482ab96605bbb235928221e6996fc77e1b1",
+   "attrs": {
+    "tex_label": "sec:setup",
+    "level": 1,
+    "number": "4",
+    "in_appendix": false,
+    "title": "Experimental setup"
+   }
+  },
+  {
+   "id": "tex:eq:loss",
+   "kind": "equation",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Eq. 1",
+   "detail": "",
+   "loc": {
+    "path": "main.tex",
+    "line": 21,
+    "end_line": null
+   },
+   "hash": "sha256:c9dfffbfcbb6f17fee23d7738888d384630a299a5dcc5c4e3a02ad09af445cbf",
+   "attrs": {
+    "tex_label": "eq:loss",
+    "number": "1"
+   }
+  },
+  {
+   "id": "tex:fig:arch",
+   "kind": "figure",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Fig. 1",
+   "detail": "Model architecture.",
+   "loc": {
+    "path": "main.tex",
+    "line": 27,
+    "end_line": null
+   },
+   "hash": "sha256:3ecc06058efa24144635d823eaaadec80119b2b5da650cd64e75c4fce155745d",
+   "attrs": {
+    "tex_label": "fig:arch",
+    "number": "1",
+    "in_appendix": false,
+    "caption": "Model architecture.",
+    "manual": true,
+    "assets": [
+     "figures/arch.pdf"
+    ]
+   }
+  },
+  {
+   "id": "tex:fig:curve",
+   "kind": "figure",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Fig. 2",
+   "detail": "Training curves.",
+   "loc": {
+    "path": "main.tex",
+    "line": 54,
+    "end_line": null
+   },
+   "hash": "sha256:b82ffbcc59dcb5f74f3c5e20689a0ecab0ce1ece4bc38df4653669320074d286",
+   "attrs": {
+    "tex_label": "fig:curve",
+    "number": "2",
+    "in_appendix": false,
+    "caption": "Training curves.",
+    "manual": false,
+    "assets": [
+     "figures/curve.png"
+    ]
+   }
+  },
+  {
+   "id": "tex:fig:qual",
+   "kind": "figure",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Fig. 3",
+   "detail": "Qualitative examples.",
+   "loc": {
+    "path": "main.tex",
+    "line": 58,
+    "end_line": null
+   },
+   "hash": "sha256:d1c81480619f4f72648b81f4ac9b4af61301835283daa7480197ebb772d0d94c",
+   "attrs": {
+    "tex_label": "fig:qual",
+    "number": "3",
+    "in_appendix": false,
+    "caption": "Qualitative examples.",
+    "manual": false,
+    "assets": [
+     "figures/qual.png"
+    ]
+   }
+  },
+  {
+   "id": "tex:tab:ablation",
+   "kind": "table",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Table 1",
+   "detail": "Ablation.",
+   "loc": {
+    "path": "main.tex",
+    "line": 46,
+    "end_line": null
+   },
+   "hash": "sha256:796add9360708a4a595f6d864e2fd6f5472c83efad45974a35441795795848ec",
+   "attrs": {
+    "tex_label": "tab:ablation",
+    "number": "1",
+    "in_appendix": false,
+    "caption": "Ablation."
+   }
+  },
+  {
+   "id": "tex:tab:main",
+   "kind": "table",
+   "layer": 3,
+   "repo": "paper",
+   "name": "Table 2",
+   "detail": "Main results.",
+   "loc": {
+    "path": "main.tex",
+    "line": 39,
+    "end_line": null
+   },
+   "hash": "sha256:1c129ac86e1d88db0142b0d21926b34b5524617161d670f242a45f8a02eeb6ad",
+   "attrs": {
+    "tex_label": "tab:main",
+    "number": "2",
+    "in_appendix": false,
+    "caption": "Main results."
+   }
+  },
+  {
+   "id": "file:code/results/metrics.json",
+   "kind": "result",
+   "layer": 4,
+   "repo": "code",
+   "name": "results/metrics.json",
+   "detail": "",
+   "loc": {
+    "path": "results/metrics.json",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:4f06ac1cd34d1426e543b1bbf1c823302078c72d",
+   "attrs": {
+    "size": 34,
+    "binary": false,
+    "ext": ".json"
+   }
+  },
+  {
+   "id": "file:code/results/table2.csv",
+   "kind": "result",
+   "layer": 4,
+   "repo": "code",
+   "name": "results/table2.csv",
+   "detail": "",
+   "loc": {
+    "path": "results/table2.csv",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:12d251c437d9a278bd203d4474d76a11f733588b",
+   "attrs": {
+    "size": 40,
+    "binary": false,
+    "ext": ".csv"
+   }
+  },
+  {
+   "id": "file:paper/figures/arch.pdf",
+   "kind": "asset",
+   "layer": 4,
+   "repo": "paper",
+   "name": "figures/arch.pdf",
+   "detail": "",
+   "loc": {
+    "path": "figures/arch.pdf",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:aca8da44fbf8e783e1462fc10deeef18681c31cf",
+   "attrs": {
+    "size": 18200,
+    "binary": true,
+    "ext": ".pdf"
+   }
+  },
+  {
+   "id": "file:paper/figures/curve.png",
+   "kind": "asset",
+   "layer": 4,
+   "repo": "paper",
+   "name": "figures/curve.png",
+   "detail": "",
+   "loc": {
+    "path": "figures/curve.png",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:fad0df0da6037e4e7df4dbf4d4f5ee97e460f8ae",
+   "attrs": {
+    "size": 40200,
+    "binary": true,
+    "ext": ".png"
+   }
+  },
+  {
+   "id": "file:paper/figures/qual.png",
+   "kind": "asset",
+   "layer": 4,
+   "repo": "paper",
+   "name": "figures/qual.png",
+   "detail": "",
+   "loc": {
+    "path": "figures/qual.png",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:28fcfda44e8c92c3e33a159a53fb6dad54bdbfa4",
+   "attrs": {
+    "size": 90100,
+    "binary": true,
+    "ext": ".png"
+   }
+  },
+  {
+   "id": "run:code/train_main",
+   "kind": "run",
+   "layer": 5,
+   "repo": "code",
+   "name": "run train_main",
+   "detail": "python train.py --config configs/default.yaml",
+   "loc": {
+    "path": "runs/train_main.json",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:e5224d533ef27b001224859a9b36696846a7e7fe",
+   "attrs": {
+    "command": "python train.py --config configs/default.yaml",
+    "started_at": "2026-09-30T14:00:00+09:00"
+   }
+  },
+  {
+   "id": "file:code/README.md",
+   "kind": "doc",
+   "layer": 6,
+   "repo": "code",
+   "name": "README.md",
+   "detail": "",
+   "loc": {
+    "path": "README.md",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:5dcb76c1c66c8e11ebbfb61f43a91d7492e676d2",
+   "attrs": {
+    "size": 90,
+    "ext": ".md"
+   }
+  },
+  {
+   "id": "file:code/configs/default.yaml",
+   "kind": "config",
+   "layer": 6,
+   "repo": "code",
+   "name": "configs/default.yaml",
+   "detail": "",
+   "loc": {
+    "path": "configs/default.yaml",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:f87db45c535ba38b60db41955115adcee6441259",
+   "attrs": {
+    "size": 70,
+    "ext": ".yaml"
+   }
+  },
+  {
+   "id": "file:code/eval.py",
+   "kind": "code",
+   "layer": 6,
+   "repo": "code",
+   "name": "eval.py",
+   "detail": "",
+   "loc": {
+    "path": "eval.py",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:ce2ecff5824000f0e594b01614abcb071cfed272",
+   "attrs": {
+    "size": 80,
+    "ext": ".py"
+   }
+  },
+  {
+   "id": "file:code/plot_curve.py",
+   "kind": "code",
+   "layer": 6,
+   "repo": "code",
+   "name": "plot_curve.py",
+   "detail": "",
+   "loc": {
+    "path": "plot_curve.py",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:43a67bac989a2afe9e0308950bb530dc6c7bd081",
+   "attrs": {
+    "size": 120,
+    "ext": ".py"
+   }
+  },
+  {
+   "id": "file:code/train.py",
+   "kind": "code",
+   "layer": 6,
+   "repo": "code",
+   "name": "train.py",
+   "detail": "",
+   "loc": {
+    "path": "train.py",
+    "line": null,
+    "end_line": null
+   },
+   "hash": "blob:3b7b0a2794126211152afc653a78db9c8332d8a8",
+   "attrs": {
+    "size": 300,
+    "ext": ".py"
+   }
+  },
+  {
+   "id": "ref:devlin2019bert",
+   "kind": "reference",
+   "layer": null,
+   "repo": "paper",
+   "name": "[devlin2019bert]",
+   "detail": "BERT: Pre-training of deep bidirectional transformers",
+   "loc": {
+    "path": "refs.bib",
+    "line": 5,
+    "end_line": null
+   },
+   "hash": "sha256:f55ad600e47f7d32337988bfdbf4d6ae78d6e118be17258b2c80818c69fa34d6",
+   "attrs": {
+    "bib_key": "devlin2019bert",
+    "title": "BERT: Pre-training of deep bidirectional transformers",
+    "year": 2019,
+    "doi": null,
+    "lookup": "matched"
+   }
+  },
+  {
+   "id": "ref:smith2021ghost",
+   "kind": "reference",
+   "layer": null,
+   "repo": "paper",
+   "name": "[smith2021ghost]",
+   "detail": "Ghost transformers for time series",
+   "loc": {
+    "path": "refs.bib",
+    "line": 9,
+    "end_line": null
+   },
+   "hash": "sha256:8635c398c2c0d7191979a5676790a3af4e6acbc09eaec0b894fc2726c72d94a4",
+   "attrs": {
+    "bib_key": "smith2021ghost",
+    "title": "Ghost transformers for time series",
+    "year": 2021,
+    "doi": null,
+    "lookup": "not_found"
+   }
+  },
+  {
+   "id": "ref:unused2019",
+   "kind": "reference",
+   "layer": null,
+   "repo": "paper",
+   "name": "[unused2019]",
+   "detail": "An uncited entry",
+   "loc": {
+    "path": "refs.bib",
+    "line": 13,
+    "end_line": null
+   },
+   "hash": "sha256:e8bb55a37f17ea9057af0bf439393e7bc58c6f20bcc4395d829d61c4d16de0d4",
+   "attrs": {
+    "bib_key": "unused2019",
+    "title": "An uncited entry",
+    "year": 2019,
+    "doi": null,
+    "lookup": "matched"
+   }
+  },
+  {
+   "id": "ref:vaswani2017attention",
+   "kind": "reference",
+   "layer": null,
+   "repo": "paper",
+   "name": "[vaswani2017attention]",
+   "detail": "Attention is all you need",
+   "loc": {
+    "path": "refs.bib",
+    "line": 1,
+    "end_line": null
+   },
+   "hash": "sha256:468d5aef1987d352fd5bc68b7ce5d0bba949d998c37089a43df9cdcc41e9d133",
+   "attrs": {
+    "bib_key": "vaswani2017attention",
+    "title": "Attention is all you need",
+    "year": 2017,
+    "doi": null,
+    "lookup": "matched"
+   }
+  }
+ ],
+ "edges": [
+  {
+   "id": "file:code/plot_curve.py|imports|file:code/eval.py",
+   "from": "file:code/plot_curve.py",
+   "to": "file:code/eval.py",
+   "kind": "imports",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "plot_curve.py",
+     "line": 2,
+     "text": "from eval import evaluate",
+     "role": "import",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "file:code/results/metrics.json|produced_by|run:code/train_main",
+   "from": "file:code/results/metrics.json",
+   "to": "run:code/train_main",
+   "kind": "produced_by",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "runs/train_main.json",
+     "line": 7,
+     "text": "\"outputs\": [\"results/table2.csv\", \"results/metrics.json\"]",
+     "role": "run_record",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "file:code/results/table2.csv|produced_by|file:code/train.py",
+   "from": "file:code/results/table2.csv",
+   "to": "file:code/train.py",
+   "kind": "produced_by",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "train.py",
+     "line": 9,
+     "text": "    evaluate(cfg)",
+     "role": "write_call",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "file:code/results/table2.csv|produced_by|run:code/train_main",
+   "from": "file:code/results/table2.csv",
+   "to": "run:code/train_main",
+   "kind": "produced_by",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "runs/train_main.json",
+     "line": 7,
+     "text": "\"outputs\": [\"results/table2.csv\", \"results/metrics.json\"]",
+     "role": "run_record",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "file:code/train.py|imports|file:code/eval.py",
+   "from": "file:code/train.py",
+   "to": "file:code/eval.py",
+   "kind": "imports",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "train.py",
+     "line": 2,
+     "text": "from eval import evaluate",
+     "role": "import",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "rq:RQ1|answers|tex:sec:results",
+   "from": "rq:RQ1",
+   "to": "tex:sec:results",
+   "kind": "answers",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 13,
+     "text": "RQ1: does a small model match larger ones? RQ2: how sensitive is it to hyperparameters?",
+     "role": "mention",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "rq:RQ2|answers|tex:app:hparams",
+   "from": "rq:RQ2",
+   "to": "tex:app:hparams",
+   "kind": "answers",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 6,
+     "text": "Learning rate & $1\\times10^{-3}$ \\\\",
+     "role": "mention",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "run:code/train_main|executes|file:code/train.py",
+   "from": "run:code/train_main",
+   "to": "file:code/train.py",
+   "kind": "executes",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "runs/train_main.json",
+     "line": 5,
+     "text": "\"script\": \"train.py\",",
+     "role": "run_record",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "run:code/train_main|reads|file:code/configs/default.yaml",
+   "from": "run:code/train_main",
+   "to": "file:code/configs/default.yaml",
+   "kind": "reads",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "code",
+     "path": "runs/train_main.json",
+     "line": 6,
+     "text": "\"inputs\": [\"configs/default.yaml\"],",
+     "role": "run_record",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:app:hparams|value_match|file:code/configs/default.yaml",
+   "from": "tex:app:hparams",
+   "to": "file:code/configs/default.yaml",
+   "kind": "value_match",
+   "status": "proposed",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 6,
+     "text": "Learning rate & $1\\times10^{-3}$ \\\\",
+     "role": "appendix",
+     "page": null
+    },
+    {
+     "repo": "code",
+     "path": "configs/default.yaml",
+     "line": 2,
+     "text": "learning_rate: 1.0e-3",
+     "role": "config",
+     "page": null
+    }
+   ],
+   "reason": "learning_rate: paper 1e-3, config 1.0e-3; batch_size: paper 128, config 128"
+  },
+  {
+   "id": "tex:fig:arch|includes|file:paper/figures/arch.pdf",
+   "from": "tex:fig:arch",
+   "to": "file:paper/figures/arch.pdf",
+   "kind": "includes",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 26,
+     "text": "\\includegraphics{figures/arch.pdf}",
+     "role": "include",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:fig:curve|generated_by|file:code/plot_curve.py",
+   "from": "tex:fig:curve",
+   "to": "file:code/plot_curve.py",
+   "kind": "generated_by",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 52,
+     "text": "% generated-by: code:plot_curve.py",
+     "role": "marker",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:fig:curve|includes|file:paper/figures/curve.png",
+   "from": "tex:fig:curve",
+   "to": "file:paper/figures/curve.png",
+   "kind": "includes",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 53,
+     "text": "\\includegraphics{figures/curve.png}",
+     "role": "include",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:fig:qual|includes|file:paper/figures/qual.png",
+   "from": "tex:fig:qual",
+   "to": "file:paper/figures/qual.png",
+   "kind": "includes",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 57,
+     "text": "\\includegraphics{figures/qual.png}",
+     "role": "include",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:intro|cites|ref:vaswani2017attention",
+   "from": "tex:sec:intro",
+   "to": "ref:vaswani2017attention",
+   "kind": "cites",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 12,
+     "text": "Attention models are common in forecasting \\cite{vaswani2017attention}.",
+     "role": "cite",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:method|contains|tex:eq:loss",
+   "from": "tex:sec:method",
+   "to": "tex:eq:loss",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 21,
+     "text": "\\begin{equation}\\label{eq:loss}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:method|contains|tex:fig:arch",
+   "from": "tex:sec:method",
+   "to": "tex:fig:arch",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 27,
+     "text": "\\caption{Model architecture.}\\label{fig:arch}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:method|refs|tex:eq:loss",
+   "from": "tex:sec:method",
+   "to": "tex:eq:loss",
+   "kind": "refs",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 20,
+     "text": "The architecture is shown in Figure~\\ref{fig:missing}. We minimise the loss in Eq.~\\ref{eq:loss}.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:related|cites|ref:devlin2019bert",
+   "from": "tex:sec:related",
+   "to": "ref:devlin2019bert",
+   "kind": "cites",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 16,
+     "text": "Attention was introduced by \\cite{vaswani2017attention} and refined by \\cite{devlin2019bert}.",
+     "role": "cite",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:related|cites|ref:smith2021ghost",
+   "from": "tex:sec:related",
+   "to": "ref:smith2021ghost",
+   "kind": "cites",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 17,
+     "text": "A recent report \\cite{smith2021ghost} disagrees; see also \\cite{nobody2020}.",
+     "role": "cite",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:related|cites|ref:vaswani2017attention",
+   "from": "tex:sec:related",
+   "to": "ref:vaswani2017attention",
+   "kind": "cites",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 16,
+     "text": "Attention was introduced by \\cite{vaswani2017attention} and refined by \\cite{devlin2019bert}.",
+     "role": "cite",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|contains|tex:fig:curve",
+   "from": "tex:sec:results",
+   "to": "tex:fig:curve",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 54,
+     "text": "\\caption{Training curves.}\\label{fig:curve}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|contains|tex:fig:qual",
+   "from": "tex:sec:results",
+   "to": "tex:fig:qual",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 58,
+     "text": "\\caption{Qualitative examples.}\\label{fig:qual}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|contains|tex:tab:ablation",
+   "from": "tex:sec:results",
+   "to": "tex:tab:ablation",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 46,
+     "text": "\\caption{Ablation.}\\label{tab:ablation}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|contains|tex:tab:main",
+   "from": "tex:sec:results",
+   "to": "tex:tab:main",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 39,
+     "text": "\\caption{Main results.}\\label{tab:main}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|refs|tex:fig:curve",
+   "from": "tex:sec:results",
+   "to": "tex:fig:curve",
+   "kind": "refs",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 36,
+     "text": "Figure~\\ref{fig:curve} shows training curves and Figure~\\ref{fig:qual} shows examples.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|refs|tex:fig:qual",
+   "from": "tex:sec:results",
+   "to": "tex:fig:qual",
+   "kind": "refs",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 36,
+     "text": "Figure~\\ref{fig:curve} shows training curves and Figure~\\ref{fig:qual} shows examples.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:results|refs|tex:tab:main",
+   "from": "tex:sec:results",
+   "to": "tex:tab:main",
+   "kind": "refs",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 35,
+     "text": "Table~\\ref{tab:main} reports the main results; our model reaches 92.4 F1 on the benchmark.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:setup|refs|tex:app:hparams",
+   "from": "tex:sec:setup",
+   "to": "tex:app:hparams",
+   "kind": "refs",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 32,
+     "text": "Details are in Appendix~\\ref{app:hparams}.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "tex:sec:setup|value_match|file:code/configs/default.yaml",
+   "from": "tex:sec:setup",
+   "to": "file:code/configs/default.yaml",
+   "kind": "value_match",
+   "status": "proposed",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 31,
+     "text": "We train with a learning rate of $3\\times10^{-4}$ and batch size 64, using the Adam optimizer.",
+     "role": "main",
+     "page": null
+    },
+    {
+     "repo": "code",
+     "path": "configs/default.yaml",
+     "line": 2,
+     "text": "learning_rate: 1.0e-3",
+     "role": "config",
+     "page": null
+    }
+   ],
+   "reason": "learning_rate: paper 3e-4, config 1.0e-3; batch_size: paper 64, config 128"
+  },
+  {
+   "id": "tex:tab:main|traces_to|file:code/results/table2.csv",
+   "from": "tex:tab:main",
+   "to": "file:code/results/table2.csv",
+   "kind": "traces_to",
+   "status": "detected",
+   "propagates": true,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 38,
+     "text": "% source: code:results/table2.csv",
+     "role": "marker",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|rq:RQ1",
+   "from": "thesis",
+   "to": "rq:RQ1",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 13,
+     "text": "RQ1: does a small model match larger ones? RQ2: how sensitive is it to hyperparameters?",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|rq:RQ2",
+   "from": "thesis",
+   "to": "rq:RQ2",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 13,
+     "text": "RQ1: does a small model match larger ones? RQ2: how sensitive is it to hyperparameters?",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:app:extra",
+   "from": "thesis",
+   "to": "tex:app:extra",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 1,
+     "text": "\\section{Extra results}\\label{app:extra}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:app:hparams",
+   "from": "thesis",
+   "to": "tex:app:hparams",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 4,
+     "text": "\\section{Hyperparameters}\\label{app:hparams}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:concl",
+   "from": "thesis",
+   "to": "tex:sec:concl",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 61,
+     "text": "\\section{Conclusion}\\label{sec:concl}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:intro",
+   "from": "thesis",
+   "to": "tex:sec:intro",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 11,
+     "text": "\\section{Introduction}\\label{sec:intro}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:method",
+   "from": "thesis",
+   "to": "tex:sec:method",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 19,
+     "text": "\\section{Method}\\label{sec:method}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:related",
+   "from": "thesis",
+   "to": "tex:sec:related",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 15,
+     "text": "\\section{Related work}\\label{sec:related}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:results",
+   "from": "thesis",
+   "to": "tex:sec:results",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 34,
+     "text": "\\section{Results}\\label{sec:results}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  },
+  {
+   "id": "thesis|contains|tex:sec:setup",
+   "from": "thesis",
+   "to": "tex:sec:setup",
+   "kind": "contains",
+   "status": "detected",
+   "propagates": false,
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 30,
+     "text": "\\section{Experimental setup}\\label{sec:setup}",
+     "role": "structure",
+     "page": null
+    }
+   ],
+   "reason": null
+  }
+ ]
+}

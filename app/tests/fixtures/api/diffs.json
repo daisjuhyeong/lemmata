@@ -1,0 +1,12 @@
+{
+ "file:code/configs/default.yaml": {
+  "node_id": "file:code/configs/default.yaml",
+  "repo": "code",
+  "path": "configs/default.yaml",
+  "from_label": "checkpoint cp1",
+  "to_label": "now",
+  "binary": false,
+  "truncated": false,
+  "unified": "--- a/configs/default.yaml (cp1)\n+++ b/configs/default.yaml (now)\n@@ -2,3 +2,3 @@\n model: tiny\n-learning_rate: 3.0e-4\n-batch_size: 64\n+learning_rate: 1.0e-3\n+batch_size: 128\n optimizer: adam\n"
+ }
+}

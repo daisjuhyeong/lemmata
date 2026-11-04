@@ -1,0 +1,67 @@
+\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+\title{Tiny Transformers for Forecasting}
+\maketitle
+
+\begin{abstract}
+We ask whether a small transformer matches larger baselines on forecasting (RQ1) and how sensitive it is to its training settings (RQ2).
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+Attention models are common in forecasting \cite{vaswani2017attention}.
+RQ1: does a small model match larger ones? RQ2: how sensitive is it to hyperparameters?
+
+\section{Related work}\label{sec:related}
+Attention was introduced by \cite{vaswani2017attention} and refined by \cite{devlin2019bert}.
+A recent report \cite{smith2021ghost} disagrees; see also \cite{nobody2020}.
+
+\section{Method}\label{sec:method}
+The architecture is shown in Figure~\ref{fig:missing}. We minimise the loss in Eq.~\ref{eq:loss}.
+\begin{equation}\label{eq:loss}
+\mathcal{L} = \sum_t (y_t - \hat y_t)^2
+\end{equation}
+\begin{figure}
+% generated-by: manual
+\includegraphics{figures/arch.pdf}
+\caption{Model architecture.}\label{fig:arch}
+\end{figure}
+
+\section{Experimental setup}\label{sec:setup}
+We train with a learning rate of $3\times10^{-4}$ and batch size 64, using the Adam optimizer.
+Details are in Appendix~\ref{app:hparams}.
+
+\section{Results}\label{sec:results}
+Table~\ref{tab:main} reports the main results; our model reaches 92.4 F1 on the benchmark.
+Figure~\ref{fig:curve} shows training curves and Figure~\ref{fig:qual} shows examples.
+\begin{table}
+% source: code:results/table2.csv
+\caption{Main results.}\label{tab:main}
+\begin{tabular}{lr}
+Baseline & 0.871 \\
+Ours & 0.902 \\
+\end{tabular}
+\end{table}
+\begin{table}
+\caption{Ablation.}\label{tab:ablation}
+\begin{tabular}{lr}
+No attention & 0.842 \\
+\end{tabular}
+\end{table}
+\begin{figure}
+% generated-by: code:plot_curve.py
+\includegraphics{figures/curve.png}
+\caption{Training curves.}\label{fig:curve}
+\end{figure}
+\begin{figure}
+\includegraphics{figures/qual.png}
+\caption{Qualitative examples.}\label{fig:qual}
+\end{figure}
+
+\section{Conclusion}\label{sec:concl}
+A small model is competitive (RQ1) and moderately sensitive to settings (RQ2).
+
+\appendix
+\input{appendix}
+\bibliography{refs}
+\end{document}

@@ -1,0 +1,322 @@
+{
+ "schema": "rmap.findings/1",
+ "checks": [
+  {
+   "check": "reference_unmatched",
+   "title": "Reference could not be matched",
+   "status": "ran",
+   "count": 1,
+   "note": "offline cache: 3 matched, 1 could not be matched, 0 not checked"
+  },
+  {
+   "check": "main_appendix_mismatch",
+   "title": "Main text and appendix differ",
+   "status": "ran",
+   "count": 2,
+   "note": ""
+  },
+  {
+   "check": "uncited_reference",
+   "title": "Reference not cited",
+   "status": "ran",
+   "count": 1,
+   "note": ""
+  },
+  {
+   "check": "unreferenced_float",
+   "title": "Figure or table not referenced",
+   "status": "ran",
+   "count": 2,
+   "note": ""
+  },
+  {
+   "check": "undefined_ref",
+   "title": "Reference target not defined",
+   "status": "ran",
+   "count": 1,
+   "note": ""
+  },
+  {
+   "check": "undefined_cite",
+   "title": "Citation key not defined",
+   "status": "ran",
+   "count": 1,
+   "note": ""
+  },
+  {
+   "check": "untraced_number",
+   "title": "Number not traced to a result file",
+   "status": "ran",
+   "count": 1,
+   "note": ""
+  },
+  {
+   "check": "figure_without_provenance",
+   "title": "Figure without provenance",
+   "status": "ran",
+   "count": 1,
+   "note": ""
+  }
+ ],
+ "findings": [
+  {
+   "id": "reference_unmatched/smith2021ghost",
+   "check": "reference_unmatched",
+   "severity": "warning",
+   "title": "Reference could not be matched",
+   "message": "Reference could not be matched: \"Ghost transformers for time series\" (smith2021ghost) was not found in OpenAlex or Crossref (lookup 2026-10-01).",
+   "nodes": [
+    "ref:smith2021ghost"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "refs.bib",
+     "line": 9,
+     "text": "@article{smith2021ghost,",
+     "role": "bib_entry",
+     "page": null
+    }
+   ],
+   "details": {
+    "lookup": {
+     "status": "not_found",
+     "source": "seed",
+     "checked_at": "2026-10-01T18:00:00+09:00",
+     "match": null
+    }
+   },
+   "fingerprint": "sha256:136abb8dfe8708940690a99a25dfbe01ea2f65169cee7568b2dfc5a2ef534a31"
+  },
+  {
+   "id": "main_appendix_mismatch/learning_rate",
+   "check": "main_appendix_mismatch",
+   "severity": "warning",
+   "title": "Main text and appendix differ",
+   "message": "Learning rate differs between the main text (3e-4, main.tex:31) and the appendix (1e-3, appendix.tex:6).",
+   "nodes": [
+    "tex:sec:setup",
+    "tex:app:hparams"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 31,
+     "text": "We train with a learning rate of $3\\times10^{-4}$ and batch size 64, using the Adam optimizer.",
+     "role": "main",
+     "page": null
+    },
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 6,
+     "text": "Learning rate & $1\\times10^{-3}$ \\\\",
+     "role": "appendix",
+     "page": null
+    }
+   ],
+   "details": {
+    "name": "learning_rate",
+    "main_value": "3e-4",
+    "appendix_value": "1e-3"
+   },
+   "fingerprint": "sha256:3dbaac3a355df24c4b228ce41b446c63003cf9039f3b0749ac4e03716516bb28"
+  },
+  {
+   "id": "main_appendix_mismatch/batch_size",
+   "check": "main_appendix_mismatch",
+   "severity": "warning",
+   "title": "Main text and appendix differ",
+   "message": "Batch size differs between the main text (64, main.tex:31) and the appendix (128, appendix.tex:7).",
+   "nodes": [
+    "tex:sec:setup",
+    "tex:app:hparams"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 31,
+     "text": "We train with a learning rate of $3\\times10^{-4}$ and batch size 64, using the Adam optimizer.",
+     "role": "main",
+     "page": null
+    },
+    {
+     "repo": "paper",
+     "path": "appendix.tex",
+     "line": 7,
+     "text": "Batch size & 128 \\\\",
+     "role": "appendix",
+     "page": null
+    }
+   ],
+   "details": {
+    "name": "batch_size",
+    "main_value": "64",
+    "appendix_value": "128"
+   },
+   "fingerprint": "sha256:e5d3cca491d79b72fb72eb1dde86c9e8a43293e100bab0e7abb9c8521378f68d"
+  },
+  {
+   "id": "uncited_reference/unused2019",
+   "check": "uncited_reference",
+   "severity": "info",
+   "title": "Reference not cited",
+   "message": "Bibliography entry \"unused2019\" is not cited anywhere in the text.",
+   "nodes": [
+    "ref:unused2019"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "refs.bib",
+     "line": 13,
+     "text": "@article{unused2019,",
+     "role": "bib_entry",
+     "page": null
+    }
+   ],
+   "details": {},
+   "fingerprint": "sha256:2de2249b50cf616bf5ce81d47a08565acc1deb10d649e1237e6d5f337edd7864"
+  },
+  {
+   "id": "unreferenced_float/fig:arch",
+   "check": "unreferenced_float",
+   "severity": "info",
+   "title": "Figure or table not referenced",
+   "message": "Fig. 1 is defined at main.tex:27 but is not referenced in the text.",
+   "nodes": [
+    "tex:fig:arch"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 27,
+     "text": "\\caption{Model architecture.}\\label{fig:arch}",
+     "role": "label",
+     "page": null
+    }
+   ],
+   "details": {},
+   "fingerprint": "sha256:659b3e46086e507b06450fd7891241c3aef49b9fd9154e2efc0ca245ecb5bd40"
+  },
+  {
+   "id": "unreferenced_float/tab:ablation",
+   "check": "unreferenced_float",
+   "severity": "info",
+   "title": "Figure or table not referenced",
+   "message": "Table 1 is defined at main.tex:46 but is not referenced in the text.",
+   "nodes": [
+    "tex:tab:ablation"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 46,
+     "text": "\\caption{Ablation.}\\label{tab:ablation}",
+     "role": "label",
+     "page": null
+    }
+   ],
+   "details": {},
+   "fingerprint": "sha256:a9ef04a2a617627508caea52604a4b79ec901fc6d1230da85b0329a94489a6ca"
+  },
+  {
+   "id": "undefined_ref/fig:missing",
+   "check": "undefined_ref",
+   "severity": "warning",
+   "title": "Reference target not defined",
+   "message": "\\ref{fig:missing} at main.tex:20 has no matching \\label.",
+   "nodes": [
+    "tex:sec:method"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 20,
+     "text": "The architecture is shown in Figure~\\ref{fig:missing}. We minimise the loss in Eq.~\\ref{eq:loss}.",
+     "role": "ref",
+     "page": null
+    }
+   ],
+   "details": {
+    "label": "fig:missing"
+   },
+   "fingerprint": "sha256:8628ec2ef7526a00dfb917bf0ca4dac2c0a81a97598c987894c00c56512bd661"
+  },
+  {
+   "id": "undefined_cite/nobody2020",
+   "check": "undefined_cite",
+   "severity": "warning",
+   "title": "Citation key not defined",
+   "message": "\\cite{nobody2020} at main.tex:17 has no entry in the bibliography.",
+   "nodes": [
+    "tex:sec:related"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 17,
+     "text": "A recent report \\cite{smith2021ghost} disagrees; see also \\cite{nobody2020}.",
+     "role": "cite",
+     "page": null
+    }
+   ],
+   "details": {
+    "key": "nobody2020"
+   },
+   "fingerprint": "sha256:d1caa9d0cd2f98a67d5daeda9b7dbb2291c29c5be5c179b2bc85ca915d61c1ee"
+  },
+  {
+   "id": "untraced_number/tex:sec:results#92.4",
+   "check": "untraced_number",
+   "severity": "info",
+   "title": "Number not traced to a result file",
+   "message": "The value 92.4 at main.tex:35 was not found in any result file.",
+   "nodes": [
+    "tex:sec:results"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 35,
+     "text": "Table~\\ref{tab:main} reports the main results; our model reaches 92.4 F1 on the benchmark.",
+     "role": "number",
+     "page": null
+    }
+   ],
+   "details": {
+    "value": "92.4"
+   },
+   "fingerprint": "sha256:7b6c6232cc42a19a654e940bdaba00bc35dd88adee4ebb8133858798eea58bcc"
+  },
+  {
+   "id": "figure_without_provenance/tex:fig:qual",
+   "check": "figure_without_provenance",
+   "severity": "info",
+   "title": "Figure without provenance",
+   "message": "Fig. 3 uses figures/qual.png, but no script that writes this file was found.",
+   "nodes": [
+    "tex:fig:qual"
+   ],
+   "evidence": [
+    {
+     "repo": "paper",
+     "path": "main.tex",
+     "line": 58,
+     "text": "\\caption{Qualitative examples.}\\label{fig:qual}",
+     "role": "label",
+     "page": null
+    }
+   ],
+   "details": {},
+   "fingerprint": "sha256:1d8243e6f182790166e4f0154ab1febc5a8349a4ddeb48f40d3572892912a4e2"
+  }
+ ]
+}

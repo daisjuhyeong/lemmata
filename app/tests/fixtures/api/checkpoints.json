@@ -1,0 +1,22 @@
+{
+ "active": "cp1",
+ "checkpoints": [
+  {
+   "id": "cp1",
+   "created_at": "2026-10-01T18:00:00+09:00",
+   "note": "CP1: draft v2 validated",
+   "repos": {
+    "paper": {
+     "rev": "c1d2e3f4a5b6c1d2e3f4a5b6c1d2e3f4a5b6c1d2",
+     "dirty": false
+    },
+    "code": {
+     "rev": "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2",
+     "dirty": false
+    }
+   },
+   "node_count": 32,
+   "active": true
+  }
+ ]
+}

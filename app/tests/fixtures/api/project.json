@@ -1,0 +1,48 @@
+{
+ "schema": "rmap.project/1",
+ "version": "0.1.0",
+ "name": "Sample: tiny transformer",
+ "root": "/home/claude/lemmata/app/tests/fixtures/files",
+ "repos": [
+  {
+   "id": "paper",
+   "role": "paper",
+   "path": "paper",
+   "abs_path": "/home/claude/lemmata/app/tests/fixtures/files/paper",
+   "vcs": "git",
+   "head": "2b7e5d1c2b7e5d1c2b7e5d1c2b7e5d1c2b7e5d1c",
+   "branch": "main",
+   "dirty": false
+  },
+  {
+   "id": "code",
+   "role": "code",
+   "path": "code",
+   "abs_path": "/home/claude/lemmata/app/tests/fixtures/files/code",
+   "vcs": "git",
+   "head": "4d9e2f5a4d9e2f5a4d9e2f5a4d9e2f5a4d9e2f5a",
+   "branch": "main",
+   "dirty": false
+  }
+ ],
+ "scanned_at": "2026-11-04T15:00:00+09:00",
+ "counts": {
+  "nodes": 32,
+  "edges": 41,
+  "proposed": 2,
+  "events": 9,
+  "findings": 10,
+  "alarm_groups": 2
+ },
+ "checkpoint": {
+  "id": "cp1",
+  "created_at": "2026-10-01T18:00:00+09:00",
+  "note": "CP1: draft v2 validated"
+ },
+ "capabilities": {
+  "paper": true,
+  "online_lookup": false,
+  "ask_ai": false
+ },
+ "warnings": []
+}

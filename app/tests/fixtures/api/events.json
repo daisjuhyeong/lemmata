@@ -1,0 +1,200 @@
+{
+ "schema": "rmap.events/1",
+ "events": [
+  {
+   "id": "ev:commit:paper:a1b2c3d4e5f6",
+   "kind": "commit",
+   "repo": "paper",
+   "rev": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+   "short": "a1b2c3d",
+   "time": "2026-09-20T10:00:00+09:00",
+   "subject": "P1 initial draft",
+   "files": [
+    {
+     "path": "main.tex",
+     "status": "A"
+    },
+    {
+     "path": "refs.bib",
+     "status": "A"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": false,
+   "changed_nodes": null,
+   "flags": []
+  },
+  {
+   "id": "ev:commit:code:b1c2d3e4f5a6",
+   "kind": "commit",
+   "repo": "code",
+   "rev": "b1c2d3e4f5a6b1c2d3e4f5a6b1c2d3e4f5a6b1c2",
+   "short": "b1c2d3e",
+   "time": "2026-09-22T10:00:00+09:00",
+   "subject": "K1 initial training code",
+   "files": [
+    {
+     "path": "train.py",
+     "status": "A"
+    },
+    {
+     "path": "configs/default.yaml",
+     "status": "A"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": false,
+   "changed_nodes": null,
+   "flags": []
+  },
+  {
+   "id": "ev:commit:paper:c1d2e3f4a5b6",
+   "kind": "commit",
+   "repo": "paper",
+   "rev": "c1d2e3f4a5b6c1d2e3f4a5b6c1d2e3f4a5b6c1d2",
+   "short": "c1d2e3f",
+   "time": "2026-09-27T10:00:00+09:00",
+   "subject": "P2 add tables and figures",
+   "files": [
+    {
+     "path": "main.tex",
+     "status": "M"
+    },
+    {
+     "path": "appendix.tex",
+     "status": "A"
+    }
+   ],
+   "at_checkpoint": true,
+   "after_checkpoint": false,
+   "changed_nodes": null,
+   "flags": []
+  },
+  {
+   "id": "ev:commit:code:d1e2f3a4b5c6",
+   "kind": "commit",
+   "repo": "code",
+   "rev": "d1e2f3a4b5c6d1e2f3a4b5c6d1e2f3a4b5c6d1e2",
+   "short": "d1e2f3a",
+   "time": "2026-09-29T10:00:00+09:00",
+   "subject": "K2 add eval and plotting",
+   "files": [
+    {
+     "path": "eval.py",
+     "status": "A"
+    },
+    {
+     "path": "plot_curve.py",
+     "status": "A"
+    }
+   ],
+   "at_checkpoint": true,
+   "after_checkpoint": false,
+   "changed_nodes": null,
+   "flags": []
+  },
+  {
+   "id": "ev:run:code/train_main",
+   "kind": "run",
+   "repo": "code",
+   "rev": null,
+   "short": "train_main",
+   "time": "2026-09-30T14:00:00+09:00",
+   "subject": "run train_main",
+   "files": [
+    {
+     "path": "results/table2.csv",
+     "status": "A"
+    },
+    {
+     "path": "results/metrics.json",
+     "status": "A"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": false,
+   "changed_nodes": null,
+   "flags": []
+  },
+  {
+   "id": "ev:commit:code:9f1c2e7a4b3d",
+   "kind": "commit",
+   "repo": "code",
+   "rev": "9f1c2e7a4b3d9f1c2e7a4b3d9f1c2e7a4b3d9f1c",
+   "short": "9f1c2e7",
+   "time": "2026-10-03T10:00:00+09:00",
+   "subject": "change learning rate 3e-4 to 1e-3",
+   "files": [
+    {
+     "path": "configs/default.yaml",
+     "status": "M"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": true,
+   "changed_nodes": [
+    "file:code/configs/default.yaml"
+   ],
+   "flags": []
+  },
+  {
+   "id": "ev:commit:paper:2b7e5d1c9a0f",
+   "kind": "commit",
+   "repo": "paper",
+   "rev": "2b7e5d1c9a0f2b7e5d1c9a0f2b7e5d1c9a0f2b7e",
+   "short": "2b7e5d1",
+   "time": "2026-10-04T09:00:00+09:00",
+   "subject": "appendix B: learning rate 1e-3",
+   "files": [
+    {
+     "path": "appendix.tex",
+     "status": "M"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": true,
+   "changed_nodes": [
+    "tex:app:hparams"
+   ],
+   "flags": []
+  },
+  {
+   "id": "ev:commit:code:3c8d1e4f7a2b",
+   "kind": "commit",
+   "repo": "code",
+   "rev": "3c8d1e4f7a2b3c8d1e4f7a2b3c8d1e4f7a2b3c8d",
+   "short": "3c8d1e4",
+   "time": "2026-10-05T11:00:00+09:00",
+   "subject": "tmp: edit comment in eval.py",
+   "files": [
+    {
+     "path": "eval.py",
+     "status": "M"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": true,
+   "changed_nodes": [],
+   "flags": []
+  },
+  {
+   "id": "ev:commit:code:4d9e2f5a8b3c",
+   "kind": "commit",
+   "repo": "code",
+   "rev": "4d9e2f5a8b3c4d9e2f5a8b3c4d9e2f5a8b3c4d9e",
+   "short": "4d9e2f5",
+   "time": "2026-10-05T11:30:00+09:00",
+   "subject": "revert eval.py",
+   "files": [
+    {
+     "path": "eval.py",
+     "status": "M"
+    }
+   ],
+   "at_checkpoint": false,
+   "after_checkpoint": true,
+   "changed_nodes": [],
+   "flags": []
+  }
+ ]
+}
