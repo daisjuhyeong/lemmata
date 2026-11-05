@@ -16,7 +16,21 @@ from urllib.parse import parse_qs, urlsplit
 CLIENT_ID = "fake-client-id"
 TOKEN = "gho_FAKETOKENfaketokenFAKETOKENfaketoken1234"
 USER = {"login": "alice", "name": "Alice Researcher", "avatar_url": "http://example.invalid/a.png"}
-BACKEND = "/usr/lib/git-core/git-http-backend"
+def _find_backend():
+    """git-http-backend lives in git's exec path: /usr/lib/git-core on Debian/Ubuntu,
+    /Library/Developer/CommandLineTools/usr/libexec/git-core on macOS, elsewhere for Homebrew."""
+    import shutil, subprocess
+    try:
+        exec_path = subprocess.run(["git", "--exec-path"], capture_output=True, text=True, check=True).stdout.strip()
+        cand = os.path.join(exec_path, "git-http-backend")
+        if os.path.exists(cand):
+            return cand
+    except Exception:
+        pass
+    return shutil.which("git-http-backend") or "/usr/lib/git-core/git-http-backend"
+
+
+BACKEND = _find_backend()
 GIT_ENV = {"GIT_AUTHOR_NAME": "Alice", "GIT_AUTHOR_EMAIL": "alice@example.com", "GIT_COMMITTER_NAME": "Alice",
            "GIT_COMMITTER_EMAIL": "alice@example.com"}
 
