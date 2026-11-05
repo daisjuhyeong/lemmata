@@ -106,7 +106,7 @@ def cmd_serve(args):
 
 
 def cmd_install(args):
-    from . import launchd
+    from . import guard, launchd
 
     if sys.platform != "darwin":
         raise SystemExit("lemmata: `hub install` writes a macOS LaunchAgent; on this system run `lemmata hub serve` yourself.")
