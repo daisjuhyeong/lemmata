@@ -677,3 +677,11 @@ class HubTest(HubBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaunchdDefaultsTest(unittest.TestCase):
+    def test_plist_without_data_dir_uses_default(self):
+        from lemmata.hub import launchd
+        from lemmata.hub.config import default_data_dir
+        pl = launchd.make_plist(None, 8765)
+        self.assertIn(str(default_data_dir().resolve()), pl["ProgramArguments"])

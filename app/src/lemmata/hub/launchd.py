@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+from lemmata.hub.config import default_data_dir
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ def plist_path():
 
 
 def make_plist(data_dir, port):
-    data_dir = Path(data_dir).expanduser().resolve()
+    data_dir = (Path(data_dir).expanduser() if data_dir else default_data_dir()).resolve()
     log = str(data_dir / "hub" / "hub.log")
     return {"Label": LABEL,
             "ProgramArguments": [sys.executable, "-m", "lemmata", "hub", "serve", "--data", str(data_dir), "--port", str(port)],
