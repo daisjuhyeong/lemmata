@@ -685,3 +685,18 @@ class LaunchdDefaultsTest(unittest.TestCase):
         from lemmata.hub.config import default_data_dir
         pl = launchd.make_plist(None, 8765)
         self.assertIn(str(default_data_dir().resolve()), pl["ProgramArguments"])
+
+
+class TailscaleDetectTest(unittest.TestCase):
+    def test_interface_fallback_finds_macos_utun_addresses(self):
+        from unittest import mock
+        from lemmata.hub import guard
+        sample = ("utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280\n"
+                  "\tinet 100.111.135.94 --> 100.111.135.94 netmask 0xffffffff\n"
+                  "\tinet6 fd7a:115c:a1e0::4a4c:875f prefixlen 48\n"
+                  "en0: flags=8863<UP> mtu 1500\n\tinet 192.168.1.128 netmask 0xffffff00\n")
+        res = mock.Mock(stdout=sample.encode())
+        with mock.patch.object(guard, "_cli_info", return_value=(set(), set())), \
+             mock.patch.object(guard.subprocess, "run", return_value=res):
+            ips, _ = guard.tailscale_info()
+        self.assertEqual(ips, {"100.111.135.94", "fd7a:115c:a1e0::4a4c:875f"})

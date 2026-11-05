@@ -23,8 +23,35 @@ def peer_ok(addr):
     return ip.is_loopback or ip in TS4 or ip in TS6
 
 
-def tailscale_info():
-    """({ips}, {names}) of this machine from `tailscale status --json`; empty sets when unavailable."""
+def _cache_path():
+    from lemmata.hub.config import default_data_dir
+    return default_data_dir() / "hub" / "tailscale.json"
+
+
+def _interface_ips():
+    """Tailscale addresses read straight from the network interfaces (`ifconfig`), no Tailscale CLI needed.
+    Works under launchd, where the GUI app's CLI may not answer."""
+    out = ""
+    for cmd in (["/sbin/ifconfig"], ["ifconfig"], ["ip", "-o", "addr"]):
+        try:
+            out = subprocess.run(cmd, capture_output=True, timeout=5, stdin=subprocess.DEVNULL).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if out:
+            break
+    ips = set()
+    for tok in out.replace("/", " ").split():
+        tok = tok.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(tok)
+        except ValueError:
+            continue
+        if ip in TS4 or ip in TS6:
+            ips.add(str(ip))
+    return ips
+
+
+def _cli_info():
     cli = shutil.which("tailscale") or (TAILSCALE_APP if os.path.exists(TAILSCALE_APP) else None)
     if not cli:
         return set(), set()
@@ -41,6 +68,27 @@ def tailscale_info():
         names.add(dns.split(".")[0])
     if me.get("HostName"):
         names.add(str(me["HostName"]).lower())
+    return ips, names
+
+
+def tailscale_info():
+    """({ips}, {names}) of this machine. Order: the Tailscale CLI (names + IPs); else the interface
+    addresses plus the names remembered from the last successful CLI call (e.g. by `lemmata hub status`)."""
+    ips, names = _cli_info()
+    cache = _cache_path()
+    if ips:
+        try:
+            if cache.parent.is_dir():
+                cache.write_text(json.dumps({"ips": sorted(ips), "names": sorted(names)}))
+        except OSError:
+            pass
+        return ips, names
+    ips = _interface_ips()
+    if ips:
+        try:
+            names = {n for n in json.loads(cache.read_text()).get("names", []) if isinstance(n, str)}
+        except (OSError, ValueError):
+            names = set()
     return ips, names
 
 

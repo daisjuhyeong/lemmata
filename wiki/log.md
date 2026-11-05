@@ -30,3 +30,4 @@ date | agent | operation | files touched | note
 2026-11-05 | pipeline-eng-mcp | build | app/src/lemmata/mcp.py, engine/api.py, engine/triage.py | notice first, recursive cleaning, structured triage `by`
 2026-11-05 | lead | build | docs/SETUP-two-macs.md, .github/workflows/mac-app.yml | two-Mac setup guide; CI builds the dmg for s04-hub-remote
 2026-11-05 | lead | build | app/src/lemmata/hub/launchd.py, app/tests/test_hub.py | hub install without --data used None (crash on Mac mini); default to ~/Lemmata; 96 tests pass on 3.13 and 3.15
+2026-11-05 | lead | build | app/src/lemmata/hub/guard.py, hub/cli.py, test_hub.py | hub under launchd did not detect Tailscale (CLI fails there) -> loopback only; detect Tailscale IPs from interfaces, cache names from interactive runs

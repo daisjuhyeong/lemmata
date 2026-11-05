@@ -111,7 +111,10 @@ def cmd_install(args):
     if sys.platform != "darwin":
         raise SystemExit("lemmata: `hub install` writes a macOS LaunchAgent; on this system run `lemmata hub serve` yourself.")
     port = args.port or Config(_data(args)).load()["port"]
+    ips, _ = guard.tailscale_info()  # run from the user's shell: remembers the Tailscale names for the service
     p = launchd.install(args.data, port)
+    if ips:
+        print("lemmata hub: Tailscale address(es): %s" % ", ".join(sorted(ips)))
     print("lemmata hub: installed %s and started it on port %d" % (p, port))
     print("lemmata hub: log %s" % (_data(args).log_path))
     print("lemmata hub: get a pairing code with `lemmata hub pair-code`")
