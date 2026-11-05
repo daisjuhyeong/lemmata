@@ -187,12 +187,14 @@
   async function viewHome() {
     clear(root);
     const user = ghUser(S.status);
-    const head = h('div', { class: 'row wrap' }, h('h1', { class: 'grow', style: 'margin:0' }, 'Projects'),
+    const head = h('div', { class: 'row wrap', style: 'margin-bottom:16px' }, h('h1', { class: 'grow', style: 'margin:0' }, 'Projects'),
       user ? h('button', { class: 'btn primary', id: 'new-project', onclick: () => { S.view = 'new'; route(); } }, 'New project') : null);
     const signin = h('div', { id: 'signin' });
     const list = h('div', { id: 'plist' }, h('p', { class: 'muted' }, 'Loading…'));
     root.append(head);
     if (!user) { root.append(signin); signInCard(signin); }
+    const ol = h('div', { id: 'overleaf' });
+    root.append(ol); overleafCard(ol);
     root.append(list);
     try {
       const r = await api('GET', '/api/hub/projects');
@@ -207,6 +209,60 @@
       clear(list).append(errBox(e.message));
     }
   }
+  /* ---------- Overleaf token ---------- */
+  function overleafCard(box, err, saved) {
+    clear(box);
+    const on = !!S.status.overleaf_configured;
+    const card = h('div', { class: 'card', id: 'ol-card' }, h('h2', null, 'Overleaf'));
+    if (on) {
+      card.append(...[h('p', null, h('span', { class: 'chip ok' }, '✓ Token saved'), ' ', saved ? 'Saved. ' : '', 'Lemmata can read your Overleaf projects with git. It never writes to Overleaf, and it never shows the token again.'),
+        err ? errBox(err) : null,
+        h('div', { class: 'acts' },
+          h('button', { class: 'btn', id: 'ol-replace', onclick: () => overleafForm(box, true) }, 'Replace token…'),
+          h('button', { class: 'btn', id: 'ol-remove', onclick: async ev => {
+            ev.target.disabled = true;
+            try { await api('DELETE', '/api/hub/overleaf/token'); S.status = await api('GET', '/api/hub/status'); overleafCard(box); }
+            catch (e) { overleafCard(box, e.message); }
+          } }, 'Remove'))].filter(Boolean));
+    } else {
+      return overleafForm(box, false, err);
+    }
+    box.append(card);
+  }
+  function overleafForm(box, replacing, err) {
+    clear(box);
+    const inp = h('input', { type: 'password', id: 'ol-token', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf Git authentication token', placeholder: 'olp_…' });
+    const save = h('button', { class: 'btn primary', id: 'ol-save', disabled: true }, 'Save token');
+    inp.addEventListener('input', () => { save.disabled = !inp.value.trim(); });
+    const go = async () => {
+      const t = inp.value.trim(); if (!t) return;
+      save.disabled = true; save.textContent = 'Saving…';
+      try {
+        await api('PUT', '/api/hub/overleaf/token', { token: t });
+        inp.value = '';
+        S.status = await api('GET', '/api/hub/status');
+        overleafCard(box, null, true);
+      } catch (e) { save.disabled = false; save.textContent = 'Save token'; clear(msg).append(errBox(e.message)); }
+    };
+    save.addEventListener('click', go);
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
+    const msg = h('div', null, errBox(err));
+    box.append(h('div', { class: 'card', id: 'ol-card' },
+      h('h2', null, 'Overleaf'),
+      h('p', null, 'Connect Overleaf so the paper comes straight from your Overleaf project (no more zip uploads). This needs Overleaf with Git integration (a paid plan).'),
+      h('ol', { class: 'howto' },
+        h('li', null, 'Open ', h('a', { href: 'https://www.overleaf.com/user/settings', target: '_blank', rel: 'noopener noreferrer' }, 'Overleaf account settings ↗'), '.'),
+        h('li', null, 'Find ', h('b', null, 'Git Integration'), ' (Account Settings → Git Integration) and choose ', h('b', null, 'Generate token'), '.'),
+        h('li', null, 'Copy the token now (Overleaf shows it once) and paste it here.')),
+      msg, inp,
+      h('div', { class: 'acts' }, save, replacing ? h('button', { class: 'btn', onclick: () => overleafCard(box) }, 'Cancel') : null),
+      h('p', { class: 'muted', style: 'margin:12px 0 0;font-size:12px' }, 'The token is stored on the Mac mini only, readable by you alone. This page will not show it again.')));
+  }
+  function paperChip(p) {
+    const v = p.paper_versions || 0, ps = p.paper_source || {};
+    if (ps.kind === 'overleaf') return h('span', { class: 'chip ok' }, '✓ Overleaf' + (v ? ' · v' + v : ''));
+    return v ? h('span', { class: 'chip plain' }, 'Paper v' + v + ' (zip)') : h('span', { class: 'chip none' }, '∅ No paper yet');
+  }
   function projRow(p) {
     const c = p.counts || { recheck: 0, findings: 0 };
     const v = p.paper_versions || 0;
@@ -217,7 +273,7 @@
           h('span', { class: 'mono' }, p.code_repo + (p.branch ? '@' + p.branch : '')),
           c.recheck ? h('span', { class: 'chip recheck' }, '↻ ' + c.recheck + ' Recheck') : h('span', { class: 'chip ok' }, '✓ 0 Recheck'),
           h('span', { class: 'chip ' + (c.findings ? 'bad' : 'plain') }, (c.findings ? '≠ ' : '') + plural(c.findings, 'finding')),
-          v ? h('span', { class: 'chip plain' }, 'Paper v' + v) : h('span', { class: 'chip none' }, '∅ No paper yet'),
+          paperChip(p),
           h('span', null, 'Last sync ' + ago(p.last_sync))),
         h('label', { class: 'meta', style: 'display:block;margin-top:6px' },
           h('input', { type: 'checkbox', checked: !!p.online_refs, 'aria-label': 'Check references online',
@@ -229,7 +285,7 @@
   /* ---------- new project ---------- */
   function viewNew() {
     clear(root);
-    let picked = null, zip = null, busy = false, reposTimer = null, seq = 0;
+    let picked = null, zip = null, mode = S.status.overleaf_configured ? 'overleaf' : 'zip', busy = false, reposTimer = null, seq = 0;
     const errs = h('div');
     const list = h('ul', { class: 'repos', id: 'repos', 'aria-label': 'Your GitHub repositories' });
     const search = h('input', { type: 'search', id: 'repo-q', placeholder: 'Search your repositories', 'aria-label': 'Search repositories', autocomplete: 'off' });
@@ -238,6 +294,20 @@
     const drop = h('div', { class: 'drop', id: 'drop' }, dropMsg);
     const progress = h('div', { class: 'hidden', id: 'progress' });
     const form = h('div');
+    const olIn = h('input', { type: 'text', id: 'ol-link', placeholder: 'https://www.overleaf.com/project/…  or the 24-character project id', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf project link' });
+    const olBox = h('div', { id: 'ol-box' }), zipBox = h('div', { id: 'zip-box' });
+    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Paper source' });
+    const olOk = () => /[0-9a-f]{24}/i.test(olIn.value);
+    function paintMode() {
+      clear(tabs).append(...[['overleaf', 'Overleaf project link'], ['zip', 'Drop a zip']].map(([k, label]) =>
+        h('button', { class: 'btn sm', 'aria-pressed': String(mode === k), onclick: () => { mode = k; paintMode(); } }, label)));
+      olBox.classList.toggle('hidden', mode !== 'overleaf'); zipBox.classList.toggle('hidden', mode !== 'zip');
+      clear(olNote);
+      if (!S.status.overleaf_configured) olNote.append(h('div', { class: 'notice' }, 'No Overleaf token is saved on the server yet. ',
+        h('a', { href: '/' }, 'Save it on the Projects page'), ' first, or add the paper later.'));
+    }
+    const olNote = h('div');
+    olIn.addEventListener('input', () => { clear(errs); });
 
     function paintDrop() {
       clear(dropMsg);
@@ -283,17 +353,25 @@
     }
     search.addEventListener('input', () => { clearTimeout(reposTimer); reposTimer = setTimeout(() => loadRepos(search.value.trim()), 250); });
 
-    const steps = [['clone', 'Cloning and scanning the repository'], ['paper', 'Uploading paper and rescanning']];
+    let paperKind = 'none';   // fixed when Create is pressed: none | overleaf | zip
+    const steps = () => [['clone', 'Cloning and scanning the repository'], ['paper', paperKind === 'overleaf' ? 'Fetching the paper from Overleaf and rescanning' : 'Uploading paper and rescanning']];
     function paintProgress(state, detail) {   // state: {clone, paper} each wait|active|done|fail|skip
       clear(progress).append(h('h2', null, 'Creating ' + picked.full_name), h('ul', { class: 'steps', 'aria-live': 'polite' },
-        steps.filter(s => !(s[0] === 'paper' && !zip)).map(([k, label]) => {
+        steps().filter(s => !(s[0] === 'paper' && paperKind === 'none')).map(([k, label]) => {
           const st = state[k];
           return h('li', { class: st }, h('span', { class: 'ic' }, st === 'done' ? '✓' : st === 'fail' ? '✕' : st === 'active' ? '…' : '·'), label,
-            k === 'paper' && st === 'active' && typeof detail === 'number' ? h('span', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(detail) }, h('i', { style: 'width:' + detail + '%' })) : null);
+            k === 'paper' && st === 'active' && typeof detail === 'number' && paperKind === 'zip' ? h('span', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(detail) }, h('i', { style: 'width:' + detail + '%' })) : null);
         })), detail && typeof detail === 'object' ? detail : []);
+    }
+    function addPaper(proj, link, file, onPct) {
+      return link ? api('POST', '/api/hub/projects/' + encodeURIComponent(proj.id) + '/paper-source', { kind: 'overleaf', project: link }) : uploadZip(proj.id, file, onPct);
     }
     async function create() {
       if (!picked || busy) return;
+      const link = mode === 'overleaf' ? olIn.value.trim() : '';
+      if (link && !olOk()) { clear(errs).append(errBox('That does not look like an Overleaf project link. It ends with 24 letters and digits, like https://www.overleaf.com/project/5f3a…')); return; }
+      paperKind = link ? 'overleaf' : (mode === 'zip' && zip ? 'zip' : 'none');
+      const file = paperKind === 'zip' ? zip : null;
       busy = true; createBtn.disabled = true; clear(errs);
       form.classList.add('hidden'); progress.classList.remove('hidden');
       const st = { clone: 'active', paper: 'wait' };
@@ -306,17 +384,19 @@
         return;
       }
       st.clone = 'done';
-      if (!zip) { st.paper = 'skip'; paintProgress(st); return openProject(proj); }
-      st.paper = 'active'; paintProgress(st, 0);
-      try {
-        await uploadZip(proj.id, zip, pct => paintProgress(st, pct));
-        st.paper = 'done'; paintProgress(st); openProject(proj);
-      } catch (e) {
-        st.paper = 'fail';
-        paintProgress(st, h('div', null, errBox('The project was created, but the paper zip could not be added. ' + e.message),
-          h('div', { class: 'acts' }, h('a', { class: 'btn primary', href: '/p/' + encodeURIComponent(proj.id) + '/' }, 'Open project anyway'),
-            h('button', { class: 'btn', onclick: () => { st.paper = 'active'; paintProgress(st, 0); uploadZip(proj.id, zip, pct => paintProgress(st, pct)).then(() => { st.paper = 'done'; paintProgress(st); openProject(proj); }).catch(() => { st.paper = 'fail'; paintProgress(st, errBox('Upload failed again.')); }); } }, 'Retry upload'))));
-      }
+      if (paperKind === 'none') { st.paper = 'skip'; paintProgress(st); return openProject(proj); }
+      const attempt = async () => {
+        st.paper = 'active'; paintProgress(st, 0);
+        try { await addPaper(proj, link, file, pct => paintProgress(st, pct)); st.paper = 'done'; paintProgress(st); openProject(proj); }
+        catch (e) {
+          st.paper = 'fail';
+          const hint = e.code === 'overleaf_token_missing' ? ' Save your Overleaf token on the Projects page, then connect Overleaf from the project page.' : '';
+          paintProgress(st, h('div', null, errBox('The project was created, but the paper could not be added. ' + e.message + hint),
+            h('div', { class: 'acts' }, h('a', { class: 'btn primary', href: '/p/' + encodeURIComponent(proj.id) + '/' }, 'Open project anyway'),
+              h('button', { class: 'btn', id: 'retry-paper', onclick: attempt }, 'Retry'))));
+        }
+      };
+      attempt();
     }
     function openProject(p) { setTimeout(() => { location.href = '/p/' + encodeURIComponent(p.id) + '/'; }, 600); }
     createBtn.addEventListener('click', create);
@@ -325,10 +405,13 @@
       h('div', { class: 'crumb' }, h('button', { class: 'linkbtn', onclick: () => { S.view = 'home'; route(); } }, '← Projects')),
       h('h1', null, 'New project'),
       h('h3', null, '1. Code: choose a GitHub repository'), search, list,
-      h('h3', null, '2. Paper (optional now): Overleaf source zip'),
-      h('p', { class: 'muted' }, 'In Overleaf: Menu → Download → Source. You can also add it later from the project page.'),
-      drop, fileIn, errs,
+      h('h3', null, '2. Paper (optional now): Overleaf project, or a zip'),
+      tabs, olNote,
+      olBox, zipBox, errs,
       h('div', { class: 'acts' }, createBtn));
+    olBox.append(h('p', { class: 'muted' }, 'Paste the project link from your browser (', h('span', { class: 'mono' }, 'overleaf.com/project/…'), '). Lemmata reads it with git and never writes to Overleaf.'), olIn);
+    zipBox.append(h('p', { class: 'muted' }, 'In Overleaf: Menu → Download → Source. You can also add the paper later from the project page.'), drop, fileIn);
+    paintMode();
     root.append(form, progress);
     loadRepos('');
     search.focus();

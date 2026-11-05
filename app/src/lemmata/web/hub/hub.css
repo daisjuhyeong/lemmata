@@ -84,3 +84,10 @@ input[type=text],input[type=search] { height:36px; width:100%; border:1px solid 
 .bar { height:6px; border-radius:3px; background:var(--sunken); overflow:hidden; margin-top:4px; width:240px; }
 .bar > i { display:block; height:100%; background:var(--ink); width:0; }
 .crumb { margin-bottom:var(--s-4); }
+
+/* S05: Overleaf */
+.howto { margin:0 0 var(--s-3); padding-left:var(--s-5); }
+.howto li { margin-bottom:var(--s-1); }
+input[type=password] { height:36px; width:100%; border:1px solid var(--border-strong); border-radius:var(--r-sm); background:var(--surface); padding:4px var(--s-3); font-family:var(--font-mono); }
+.seg { display:flex; gap:var(--s-1); margin-bottom:var(--s-3); }
+.seg .btn[aria-pressed="true"] { background:var(--ink); color:var(--paper); border-color:var(--ink); }

@@ -1,0 +1,97 @@
+{
+  "name": "lemmata",
+  "displayName": "Lemmata",
+  "description": "Lemmata alarms and findings for your ML paper and code, shown as VS Code diagnostics.",
+  "version": "0.1.0",
+  "publisher": "lemmata-local",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Linters", "Other"],
+  "repository": { "type": "git", "url": "https://github.com/lemmata-local/lemmata.git" },
+  "main": "./out/src/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "configuration": {
+      "title": "Lemmata",
+      "properties": {
+        "lemmata.serverUrl": {
+          "type": "string",
+          "default": "http://100.111.135.94:8765",
+          "markdownDescription": "Address of your Lemmata hub (http or https). The token is kept in VS Code's secret storage, never in settings."
+        },
+        "lemmata.project": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Hub project id to use for this workspace. Leave empty to match the workspace's git remotes against your hub projects."
+        },
+        "lemmata.refreshSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "description": "How often to fetch alarms and findings from the hub (also on window focus and file save)."
+        }
+      }
+    },
+    "commands": [
+      { "command": "lemmata.connect", "title": "Connect to Server", "category": "Lemmata" },
+      { "command": "lemmata.disconnect", "title": "Disconnect (forget token)", "category": "Lemmata" },
+      { "command": "lemmata.refresh", "title": "Refresh", "category": "Lemmata", "icon": "$(refresh)" },
+      { "command": "lemmata.sync", "title": "Sync now", "category": "Lemmata", "icon": "$(sync)" },
+      { "command": "lemmata.checkpoint", "title": "Set checkpoint", "category": "Lemmata", "icon": "$(bookmark)" },
+      { "command": "lemmata.showPanel", "title": "Show panel", "category": "Lemmata" },
+      { "command": "lemmata.openItem", "title": "Open in editor", "category": "Lemmata" },
+      { "command": "lemmata.markReviewed", "title": "Mark Reviewed", "category": "Lemmata" },
+      { "command": "lemmata.markNeedsFixing", "title": "Needs fixing", "category": "Lemmata" },
+      { "command": "lemmata.markIgnored", "title": "Ignore", "category": "Lemmata" },
+      { "command": "lemmata.why", "title": "Why?", "category": "Lemmata" },
+      { "command": "lemmata.openInLemmata", "title": "Open in Lemmata", "category": "Lemmata" }
+    ],
+    "viewsContainers": {
+      "activitybar": [ { "id": "lemmata", "title": "Lemmata", "icon": "media/lemmata.svg" } ]
+    },
+    "views": {
+      "lemmata": [ { "id": "lemmata.panel", "name": "Alarms and findings" } ]
+    },
+    "viewsWelcome": [
+      { "view": "lemmata.panel", "contents": "Not connected to a Lemmata server yet.\n[Connect to Server](command:lemmata.connect)", "when": "!lemmata.connected" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "lemmata.refresh", "when": "view == lemmata.panel", "group": "navigation@1" },
+        { "command": "lemmata.sync", "when": "view == lemmata.panel", "group": "navigation@2" },
+        { "command": "lemmata.checkpoint", "when": "view == lemmata.panel", "group": "navigation@3" }
+      ],
+      "view/item/context": [
+        { "command": "lemmata.markReviewed", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@1" },
+        { "command": "lemmata.markNeedsFixing", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@2" },
+        { "command": "lemmata.markIgnored", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@3" },
+        { "command": "lemmata.why", "when": "view == lemmata.panel && viewItem =~ /why/", "group": "2_inspect@1" },
+        { "command": "lemmata.openInLemmata", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "2_inspect@2" }
+      ],
+      "commandPalette": [
+        { "command": "lemmata.openItem", "when": "false" },
+        { "command": "lemmata.markReviewed", "when": "false" },
+        { "command": "lemmata.markNeedsFixing", "when": "false" },
+        { "command": "lemmata.markIgnored", "when": "false" },
+        { "command": "lemmata.why", "when": "false" },
+        { "command": "lemmata.openInLemmata", "when": "false" }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test \"out/test/unit/*.test.js\"",
+    "test:integration": "npm run compile && node --test --test-timeout=240000 \"out/test/integration/*.test.js\"",
+    "test:host": "npm run compile && node out/test/host/run.js",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.5.0"
+  }
+}

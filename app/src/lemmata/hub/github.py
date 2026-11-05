@@ -25,15 +25,15 @@ def scrub(text, *secrets_):
     text = str(text)
     for s in secrets_:
         if s:
-            for form in (s, base64.b64encode(("x-access-token:%s" % s).encode()).decode()):
+            for form in (s, base64.b64encode(("x-access-token:%s" % s).encode()).decode(), base64.b64encode(("git:%s" % s).encode()).decode()):
                 text = text.replace(form, "***")
     text = re.sub(r"(?i)(authorization:\s*(?:basic|bearer|token)\s+)\S+", r"\1***", text)
     text = re.sub(r"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})", "***", text)
     return text
 
 
-def git_auth_header(token):
-    return "Authorization: Basic " + base64.b64encode(("x-access-token:%s" % token).encode()).decode()
+def git_auth_header(token, user="x-access-token"):
+    return "Authorization: Basic " + base64.b64encode(("%s:%s" % (user, token)).encode()).decode()
 
 
 class GitHub:

@@ -10,6 +10,7 @@ import secrets
 import shutil
 import subprocess
 import threading
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -19,6 +20,7 @@ from lemmata.server import App
 
 from .config import read_json
 from .github import git_auth_header, scrub
+from .overleaf import Overleaf, OverleafError, parse_project
 
 MAX_ZIP = 100 * 1024 * 1024
 MAX_FILES = 5000
@@ -64,7 +66,7 @@ def now_iso():
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900):
+def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900, user="x-access-token"):
     """Run git hardened: no hooks, no symlink checkout, no submodules, only the allowed protocols, no user/system config.
     The token travels only in the child's environment (GIT_CONFIG_*), scoped to the GitHub URL, never in argv,
     .git/config or logs; stderr is scrubbed before it can reach a caller."""
@@ -73,7 +75,7 @@ def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900):
                 "GIT_OPTIONAL_LOCKS": "0", "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"})
     if token:
         base = (scope_url or "").rstrip("/") + "/"
-        env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.%s.extraHeader" % base, "GIT_CONFIG_VALUE_0": git_auth_header(token)})
+        env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.%s.extraHeader" % base, "GIT_CONFIG_VALUE_0": git_auth_header(token, user)})
     env.update(extra_env or {})
     try:
         p = subprocess.run(["git"] + safe_flags(scope_url) + list(args), cwd=str(cwd) if cwd else None, env=env, capture_output=True,
@@ -230,6 +232,7 @@ class LockedEngine:
 class Manager:
     def __init__(self, data, cfg, gh):
         self.data, self.cfg, self.gh = data, cfg, gh
+        self.ol = Overleaf(data, cfg)
         self.apps = {}
         self.mlock = threading.Lock()
         self.oplocks = {}
@@ -291,9 +294,16 @@ class Manager:
             versions = int(git(paper, ["rev-list", "--count", "HEAD"])) if (paper / ".git").exists() else 0
         except ProjectError:
             versions = 0
-        return {"id": pid, "name": m.get("name", pid), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
+        return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
                 "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"),
                 "counts": {"recheck": al.get("summary", {}).get("flagged_nodes", 0), "findings": st["counts"]["findings"]}}
+
+    @staticmethod
+    def paper_source(m):
+        ps = m.get("paper_source")
+        if isinstance(ps, dict) and ps.get("kind") == "overleaf" and ps.get("project_id"):
+            return {"kind": "overleaf", "project_id": ps["project_id"]}
+        return {"kind": "zip"}
 
     def list(self):
         out = []
@@ -322,7 +332,7 @@ class Manager:
         return hits[0]
 
     # --- create
-    def create(self, name, repo, branch):
+    def create(self, name, repo, branch, paper_overleaf=None):
         if not isinstance(repo, str) or not CODE_REPO_RE.match(repo) or repo.endswith(".git") or ".." in repo:
             raise ProjectError(400, "bad_request", "code_repo must look like owner/name.")
         if branch is not None and not valid_branch(branch):
@@ -332,6 +342,11 @@ class Manager:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
         if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 100):
             raise ProjectError(400, "bad_request", "name must be text up to 100 characters.")
+        ol_id = None
+        if paper_overleaf not in (None, ""):
+            ol_id = parse_project(paper_overleaf)  # OverleafError -> 400
+            if not self.ol.token():
+                raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
         pid = "%s-%s" % (slug(repo.split("/")[1]), secrets.token_hex(2))
         root = self.data.projects / pid
         root.mkdir(parents=True)
@@ -346,16 +361,22 @@ class Manager:
             git(None, args + ["--", url, str(root / "code")], token=token, scope_url=web)
             got = git(root / "code", ["rev-parse", "--abbrev-ref", "HEAD"])
             paper = root / "paper"
-            paper.mkdir()
-            git(paper, ["init", "-q", "--template=" + str(tpl)])
-            git(paper, ["symbolic-ref", "HEAD", "refs/heads/main"])
+            if ol_id:
+                self._overleaf_clone(ol_id, paper)
+            else:
+                paper.mkdir()
+                git(paper, ["init", "-q", "--template=" + str(tpl)])
+                git(paper, ["symbolic-ref", "HEAD", "refs/heads/main"])
             (root / ".lemmata").mkdir()
             (root / ".lemmata" / "project.json").write_text(json.dumps({
                 "schema": "lemmata.project/1", "name": (name or repo.split("/")[1]).strip(),
                 "repos": [{"id": "paper", "role": "paper", "path": "paper"}, {"id": "code", "role": "code", "path": "code"}]},
                 indent=1) + "\n", encoding="utf-8")
             meta = {"schema": "lemmata.hubproject/1", "id": pid, "name": (name or repo.split("/")[1]).strip(),
-                    "code_repo": repo, "branch": branch or got, "created": now_iso(), "last_sync": now_iso()}
+                    "code_repo": repo, "branch": branch or got, "created": now_iso(), "last_sync": now_iso(),
+                    "paper_source": {"kind": "overleaf", "project_id": ol_id} if ol_id else {"kind": "zip"}}
+            if ol_id:
+                meta["overleaf_last_fetch"] = time.time()
             self._save_meta(pid, meta)
             self._scan(pid)
         except BaseException:
@@ -370,6 +391,8 @@ class Manager:
         commit exists, and is restored from a backup if the swap itself fails."""
         root = self.root(pid)
         paper = root / "paper"
+        if self.paper_source(self.meta(pid))["kind"] == "overleaf":
+            raise ProjectError(409, "paper_is_overleaf", "This project's paper comes from Overleaf; switch it back to a zip first.")
         with self.oplock(pid):
             work = Path(self.data.tmp) / ("up-" + secrets.token_hex(6))
             backup = Path(self.data.tmp) / ("bk-" + secrets.token_hex(6))
@@ -426,10 +449,87 @@ class Manager:
                 shutil.rmtree(backup, ignore_errors=True)
         return {"version": version, "commit": sha, "files": files}
 
+    # --- Overleaf
+    def _overleaf_git(self, cwd, args, token):
+        """git against Overleaf: the token only in the child's environment, errors mapped to the API's codes."""
+        try:
+            return git(cwd, args, token=token, scope_url=self.ol.base(), user="git")
+        except ProjectError as e:
+            if e.code != "git_failed":
+                raise
+            t = e.message.lower()
+            if re.search(r"returned error: 40[13]\b", t) or any(k in t for k in ("authentication failed", "terminal prompts disabled", "could not read username", "invalid credentials")):
+                raise ProjectError(502, "overleaf_auth_failed", "Overleaf refused access: token missing or expired, or the project isn't yours/shared.")
+            if re.search(r"returned error: 404\b", t) or "not found" in t or "does not exist" in t:
+                raise ProjectError(404, "overleaf_not_found", "Overleaf has no project with that id.")
+            raise
+
+    def _overleaf_clone(self, project_id, dest):
+        token = self.ol.token()
+        if not token:
+            raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
+        tpl = self.data.hub / "empty-template"
+        tpl.mkdir(mode=0o700, exist_ok=True)
+        self._overleaf_git(None, ["clone", "--no-tags", "--no-recurse-submodules", "--template=" + str(tpl), "--", self.ol.url(project_id), str(dest)], token)
+        return git(dest, ["rev-parse", "HEAD"])
+
+    def set_paper_source(self, pid, kind, project=None):
+        root = self.root(pid)
+        if kind not in ("overleaf", "zip"):
+            raise ProjectError(400, "bad_request", 'kind must be "overleaf" or "zip".')
+        pid_ol = parse_project(project) if kind == "overleaf" else None
+        paper = root / "paper"
+        with self.oplock(pid):
+            m = self.meta(pid)
+            if kind == "overleaf":
+                if not self.ol.token():
+                    raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
+                clone = Path(self.data.tmp) / ("ol-" + secrets.token_hex(6))
+                try:
+                    self._overleaf_clone(pid_ol, clone)
+                    a = self.app(pid)
+                    with a.lock:
+                        prev = root / ("paper.prev-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+                        n = 1
+                        while prev.exists():
+                            n += 1
+                            prev = root / ("paper.prev-%s-%d" % (datetime.now().strftime("%Y%m%d-%H%M%S"), n))
+                        os.rename(paper, prev)
+                        try:
+                            os.rename(clone, paper)
+                        except BaseException:
+                            os.rename(prev, paper)
+                            raise
+                        m["paper_source"] = {"kind": "overleaf", "project_id": pid_ol}
+                        m["overleaf_last_fetch"] = time.time()
+                        self._save_meta(pid, m)
+                        a.engine.scan()
+                finally:
+                    shutil.rmtree(clone, ignore_errors=True)
+            elif self.paper_source(m)["kind"] == "overleaf":
+                with self.app(pid).lock:
+                    try:
+                        git(paper, ["remote", "remove", "origin"])
+                    except ProjectError:
+                        pass
+                    m["paper_source"] = {"kind": "zip"}
+                    m.pop("overleaf_last_fetch", None)
+                    self._save_meta(pid, m)
+                    self.app(pid).engine.scan()
+            m = self.meta(pid)
+        src = self.paper_source(m)
+        out = {"kind": src["kind"]}
+        if src.get("project_id"):
+            out["project_id"] = src["project_id"]
+        out["head"] = git(paper, ["rev-parse", "HEAD"])
+        out["versions"] = int(git(paper, ["rev-list", "--count", "HEAD"]))
+        return out
+
     # --- sync
     def sync(self, pid):
         m = self.meta(pid)
         code = self.root(pid) / "code"
+        paper = self.root(pid) / "paper"
         token = self.gh.token()
         if not token:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
@@ -444,18 +544,54 @@ class Manager:
                     raise ProjectError(409, "not_fast_forward", "The branch was rewritten on GitHub; delete and re-add the project to re-clone it.")
                 head = git(code, ["rev-parse", "HEAD"])
                 changed = head != before
-                if changed:
+            pp = self._sync_paper(pid, m, paper, a)
+            with a.lock:
+                if changed or pp["changed"]:
                     a.engine.scan()
             m["last_sync"] = now_iso()
             self._save_meta(pid, m)
-        return {"changed": changed, "head": head}
+        return {"changed": changed, "head": head, "code": {"changed": changed, "head": head}, "paper": pp}
+
+    def _sync_paper(self, pid, m, paper, a):
+        """Fetch the Overleaf paper repo (never push); at most once per overleaf_min_interval seconds per project. Errors are
+        reported in the result, they never abort the code sync. Mutates `m` (last fetch time); the caller saves it."""
+        def head():
+            try:
+                return git(paper, ["rev-parse", "HEAD"])
+            except ProjectError:
+                return None
+        before = head()
+        res = {"changed": False, "head": before, "source": self.paper_source(m)["kind"]}
+        if res["source"] != "overleaf":
+            return res
+        gap = float(self.cfg.load().get("overleaf_min_interval", 120))
+        if time.time() - float(m.get("overleaf_last_fetch") or 0) < gap:
+            res["skipped"] = "rate_limited"
+            return res
+        token = self.ol.token()
+        if not token:
+            res["error"] = {"code": "overleaf_token_missing", "message": "Save your Overleaf Git token on the hub page first."}
+            return res
+        m["overleaf_last_fetch"] = time.time()
+        try:
+            self._overleaf_git(paper, ["fetch", "--no-tags", "origin", "HEAD"], token)
+            with a.lock:
+                try:
+                    git(paper, ["merge", "--ff-only", "-q", "FETCH_HEAD"])
+                except ProjectError:
+                    raise ProjectError(409, "not_fast_forward", "The Overleaf history was rewritten; connect the project again.")
+            res["head"] = head()
+            res["changed"] = res["head"] != before
+        except ProjectError as e:
+            res["error"] = {"code": e.code, "message": e.message}
+        return res
 
     def sync_all(self):
         for pid in self.ids():
             try:
                 self.sync(pid)
             except Exception as e:
-                print("lemmata hub: sync %s failed: %s" % (pid, scrub(str(e), self.gh.token())), flush=True)
+                print("lemmata hub: sync %s failed: %s" % (pid, scrub(str(e), self.gh.token(), self.ol.token())), flush=True)
 
     def set_online_refs(self, pid, value):
         if not isinstance(value, bool):

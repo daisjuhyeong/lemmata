@@ -14,3 +14,5 @@ app/build/
 app/packaging/dist/
 app/packaging/build/
 app/packaging/.venv/
+vscode/node_modules/
+vscode/out/

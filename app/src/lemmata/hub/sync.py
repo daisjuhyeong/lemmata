@@ -1,4 +1,4 @@
-"""Background loop: sync every project from GitHub (default every 5 minutes)."""
+"""Background loop: sync every project (code from GitHub, paper from Overleaf) (default every 5 minutes)."""
 from __future__ import annotations
 
 import threading

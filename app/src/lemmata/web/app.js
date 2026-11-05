@@ -864,18 +864,76 @@ function renderTopbar() {
     h('button', { class: 'btn', id: 'btn-cp', 'aria-haspopup': 'dialog', onclick: toggleCheckpointPanel, title: 'Your Last known good checkpoint' },
       'Checkpoint: ' + (cp ? cp.id.toUpperCase() : 'none'), ' ▾'),
     READONLY ? null : h('button', { class: 'btn', id: 'btn-rescan', onclick: rescan }, 'Rescan'),
-    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-sync', title: 'Pull the latest commits from GitHub and rescan', onclick: hubSync }, 'Sync now') : null,
-    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-upload', title: 'In Overleaf: Menu → Download → Source', onclick: () => $('#zip-in').click() }, 'Upload paper zip') : null,
-    HUB_ON && !READONLY ? h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }) : null,
+    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-sync', title: 'Pull the latest commits from GitHub (and Overleaf) and rescan', onclick: hubSync }, 'Sync now') : null,
+    HUB_ON && !READONLY ? paperSourceChip() : null,
+    HUB_ON && !READONLY && !(HUBINFO && HUBINFO.kind === 'overleaf') ? h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }) : null,
     READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export HTML report'),
     h('button', { class: 'btn', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts  ?', onclick: showShortcuts }, '?')].filter(Boolean));
+}
+/* Paper source (hub mode): Overleaf or zip. HUBINFO = {kind, project_id, last_sync, overleaf_configured}. */
+let HUBINFO = null;
+function agoText(t) {
+  if (!t) return 'never';
+  const d = (Date.now() - Date.parse(t)) / 1000;
+  if (isNaN(d)) return String(t);
+  if (d < 90) return 'just now';
+  if (d < 3600) return Math.round(d / 60) + ' min ago';
+  if (d < 86400) return Math.round(d / 3600) + ' h ago';
+  return Math.round(d / 86400) + ' d ago';
+}
+async function loadHubInfo() {
+  if (!HUB_ON || !PID) return;
+  try {
+    const [pl, st] = await Promise.all([fetch('/api/hub/projects', { cache: 'no-store' }).then(r => r.json()), fetch('/api/hub/status', { cache: 'no-store' }).then(r => r.json())]);
+    const p = (pl.projects || []).find(x => x.id === PID);
+    const ps = (p && p.paper_source) || { kind: 'zip' };
+    HUBINFO = { kind: ps.kind === 'overleaf' ? 'overleaf' : 'zip', project_id: ps.project_id || null, last_sync: p ? p.last_sync : null, overleaf_configured: !!st.overleaf_configured };
+  } catch (e) { /* keep the previous info; the bar just shows less */ }
+  renderTopbar();
+}
+function paperSourceChip() {
+  if (!HUBINFO) return null;
+  if (HUBINFO.kind === 'overleaf')
+    return h('span', { class: 'chip confirmed', id: 'paper-src', title: 'Overleaf project ' + (HUBINFO.project_id || '') }, 'Paper: Overleaf ✓', h('span', { class: 'sub' }, '(synced ' + agoText(HUBINFO.last_sync) + ')'));
+  // zip project: one button that offers the two ways to supply the paper
+  return h('button', { class: 'btn', id: 'paper-src', 'aria-haspopup': 'dialog', title: 'Where the paper comes from',
+    onclick: () => modal('Paper: uploaded zip', h('p', null, 'This project\'s paper was uploaded as a source zip. You can connect the Overleaf project instead, so Lemmata reads it directly and a sync picks up your edits.'),
+      [{ label: 'Cancel' }, { label: 'Upload paper zip', fn: () => $('#zip-in').click() }, { label: 'Connect Overleaf…', primary: true, fn: connectOverleaf }]) }, 'Paper: zip ▾');
+}
+function connectOverleaf() {
+  const inp = h('input', { type: 'text', id: 'ol-link', placeholder: 'https://www.overleaf.com/project/…', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf project link' });
+  const configured = HUBINFO && HUBINFO.overleaf_configured;
+  const body = h('div', null,
+    h('p', null, 'Paste the link of your Overleaf project. Lemmata reads it with git (read only) and never writes to Overleaf.'),
+    configured ? inp : h('div', { class: 'warn-note' }, 'The server has no Overleaf token yet. Open the ', h('a', { href: '/' }, 'Projects page'), ' and save your Overleaf Git token first (Overleaf → Account Settings → Git Integration).'),
+    configured ? h('p', { class: 'muted' }, 'This replaces the current paper. The old copy is kept on the server.') : null);
+  modal('Connect Overleaf', body, configured ? [{ label: 'Cancel' }, { label: 'Connect', primary: true, fn: async () => {
+    const v = inp.value.trim(); if (!v) return;
+    toast('Connecting Overleaf…');
+    try {
+      await hubJson('POST', '/api/hub/projects/' + encodeURIComponent(PID) + '/paper-source', { kind: 'overleaf', project: v });
+      await loadAll({ keepView: true }); await loadHubInfo();
+      toast('Paper now comes from Overleaf · rescanned');
+    } catch (e) { toast('Overleaf: ' + e.message); }
+  } }] : [{ label: 'Close' }]);
+  if (configured) inp.focus();
+}
+async function hubJson(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return j;
 }
 async function hubSync() {
   const b = $('#btn-sync'); if (b) { b.disabled = true; b.textContent = 'Syncing…'; }
   try {
     const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/sync', null, 'application/json');
     await loadAll({ keepView: true });
-    toast(r.changed ? 'Synced from GitHub · rescanned' : 'Already up to date');
+    const c = r.code ? r.code.changed : r.changed, pp = r.paper && r.paper.changed;
+    const perr = r.paper && r.paper.error;
+    if (perr) toast('Overleaf: ' + String(perr).slice(0, 200) + (c ? ' (code was synced)' : ''));
+    else toast(c || pp ? 'Synced ' + [c ? 'code from GitHub' : '', pp ? 'paper from Overleaf' : ''].filter(Boolean).join(' and ') + ' · rescanned' : 'Already up to date');
+    await loadHubInfo();
   } catch (e) { toast('Sync failed: ' + e.message); }
   renderTopbar();
 }
@@ -886,6 +944,7 @@ async function hubUpload(ev) {
     const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/paper', f, 'application/zip');
     await loadAll({ keepView: true });
     toast('Paper version ' + r.version + ' uploaded · rescanned');
+    await loadHubInfo();
   } catch (e) { toast('Upload failed: ' + e.message); }
   renderTopbar();
 }
@@ -1766,6 +1825,7 @@ function startAutoRefresh() {
 async function detectHub() {
   if (READONLY || !PID) return;
   try { const r = await fetch('/api/hub/status', { cache: 'no-store' }); HUB_ON = r.ok; } catch (e) { HUB_ON = false; }
+  if (HUB_ON) { loadHubInfo(); setInterval(loadHubInfo, 60000); }
 }
 function boot() {
   buildShell();

@@ -13,6 +13,8 @@ DEFAULTS = {
     "github_client_id": DEFAULT_CLIENT_ID,
     "github_api": "https://api.github.com",
     "github_web": "https://github.com",
+    "overleaf_git": "https://git.overleaf.com",
+    "overleaf_min_interval": 120,
     "allow_hosts": [],
     "owner": None,
     "sync_interval": 300,
@@ -72,6 +74,10 @@ class DataDir:
     @property
     def github_path(self):
         return self.hub / "github.json"
+
+    @property
+    def overleaf_path(self):
+        return self.hub / "overleaf.json"
 
     @property
     def log_path(self):

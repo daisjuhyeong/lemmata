@@ -18,6 +18,7 @@ from lemmata.server import WEB, ApiError, Handler, _map_exc, parse_length
 from .auth import Auth, cookie_header, parse_cookie, COOKIE
 from .config import Config, DataDir
 from .github import GitHub, GitHubError, scrub
+from .overleaf import OverleafError
 from .guard import Guard, peer_ok
 from .projects import MAX_ZIP, HubContext, Manager, ProjectError, mask
 from .sync import SyncLoop
@@ -96,6 +97,9 @@ class HubHandler(Handler):
         extra.setdefault("Referrer-Policy", "no-referrer")
         super()._send(status, body, ctype, extra)
 
+    def do_PUT(self):
+        self._dispatch("PUT")
+
     def do_DELETE(self):
         self._dispatch("DELETE")
 
@@ -173,14 +177,14 @@ class HubHandler(Handler):
             self._error(e.status, e.code, e.message)
         except ProjectError as e:
             self._error(e.status, e.code, e.message)
-        except GitHubError as e:
+        except (GitHubError, OverleafError) as e:
             self._error(e.status, e.code, e.message)
         except Exception as e:
             m = _map_exc(e)
             if m:
                 self._error(m.status, m.code, m.message)
             else:
-                self._error(500, "internal", mask(scrub("%s: %s" % (type(e).__name__, e), self.hub.gh.token()))[:300])
+                self._error(500, "internal", mask(scrub("%s: %s" % (type(e).__name__, e), self.hub.gh.token(), self.hub.mgr.ol.token()))[:300])
 
     # --- static
     def _hub_static(self, path):
@@ -231,6 +235,7 @@ class HubHandler(Handler):
             return self._json({"ok": True, "hub": True, "version": __version__, "authenticated": bool(dev),
                                "paired": bool(hub.auth.devices()), "github_connected": bool(gh),
                                "github_configured": bool(c.get("github_client_id")),
+                               "overleaf_configured": hub.mgr.ol.configured(),
                                "owner": c.get("owner") if dev else None,
                                "user": hub.gh.user_public() if dev else None,
                                "device": dev["name"] if dev else None})
@@ -260,14 +265,24 @@ class HubHandler(Handler):
             return self._json({"ok": True})
         if (method, r) == ("GET", "/github/repos"):
             return self._json(hub.gh.repos(q.get("q", "")))
+        # --- Overleaf token (never echoed back)
+        if r == "/overleaf/token":
+            if method == "PUT":
+                body = self._body()
+                hub.mgr.ol.save(body.get("token"))
+                return self._json({"configured": True})
+            if method == "DELETE":
+                hub.mgr.ol.remove()
+                return self._json({"configured": False})
+            raise ApiError(405, "method_not_allowed", "method not allowed")
         # --- projects
         if r == "/projects":
             if method == "GET":
                 return self._json({"projects": hub.mgr.list()})
             if method == "POST":
                 body = self._body()
-                return self._json(hub.mgr.create(body.get("name"), body.get("code_repo"), body.get("branch")), 201)
-        m = re.match(r"^/projects/([a-z0-9-]{1,64})(/paper|/sync)?$", r)
+                return self._json(hub.mgr.create(body.get("name"), body.get("code_repo"), body.get("branch"), body.get("paper_overleaf")), 201)
+        m = re.match(r"^/projects/([a-z0-9-]{1,64})(/paper|/sync|/paper-source)?$", r)
         if m:
             pid, sub = m.group(1), m.group(2)
             hub.mgr.root(pid)  # 404 before any body is read
@@ -276,6 +291,9 @@ class HubHandler(Handler):
             if sub == "/sync" and method == "POST":
                 self._body()
                 return self._json(hub.mgr.sync(pid))
+            if sub == "/paper-source" and method == "POST":
+                body = self._body()
+                return self._json(hub.mgr.set_paper_source(pid, body.get("kind"), body.get("project")))
             if sub == "/paper" and method == "POST":
                 return self._json(self._paper(pid))
             if sub is None and method == "GET":

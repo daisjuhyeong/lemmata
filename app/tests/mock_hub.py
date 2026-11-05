@@ -38,6 +38,7 @@ class State:
         self.user = None
         self.gh = {"mode": "ok", "pending": 2}
         self.polls = 0
+        self.overleaf = False
         self.projects = []
         self.engine_port = None
         self.lock = threading.Lock()
@@ -89,11 +90,14 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         self.route("POST")
 
+    def do_PUT(self):
+        self.route("PUT")
+
     def do_DELETE(self):
         self.route("DELETE")
 
     def status_obj(self):
-        return {"paired": self.authed(), "github": {"signed_in": bool(ST.user), "user": ST.user}, "version": "0.1.0"}
+        return {"paired": self.authed(), "github": {"signed_in": bool(ST.user), "user": ST.user}, "overleaf_configured": ST.overleaf, "version": "0.1.0"}
 
     def route(self, m):
         self.__dict__.pop("_b", None)
@@ -104,7 +108,7 @@ class H(BaseHTTPRequestHandler):
             ST.gh.update(json.loads(self.body() or b"{}")); ST.polls = 0
             return self.send(200, ST.gh)
         if p == "/__mock/reset" and m == "POST":
-            ST.sessions.clear(); ST.user = None; ST.projects.clear(); ST.polls = 0; ST.gh.update({"mode": "ok", "pending": 2})
+            ST.sessions.clear(); ST.user = None; ST.projects.clear(); ST.polls = 0; ST.overleaf = False; ST.gh.update({"mode": "ok", "pending": 2})
             ST.paired_codes = {"ABCD2345"}
             return self.send(200, {})
         if p == "/api/hub/status":
@@ -120,6 +124,12 @@ class H(BaseHTTPRequestHandler):
         if p.startswith("/p/") or p.startswith("/api/") or p == "/mcp":
             if not self.authed():
                 return self.err(401, "unauthorized", "Pair this device first.")
+        if p == "/api/hub/overleaf/token" and m == "PUT":
+            ST.overleaf = bool(json.loads(self.body() or b"{}").get("token"))
+            return self.send(200, {"configured": ST.overleaf})
+        if p == "/api/hub/overleaf/token" and m == "DELETE":
+            ST.overleaf = False
+            return self.send(200, {"configured": False})
         if p == "/api/hub/github/start" and m == "POST":
             ST.polls = 0
             return self.send(200, {"user_code": "WDJB-MJHT", "verification_uri": "http://localhost:%d/__mock/github-device" % self.server.server_address[1], "expires_in": 900, "interval": 1})
@@ -147,7 +157,7 @@ class H(BaseHTTPRequestHandler):
             time.sleep(1.2)
             name = b["code_repo"].split("/")[-1]
             pr = {"id": name + "-" + secrets.token_hex(2), "name": name, "code_repo": b["code_repo"], "branch": b.get("branch") or "main",
-                  "paper_versions": 0, "last_sync": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "scanned_at": None, "counts": {"recheck": 0, "findings": 0}}
+                  "paper_versions": 0, "paper_source": {"kind": "zip"}, "last_sync": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "scanned_at": None, "counts": {"recheck": 0, "findings": 0}}
             ST.projects.append(pr)
             return self.send(201, {"project": pr})
         if p.startswith("/api/hub/projects/"):
@@ -161,10 +171,28 @@ class H(BaseHTTPRequestHandler):
                     return self.err(400, "bad_zip", "That file is not a zip.")
                 pr["paper_versions"] += 1; pr["counts"] = {"recheck": 3, "findings": 2}
                 return self.send(200, {"version": pr["paper_versions"], "commit": "abc1234", "files": 12})
+            if parts[5:] == ["paper-source"] and m == "POST":
+                b = json.loads(self.body() or b"{}")
+                if b.get("kind") == "zip":
+                    pr["paper_source"] = {"kind": "zip"}
+                    return self.send(200, {"kind": "zip"})
+                import re
+                mm = re.search(r"[0-9a-f]{24}", b.get("project") or "")
+                if not ST.overleaf:
+                    return self.err(409, "overleaf_token_missing", "Save your Overleaf token first.")
+                if not mm:
+                    return self.err(400, "bad_request", "That is not an Overleaf project link or id.")
+                if mm.group(0).startswith("dead"):
+                    return self.err(404, "overleaf_not_found", "Overleaf has no project with that id.")
+                time.sleep(0.6)
+                pr["paper_source"] = {"kind": "overleaf", "project_id": mm.group(0)}
+                pr["paper_versions"] = 4; pr["counts"] = {"recheck": 3, "findings": 2}
+                pr["last_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                return self.send(200, {"kind": "overleaf", "project_id": mm.group(0), "head": "abc1234", "versions": 4})
             if parts[5:] == ["sync"] and m == "POST":
                 self.body()
                 pr["last_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                return self.send(200, {"changed": False, "head": "abc1234"})
+                return self.send(200, {"changed": False, "head": "abc1234", "code": {"changed": False, "head": "abc1234"}, "paper": {"changed": False, "head": "def5678"}})
         if p.startswith("/p/"):
             parts = p.split("/", 3)   # '', 'p', pid, rest
             rest = parts[3] if len(parts) > 3 else ""

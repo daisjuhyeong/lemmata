@@ -33,3 +33,6 @@ date | agent | operation | files touched | note
 2026-11-05 | lead | build | app/src/lemmata/hub/guard.py, hub/cli.py, test_hub.py | hub under launchd did not detect Tailscale (CLI fails there) -> loopback only; detect Tailscale IPs from interfaces, cache names from interactive runs
 2026-11-05 | lead | build | app/src/lemmata/hub/launchd.py | reinstall hit 'Bootstrap failed: 5' (bootout is async); wait for teardown and retry
 2026-11-05 | lead | build | desktop/src-tauri/Info.plist, .github/workflows/mac-app.yml | app showed a broken launcher when connecting: macOS ATS blocks http in the web view; ATS exception approved by Juhyeong (navigation guard still limits the window to the hub); CI checks the key
+2026-11-05 | lead | build | wiki/sprints/S05/S05-brief.md | founder decisions: Overleaf premium -> pull paper via Overleaf Git; VS Code extension; Notion not now
+2026-11-05 | pipeline-eng | build | app/src/lemmata/hub/{overleaf,projects,routes,config,github,sync}.py, tests | Overleaf paper source, both repos synced; 110 tests
+2026-11-05 | web-eng | build | web/hub/*, web/app.js, vscode/**, s05 screenshots | Overleaf hub UI; VS Code extension 0.1.0 (19 unit + 8 integration tests)

@@ -566,7 +566,8 @@ class HubTest(HubBase):
         self.assertEqual(s, 403)
         s, _, _ = self.raw("GET", "/api/hub/projects", None, {"Authorization": "Bearer " + self.token, "Tailscale-Funnel-Request": "?1"})
         self.assertEqual(s, 403)
-        for m in ("PUT", "OPTIONS", "TRACE", "PROPFIND"):
+        self.assertEqual(self.raw("PUT", "/api/hub/projects")[0], 401)  # PUT exists since S05 (Overleaf token) but needs a session
+        for m in ("OPTIONS", "TRACE", "PROPFIND"):
             s, hd, out = self.raw(m, "/api/hub/projects")
             self.assertEqual(s, 405, m)
             self.assertIn("frame-ancestors", hd["content-security-policy"])
