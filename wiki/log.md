@@ -18,3 +18,9 @@ date | agent | operation | files touched | note
 2026-11-05 | pipeline-eng | build | app/src/lemmata/{cli,server,gitbin,watch}.py, samples/, app/packaging/*, app/tests/test_sidecar.py, handoff | sidecar contract, one-file PyInstaller build verified on Linux (9.4 MB, ready 0.6 s)
 2026-11-05 | web-eng | build | desktop/**, app/src/lemmata/web/app.js, .gitignore, handoff | Tauri v2 shell compiles on Linux; headless spawn-ready-navigate verified; 5 s auto-refresh
 2026-11-05 | lead | build | app/src/lemmata/cli.py, .github/workflows/mac-app.yml | parent-exit fix when stderr is closed; macOS CI build of Lemmata.dmg
+2026-11-05 | lead | build | wiki/sprints/S04/S04-brief.md | founder decisions: app on MacBook, hub on Mac mini via Tailscale, GitHub-only sign-in (OAuth App client id registered), Overleaf zip upload, Claude Code via MCP
+2026-11-05 | cto | build | wiki/decisions/ADR-004-hub-on-mac-mini.md, wiki/architecture/threat-model.md | ADR-004 proposed; threat model with 11 must-fix items (forwarded to engineers)
+2026-11-05 | pipeline-eng-mcp | build | app/src/lemmata/mcp.py, cli.py, app/tests/test_mcp.py, handoff | MCP server, 9 tools, stdio entry, SDK handshake OK; CTO items 8-9
+2026-11-05 | pipeline-eng-hub | build | app/src/lemmata/hub/*, server.py, cli.py, engine/tree.py, fake_github.py, test_hub.py, handoff | multi-project hub, pairing, GitHub device flow, zip ingest, sync, MCP route; CTO items 1-7,10,11
+2026-11-05 | web-eng | build | web/hub/*, web/app.js, desktop/launcher/*, desktop/src-tauri/*, mock_hub.py, s04 screenshots, handoff | hub pages, API base, Tauri connect flow
+2026-11-05 | lead | build | app/src/lemmata/hub/routes.py | CSP allows inline styles (vendored Cytoscape)

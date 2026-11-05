@@ -55,3 +55,10 @@ h2 { margin:var(--s-6) 0 var(--s-2); font-size:12px; text-transform:uppercase; l
 .details { margin-top:var(--s-3); background:var(--sunken); border-radius:var(--r-md); padding:var(--s-2) var(--s-3); font:12px/1.5 var(--font-mono); max-height:160px; overflow:auto; white-space:pre-wrap; -webkit-user-select:text; user-select:text; }
 footer { padding:var(--s-2) var(--s-4) var(--s-3); text-align:center; font-size:12px; color:var(--muted); }
 footer .n { font-family:var(--font-mono); }
+
+.server { display:grid; gap:var(--s-1); }
+.server .helper { margin:0; }
+.srow { display:flex; gap:var(--s-2); }
+.srow input { flex:1; min-width:0; height:36px; padding:0 var(--s-3); border:1px solid var(--border-strong); border-radius:var(--r-sm); background:var(--surface); font:12px/1.4 var(--font-mono); color:var(--ink); -webkit-user-select:text; user-select:text; }
+.srow input:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+.banner.srv { background:var(--amber-bg); border-color:var(--amber); }

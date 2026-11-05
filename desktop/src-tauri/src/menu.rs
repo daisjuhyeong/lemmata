@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager, Wry};
 
 fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let has = state::has_project(app);
+    let connected = state::is_connected(app);
     let recent_list = recent::load(app);
 
     let mut recent_sub = SubmenuBuilder::new(app, "Open Recent");
@@ -47,7 +48,10 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&MenuItemBuilder::with_id("reset_sample", "Reset Sample").build(app)?)
         .separator()
-        .item(&MenuItemBuilder::with_id("close", "Close Project").accelerator("CmdOrCtrl+W").enabled(has).build(app)?)
+        .item(&MenuItemBuilder::with_id("connect", "Connect to Server\u{2026}").build(app)?)
+        .item(&MenuItemBuilder::with_id("disconnect", "Disconnect").enabled(connected).build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("close", "Close Project").accelerator("CmdOrCtrl+W").enabled(has || connected).build(app)?)
         .item(&MenuItemBuilder::with_id("reveal", if cfg!(target_os = "macos") { "Reveal Project in Finder" } else { "Reveal Project in File Manager" }).enabled(has).build(app)?)
         .build()?;
 
@@ -63,7 +67,7 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
-        .item(&MenuItemBuilder::with_id("reload", "Reload").accelerator("CmdOrCtrl+R").enabled(has).build(app)?)
+        .item(&MenuItemBuilder::with_id("reload", "Reload").accelerator("CmdOrCtrl+R").enabled(has || connected).build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("zoom_reset", "Actual Size").accelerator("CmdOrCtrl+0").build(app)?)
         .item(&MenuItemBuilder::with_id("zoom_in", "Zoom In").accelerator("CmdOrCtrl+=").build(app)?)
@@ -101,7 +105,19 @@ pub fn on_event(app: &AppHandle, id: &str) {
         "reset_sample" => {
             tauri::async_runtime::spawn(commands::open_sample(app, true));
         }
-        "close" => state::close_project(&app),
+        "close" => {
+            if state::is_connected(&app) {
+                state::disconnect(&app);
+            } else {
+                state::close_project(&app);
+            }
+        }
+        "connect" => {
+            // Back to the launcher, which has the server field; it focuses the field on this event.
+            state::show_launcher(&app);
+            let _ = tauri::Emitter::emit(&app, "focus-connect", ());
+        }
+        "disconnect" => state::disconnect(&app),
         "reveal" => commands::reveal_project(&app),
         "clear_recent" => {
             recent::clear(&app);

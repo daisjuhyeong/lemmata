@@ -52,6 +52,14 @@
     const busy = !!state.opening;
     const gitOk = state.git.ok;
     const off = busy || !gitOk;
+    const connecting = !!state.connecting;
+    const urlIn = $('#server-url');
+    if (!urlIn.dataset.init) { urlIn.dataset.init = '1'; urlIn.value = state.server_url; }
+    $('#btn-connect').disabled = busy || connecting;
+    $('#btn-connect').textContent = connecting ? 'Connecting…' : 'Connect to Lemmata server';
+    const sm = $('#server-msg');
+    sm.classList.toggle('hidden', !connecting);
+    sm.textContent = connecting ? 'Connecting to ' + state.connecting + '…' : '';
     for (const id of ['#btn-open', '#btn-sample']) {
       const b = $(id); b.disabled = off; b.title = !gitOk ? 'Install git first.' : '';
     }
@@ -67,6 +75,22 @@
         h('div', { class: 'btns' },
           h('button', { class: 'btn', disabled: installClicked, onclick: () => { installClicked = true; invoke('install_git'); render(); } }, 'Install Command Line Tools')),
         installClicked ? h('p', null, 'Waiting for the installer. Return here when it finishes. ', h('button', { class: 'linkbtn', onclick: refresh }, 'Check again')) : null));
+    } else if (state.error && state.error.code === 'server_unreachable' && !busy) {
+      const e = state.error;
+      const det = h('div', { class: 'details', id: 'details' }, e.details || 'No details were captured.');
+      det.classList.toggle('hidden', !showDetails);
+      bn.append(h('div', { class: 'banner srv', role: 'alert' },
+        h('span', { class: 'chipx' }, '∅ Server not reachable'),
+        h('h3', { tabindex: '-1', id: 'err-h' }, "Can't reach the Mac mini."),
+        h('p', null, 'Is it on, and is Tailscale connected on both Macs?'),
+        h('div', { class: 'btns' },
+          h('button', { class: 'btn sm', id: 'srv-retry', onclick: () => invoke('connect_server', { url: $('#server-url').value }) }, 'Retry'),
+          h('button', { class: 'btn sm', id: 'srv-local', onclick: () => invoke('use_locally') }, 'Use locally'),
+          h('button', { class: 'btn sm', onclick: () => { showDetails = !showDetails; render(); } }, showDetails ? 'Hide details' : 'Show details')),
+        det));
+    } else if (state.error && state.error.code === 'bad_url' && !busy) {
+      bn.append(h('div', { class: 'banner err', role: 'alert' }, h('span', { class: 'chipx' }, '✕ Check the address'), h('p', null, state.error.message),
+        h('div', { class: 'btns' }, h('button', { class: 'btn sm', onclick: () => invoke('dismiss_error') }, 'OK'))));
     } else if (state.error && !busy) {
       const e = state.error;
       const key = e.code + '|' + e.message;
@@ -128,6 +152,9 @@
 
   $('#btn-open').addEventListener('click', () => invoke('open_project_dialog'));
   $('#btn-sample').addEventListener('click', () => invoke('open_sample_cmd'));
+  $('#btn-connect').addEventListener('click', () => invoke('connect_server', { url: $('#server-url').value }));
+  $('#server-url').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#btn-connect').click(); });
+  if (T && T.event) T.event.listen('focus-connect', () => { const i = $('#server-url'); i.focus(); i.select(); });
   $('#adv-toggle').addEventListener('click', (ev) => {
     const adv = $('#adv'); const open = adv.classList.toggle('hidden') === false;
     ev.target.setAttribute('aria-expanded', String(open));

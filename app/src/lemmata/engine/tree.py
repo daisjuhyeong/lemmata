@@ -115,19 +115,40 @@ class WorkTree:
             self._files = sorted(out)
         return self._files
 
+    def _safe(self, path):
+        """Absolute path of `path` inside the repo, or None: no absolute paths, no escape via `..`, no symlinked
+        component (a repo symlink or \\input{../..} must never surface files outside the repo)."""
+        if not isinstance(path, str) or not path or "\x00" in path or os.path.isabs(path) or path.startswith(("/", "\\")):
+            return None
+        norm = os.path.normpath(path.replace("\\", "/"))
+        if norm == "." or norm == ".." or norm.startswith(".." + os.sep) or os.path.isabs(norm):
+            return None
+        root = os.path.realpath(self.root)
+        full = os.path.join(root, norm)
+        if os.path.realpath(full) != full:  # any symlink on the way (or a case/normalisation surprise) is refused
+            return None
+        return full
+
     def has(self, path):
-        return os.path.isfile(os.path.join(self.root, path))
+        p = self._safe(path)
+        return p is not None and os.path.isfile(p)
 
     def read(self, path):
+        p = self._safe(path)
+        if p is None:
+            return None
         try:
-            with open(os.path.join(self.root, path), "rb") as f:
+            with open(p, "rb") as f:
                 return f.read()
         except OSError:
             return None
 
     def size(self, path):
+        p = self._safe(path)
+        if p is None:
+            return 0
         try:
-            return os.path.getsize(os.path.join(self.root, path))
+            return os.path.getsize(p)
         except OSError:
             return 0
 

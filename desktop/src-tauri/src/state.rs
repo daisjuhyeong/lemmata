@@ -42,6 +42,10 @@ pub struct SessionState {
     pub last_target: Option<Target>,
     /// Last logical size of the project window (remembered across launches).
     pub project_size: Option<(f64, f64)>,
+    /// Hub URL the window is showing (S04), if connected to a server.
+    pub server: Option<String>,
+    /// Hub URL being probed right now.
+    pub connecting: Option<String>,
 }
 
 pub struct AppState(pub Mutex<SessionState>);
@@ -59,6 +63,8 @@ impl AppState {
             zoom: 1.0,
             last_target: None,
             project_size: None,
+            server: None,
+            connecting: None,
         }))
     }
 }
@@ -211,6 +217,7 @@ pub fn show_launcher(app: &AppHandle) {
     let (need, url) = with(app, |s| {
         let need = !s.on_launcher;
         s.on_launcher = true;
+        s.server = None;
         (need, s.launcher_url.clone())
     });
     if let Some(w) = app.get_webview_window("main") {
@@ -239,6 +246,58 @@ pub fn navigate_to(app: &AppHandle, url: &str, title: &str) {
         }
         let _ = w.navigate(u);
     }
+}
+
+pub fn connected_server(app: &AppHandle) -> Option<String> {
+    with(app, |s| s.server.clone())
+}
+
+pub fn is_connected(app: &AppHandle) -> bool {
+    with(app, |s| s.server.is_some())
+}
+
+pub fn set_connecting(app: &AppHandle, url: Option<String>) {
+    with(app, |s| {
+        s.connecting = url;
+        s.error = None;
+    });
+    notify(app);
+}
+
+pub fn set_connect_error(app: &AppHandle, e: ErrorInfo) {
+    eprintln!("lemmata: connect failed [{}] {}\n{}", e.code, e.message, e.details);
+    with(app, |s| {
+        s.connecting = None;
+        s.error = Some(e);
+    });
+    show_launcher(app);
+    notify(app);
+}
+
+/// Close any local project, then show the hub page in the main window.
+pub fn set_server(app: &AppHandle, url: &str, host: &str) {
+    let child = with(app, |s| {
+        s.gen += 1;
+        s.current = None;
+        s.opening = None;
+        s.error = None;
+        s.connecting = None;
+        // set before navigating: the navigation guard only lets the connected origin through
+        s.server = Some(url.to_string());
+        s.child.take()
+    });
+    if let Some(c) = child {
+        sidecar::terminate(c);
+    }
+    navigate_to(app, url, &format!("Lemmata \u{2014} {host}"));
+    notify(app);
+}
+
+/// Disconnect: forget auto-reconnect and go back to the launcher.
+pub fn disconnect(app: &AppHandle) {
+    crate::server::forget_auto(app);
+    show_launcher(app);
+    notify(app);
 }
 
 pub fn last_target(app: &AppHandle) -> Option<Target> {
@@ -282,6 +341,9 @@ pub struct LauncherState {
     pub recent: Vec<RecentView>,
     pub opening: Option<String>,
     pub error: Option<ErrorInfo>,
+    pub connecting: Option<String>,
+    pub server_url: String,
+    pub server_auto: bool,
 }
 
 #[derive(Serialize)]
@@ -292,8 +354,12 @@ pub struct RecentView {
 }
 
 pub fn launcher_state(app: &AppHandle) -> LauncherState {
-    let (opening, error) = with(app, |s| (s.opening.clone(), s.error.clone()));
+    let (opening, error, connecting) = with(app, |s| (s.opening.clone(), s.error.clone(), s.connecting.clone()));
+    let saved = crate::server::load(app);
     LauncherState {
+        connecting,
+        server_url: saved.as_ref().map(|x| x.url.clone()).unwrap_or_else(|| crate::server::DEFAULT_URL.to_string()),
+        server_auto: saved.map(|x| x.auto).unwrap_or(false),
         version: app.package_info().version.to_string(),
         git: crate::git::check(),
         recent: recent::load(app)

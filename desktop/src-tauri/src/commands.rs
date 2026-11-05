@@ -140,3 +140,15 @@ pub async fn retry_open(app: AppHandle) {
         sidecar::open(app, t).await;
     }
 }
+
+#[tauri::command]
+pub async fn connect_server(app: AppHandle, url: String) {
+    crate::server::connect(app, url).await;
+}
+
+/// "Use locally" after the server could not be reached: stop auto-reconnect and clear the message.
+#[tauri::command]
+pub fn use_locally(app: AppHandle) {
+    crate::server::forget_auto(&app);
+    state::clear_error(&app);
+}

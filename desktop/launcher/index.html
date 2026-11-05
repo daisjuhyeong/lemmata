@@ -30,6 +30,16 @@
     <button id="adv-open" class="btn sm" disabled>Open</button>
   </div>
 
+  <h2>Lemmata server</h2>
+  <div class="server">
+    <label for="server-url" class="helper">Work on the Mac mini from this Mac. Both Macs need Tailscale.</label>
+    <div class="srow">
+      <input id="server-url" type="text" spellcheck="false" autocomplete="off" value="http://dais-juhyeongs-mac-mini:8765" aria-label="Server address">
+      <button id="btn-connect" class="btn">Connect to Lemmata server</button>
+    </div>
+    <p id="server-msg" class="opening hidden" role="status"></p>
+  </div>
+
   <h2>Recent projects</h2>
   <ul id="recent" class="recent"></ul>
   <div id="empty" class="well hidden"><strong>No projects yet</strong><br>Open a folder with your paper to begin, or try the sample first.</div>

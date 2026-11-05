@@ -245,3 +245,7 @@ kbd { font:12px var(--font-mono); border:1px solid var(--border-strong); border-
   #topbar .scanst, #topbar .wname { display:none; }
   #topbar .proj { max-width:160px; }
 }
+
+/* hub mode (served under /p/<pid>/): a few more controls in the top bar */
+#topbar .btn { flex:none; }
+@media (max-width:1439px) { #topbar { gap:var(--s-2); } #topbar .scanst { display:none; } #topbar .proj { max-width:140px; } }

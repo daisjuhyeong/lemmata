@@ -9,6 +9,11 @@ const SNAP = (function () {
   try { return JSON.parse(el.textContent); } catch (e) { return null; }
 })();
 const READONLY = !!SNAP;
+/* API base: /p/<pid>/ -> /p/<pid>/api/ (served by a hub); anything else -> /api/ (single-project mode). */
+const PID = (function () { const m = location.pathname.match(/^\/p\/([^/]+)\//); return m ? decodeURIComponent(m[1]) : null; })();
+const API_BASE = PID ? '/p/' + encodeURIComponent(PID) + '/api/' : '/api/';
+const apiUrl = path => path.startsWith('/api/') ? API_BASE + path.slice(5) : path;
+let HUB_ON = false;   // true when /api/hub/status answers and the page is under /p/<pid>/
 
 /* ---------- tiny DOM helper ---------- */
 function h(tag, attrs, ...kids) {
@@ -39,14 +44,14 @@ function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one +
 /* ---------- API ---------- */
 async function apiGet(path) {
   if (SNAP) return snapGet(path);
-  const r = await fetch(path, { cache: 'no-store' });
+  const r = await fetch(apiUrl(path), { cache: 'no-store' });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
   return j;
 }
 async function apiPost(path, body) {
   if (SNAP) throw new Error('Read-only snapshot');
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const r = await fetch(apiUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status)); e.status = r.status; throw e; }
   return j;
@@ -848,6 +853,7 @@ function renderTopbar() {
   const badge = (n, word) => h('span', { class: 'badge' + (n ? '' : ' zero'), 'aria-label': n + ' ' + word }, String(n));
   const cp = S.alarms && S.alarms.checkpoint;
   tb.append(...[
+    HUB_ON ? h('a', { class: 'btn', id: 'btn-projects', href: '/', title: 'All projects' }, '← Projects') : null,
     h('span', { class: 'brand' }, PRODUCT), 
     h('button', { class: 'proj', title: 'Project and scan', onclick: () => openPicker() }, 'project: ', h('b', null, S.project.name)),
     h('div', { class: 'tabs', role: 'tablist' }, TABS.map(([id, label, key]) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), title: label + '  ' + key, onclick: () => setTab(id) }, label,
@@ -858,8 +864,36 @@ function renderTopbar() {
     h('button', { class: 'btn', id: 'btn-cp', 'aria-haspopup': 'dialog', onclick: toggleCheckpointPanel, title: 'Your Last known good checkpoint' },
       'Checkpoint: ' + (cp ? cp.id.toUpperCase() : 'none'), ' ▾'),
     READONLY ? null : h('button', { class: 'btn', id: 'btn-rescan', onclick: rescan }, 'Rescan'),
-    READONLY ? null : h('a', { class: 'btn', href: '/api/export', download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export HTML report'),
+    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-sync', title: 'Pull the latest commits from GitHub and rescan', onclick: hubSync }, 'Sync now') : null,
+    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-upload', title: 'In Overleaf: Menu → Download → Source', onclick: () => $('#zip-in').click() }, 'Upload paper zip') : null,
+    HUB_ON && !READONLY ? h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }) : null,
+    READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export HTML report'),
     h('button', { class: 'btn', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts  ?', onclick: showShortcuts }, '?')].filter(Boolean));
+}
+async function hubSync() {
+  const b = $('#btn-sync'); if (b) { b.disabled = true; b.textContent = 'Syncing…'; }
+  try {
+    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/sync', null, 'application/json');
+    await loadAll({ keepView: true });
+    toast(r.changed ? 'Synced from GitHub · rescanned' : 'Already up to date');
+  } catch (e) { toast('Sync failed: ' + e.message); }
+  renderTopbar();
+}
+async function hubUpload(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const b = $('#btn-upload'); if (b) { b.disabled = true; b.textContent = 'Uploading…'; }
+  try {
+    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/paper', f, 'application/zip');
+    await loadAll({ keepView: true });
+    toast('Paper version ' + r.version + ' uploaded · rescanned');
+  } catch (e) { toast('Upload failed: ' + e.message); }
+  renderTopbar();
+}
+async function hubPost(path, body, type) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': type }, body: body == null ? '{}' : body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return j;
 }
 function showShortcuts() {
   const rows = [['/', 'Search'], ['F', 'Fit'], ['Esc', 'Clear'], ['G A C L', 'Switch tab'], ['[ ]', 'Toggle panels'], ['R X I', 'Triage'], ['U D B', 'Lineage direction'], ['K', 'Checkpoint at selected commit'], ['+ − 0', 'Zoom'], ['Arrows', 'Move selection'], ['?', 'This sheet']];
@@ -1048,7 +1082,7 @@ async function fillPreview(box, n, token) {
       return set([h('div', { class: 'cap' }, n.repo + ':' + loc.path + ':' + r.start + '–' + (r.start + r.lines.length - 1)), codeBlock(r.lines, r.start, [loc.line], { word: 'Here' })]);
     }
     if (n.kind === 'asset' && /\.(png|jpe?g|svg)$/i.test(loc.path || '') && !READONLY) {
-      const img = h('img', { src: '/api/raw?repo=' + encodeURIComponent(n.repo) + '&path=' + encodeURIComponent(loc.path), alt: n.name, style: { maxWidth: '100%', border: '1px solid var(--border)' } });
+      const img = h('img', { src: apiUrl('/api/raw') + '?repo=' + encodeURIComponent(n.repo) + '&path=' + encodeURIComponent(loc.path), alt: n.name, style: { maxWidth: '100%', border: '1px solid var(--border)' } });
       img.onerror = () => { if (token === detailToken) clear(box).append(h('div', { class: 'hint' }, 'No image available. ' + loc.path + ' is not a bitmap or was not found.')); };
       return set([h('div', { class: 'cap' }, n.repo + ':' + loc.path), img]);
     }
@@ -1426,7 +1460,7 @@ function renderChecks() {
       h('select', { 'aria-label': 'Status', onchange: ev => { F.state = ev.target.value; renderChecks(); } }, [['', 'All'], ['open', 'Open'], ['reviewed', 'Reviewed'], ['needs_fixing', 'Needs fixing'], ['ignored', 'Ignored']].map(o => h('option', { value: o[0], selected: F.state === o[0] }, o[1]))),
       h('input', { type: 'search', placeholder: 'Search findings', 'aria-label': 'Search findings', value: F.q || '', oninput: ev => { F.q = ev.target.value; renderChecks(); const i = $('#v-checks input[type=search]'); i.focus(); i.setSelectionRange(F.q.length, F.q.length); } }),
       h('span', { style: { flex: 1 } }),
-      READONLY ? null : h('a', { class: 'btn', href: '/api/export', download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export report (HTML)')));
+      READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export report (HTML)')));
   const body = h('div', { class: 'pad', style: { flex: 1 } });
   const det = h('details', { style: { marginBottom: '12px' } }, h('summary', { class: 'muted' }, 'Status of all ' + S.findings.checks.length + ' checks'),
     h('table', { class: 'tbl' }, S.findings.checks.map(c => h('tr', null, h('td', null, c.title), h('td', { class: 'mono' }, c.status === 'ran' ? 'Ran · ' + plural(c.count, 'finding') : 'Not applicable' + (c.note ? ' (' + c.note + ')' : '')), h('td', { class: 'muted' }, c.status === 'ran' ? c.note : '')))));
@@ -1728,12 +1762,16 @@ function startAutoRefresh() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); });
 }
 
+async function detectHub() {
+  if (READONLY || !PID) return;
+  try { const r = await fetch('/api/hub/status', { cache: 'no-store' }); HUB_ON = r.ok; } catch (e) { HUB_ON = false; }
+}
 function boot() {
   buildShell();
   S.graph = { nodes: [], edges: [] }; rebuildIndex();
   setGraphMsg({ t: 'Building graph…' });
   setTab('graph');
-  loadAll().then(() => {
+  detectHub().then(loadAll).then(() => {
     startAutoRefresh();
     rememberProject();
     if (location.hash === '#/open') openPicker();

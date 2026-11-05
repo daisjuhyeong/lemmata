@@ -273,6 +273,15 @@ def cmd_checkpoint(args):
     return 0
 
 
+def cmd_mcp_stdio(args):
+    from lemmata.mcp import LocalCtx, run_stdio
+
+    root = Path(args.project_dir).expanduser().resolve()
+    if not root.is_dir():
+        raise SystemExit("lemmata: %s is not a folder" % root)
+    return run_stdio(LocalCtx(root))
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="lemmata", description="Lemmata: track paper, code and runs as a dependency graph.")
     ap.add_argument("--version", action="version", version="lemmata " + __version__)
@@ -318,6 +327,14 @@ def build_parser():
     c.add_argument("--note")
     common(c, serving=False)
     c.set_defaults(fn=cmd_checkpoint)
+
+    # --- MCP stdio entry (Claude Code); keep this block separate ---
+    m = sub.add_parser("mcp-stdio", help="serve one local project to an MCP client over stdio (Claude Code)")
+    m.add_argument("project_dir")
+    m.set_defaults(fn=cmd_mcp_stdio)
+    from lemmata.hub.cli import add_parser as add_hub
+
+    add_hub(sub)
     return ap
 
 

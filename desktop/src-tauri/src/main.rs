@@ -6,6 +6,7 @@ mod downloads;
 mod git;
 mod menu;
 mod recent;
+mod server;
 mod sidecar;
 mod state;
 
@@ -29,6 +30,8 @@ fn main() {
             commands::clear_recent,
             commands::remove_recent,
             commands::retry_open,
+            commands::connect_server,
+            commands::use_locally,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -36,8 +39,16 @@ fn main() {
             // the web UI's "Export HTML report" is a file download.
             let cfg = app.config().app.windows[0].clone();
             let dl_handle = handle.clone();
+            let nav_handle = handle.clone();
+            let win_handle = handle.clone();
             let w = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?
                 .on_download(move |_wv, ev| downloads::on_event(&dl_handle, ev))
+                .on_navigation(move |u| server::allow_navigation(&nav_handle, u))
+                // target=_blank links (for example GitHub's device page) open in the default browser.
+                .on_new_window(move |u, _f| {
+                    server::open_external(&win_handle, &u);
+                    tauri::webview::NewWindowResponse::Deny
+                })
                 .build()?;
             if let Ok(u) = w.url() {
                 let st = app.state::<state::AppState>();
@@ -45,6 +56,13 @@ fn main() {
             }
             state::load_window_size(&handle);
             // Test hook (headless smoke test): LEMMATA_OPEN=<folder> or LEMMATA_OPEN=sample opens at startup.
+            // Reconnect to the last Lemmata server (S04) unless a test hook asks for a local project.
+            if std::env::var("LEMMATA_OPEN").is_err() {
+                if let Some(saved) = server::load(&handle).filter(|x| x.auto) {
+                    let h3 = handle.clone();
+                    tauri::async_runtime::spawn(async move { server::connect(h3, saved.url).await });
+                }
+            }
             if let Ok(v) = std::env::var("LEMMATA_OPEN") {
                 let h2 = handle.clone();
                 tauri::async_runtime::spawn(async move {

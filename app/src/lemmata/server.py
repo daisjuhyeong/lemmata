@@ -163,191 +163,196 @@ class App:
         return html, snap["project"].get("name", "project")
 
 
-def make_handler(app: App):
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-        server_version = "lemmata"
+class Handler(BaseHTTPRequestHandler):
+    """Request handler; `app` is a class attribute (single-project mode) or set per request by the hub."""
+    app: App = None
+    web_root = WEB
 
-        def log_message(self, fmt, *args):  # quiet by default
-            pass
+    protocol_version = "HTTP/1.1"
+    server_version = "lemmata"
 
-        # --- output helpers
-        def _send(self, status, body, ctype, extra=None):
-            self.send_response(status)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            for k, v in (extra or {}).items():
-                self.send_header(k, v)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+    def log_message(self, fmt, *args):  # quiet by default
+        pass
 
-        def _json(self, obj, status=200):
-            self._send(status, json.dumps(obj, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+    # --- output helpers
+    def _send(self, status, body, ctype, extra=None):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
-        def _error(self, status, code, message):
-            if status >= 400 and self.command == "POST":
-                self.close_connection = True
-            self._json({"error": {"code": code, "message": message}}, status)
+    def _json(self, obj, status=200):
+        self._send(status, json.dumps(obj, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
-        # --- guards
-        def _host_ok(self):
-            host = (self.headers.get("Host") or "").lower()
-            return host in ("127.0.0.1:%d" % app.port, "localhost:%d" % app.port)
+    def _error(self, status, code, message):
+        if status >= 400 and self.command == "POST":
+            self.close_connection = True
+        self._json({"error": {"code": code, "message": message}}, status)
 
-        def _origin_ok(self):
-            origin = self.headers.get("Origin")
-            return origin is None or origin.lower() in ("http://127.0.0.1:%d" % app.port, "http://localhost:%d" % app.port)
+    # --- guards
+    def _host_ok(self):
+        host = (self.headers.get("Host") or "").lower()
+        return host in ("127.0.0.1:%d" % self.app.port, "localhost:%d" % self.app.port)
 
-        def _dispatch(self, method):
-            try:
-                if not self._host_ok():
-                    raise ApiError(403, "forbidden", "host not allowed")
-                url = urlsplit(self.path)
-                path = unquote(url.path)
-                q = {k: v[-1] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
-                if path.startswith("/api/"):
-                    self._api(method, path, q)
-                elif method == "GET":
-                    self._static(path)
-                else:
-                    raise ApiError(405, "method_not_allowed", "method not allowed")
-            except ApiError as e:
-                self._error(e.status, e.code, e.message)
-            except Exception as e:  # engine errors map by class name, everything else is a 500
-                m = _map_exc(e)
-                if m:
-                    self._error(m.status, m.code, m.message)
-                else:
-                    self._error(500, "internal", "%s: %s" % (type(e).__name__, e))
+    def _origin_ok(self):
+        origin = self.headers.get("Origin")
+        return origin is None or origin.lower() in ("http://127.0.0.1:%d" % self.app.port, "http://localhost:%d" % self.app.port)
 
-        def do_GET(self):
-            self._dispatch("GET")
+    def _dispatch(self, method):
+        try:
+            if not self._host_ok():
+                raise ApiError(403, "forbidden", "host not allowed")
+            url = urlsplit(self.path)
+            path = unquote(url.path)
+            q = {k: v[-1] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
+            if path.startswith("/api/"):
+                self._api(method, path, q)
+            elif method == "GET":
+                self._static(path)
+            else:
+                raise ApiError(405, "method_not_allowed", "method not allowed")
+        except ApiError as e:
+            self._error(e.status, e.code, e.message)
+        except Exception as e:  # engine errors map by class name, everything else is a 500
+            m = _map_exc(e)
+            if m:
+                self._error(m.status, m.code, m.message)
+            else:
+                self._error(500, "internal", "%s: %s" % (type(e).__name__, e))
 
-        def do_POST(self):
-            self._dispatch("POST")
+    def do_GET(self):
+        self._dispatch("GET")
 
-        def do_HEAD(self):
-            self._dispatch("GET")
+    def do_POST(self):
+        self._dispatch("POST")
 
-        # --- static
-        def _static(self, path):
-            rel = "index.html" if path in ("", "/") else path.lstrip("/")
-            if "\x00" in rel:
-                raise ApiError(404, "not_found", "not found")
-            root = WEB.resolve()
-            p = (root / rel).resolve()
-            if not p.is_relative_to(root) or not p.is_file():
-                raise ApiError(404, "not_found", "not found")
-            ctype = STATIC_TYPES.get(p.suffix.lower()) or mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-            self._send(200, p.read_bytes(), ctype)
+    def do_HEAD(self):
+        self._dispatch("GET")
 
-        # --- body
-        def _body(self):
-            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if ctype != "application/json":
-                raise ApiError(400, "bad_request", "Content-Type must be application/json")
-            if not self._origin_ok():
-                raise ApiError(403, "forbidden", "origin not allowed")
-            try:
-                n = int(self.headers.get("Content-Length") or "0")
-            except ValueError:
-                raise ApiError(400, "bad_request", "bad Content-Length")
-            if n > MAX_BODY:
-                raise ApiError(413, "too_large", "request body over 64 KB")
-            raw = self.rfile.read(n) if n else b""
-            try:
-                obj = json.loads(raw.decode("utf-8") or "{}")
-            except (ValueError, UnicodeDecodeError):
-                raise ApiError(400, "bad_request", "body is not valid JSON")
-            if not isinstance(obj, dict):
-                raise ApiError(400, "bad_request", "body must be a JSON object")
-            return obj
+    # --- static
+    def _static(self, path, root=None):
+        rel = "index.html" if path in ("", "/") else path.lstrip("/")
+        if "\x00" in rel:
+            raise ApiError(404, "not_found", "not found")
+        root = Path(root or self.web_root).resolve()
+        p = (root / rel).resolve()
+        if not p.is_relative_to(root) or not p.is_file():
+            raise ApiError(404, "not_found", "not found")
+        ctype = STATIC_TYPES.get(p.suffix.lower()) or mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+        self._send(200, p.read_bytes(), ctype)
 
-        # --- api
-        def _api(self, method, path, q):
-            eng = app.engine
-            r = path[len("/api"):]
-            gets = {"/health": lambda: {"ok": True, "version": __version__},
-                    "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
-                    "/checkpoints": eng.checkpoints, "/triage": eng.triage}
-            if method == "GET":
-                # engine reads wait for a running (re)scan: a half-built scan state must never be served
-                if r in gets:
-                    with app.lock:
-                        data = gets[r]()
-                    return self._json(data)
-                if r == "/events":
-                    with app.lock:
-                        data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
-                    return self._json(data)
-                if r == "/analyze":
-                    if not q.get("group") or not q.get("node"):
-                        raise ApiError(400, "bad_request", "group and node are required")
-                    with app.lock:
-                        data = eng.analyze(q["group"], q["node"])
-                    return self._json(data)
-                if r == "/file":
-                    try:
-                        a = int(q.get("start", "1"))
-                        b = int(q["end"]) if q.get("end") else None
-                    except ValueError:
-                        raise ApiError(400, "bad_request", "start/end must be integers")
-                    return self._json(app.read_lines(q.get("repo", ""), q.get("path", ""), a, b))
-                if r == "/raw":
-                    p = app.safe_path(q.get("repo", ""), q.get("path", ""))
-                    ct = IMAGE_TYPES.get(p.suffix.lower())
-                    if not ct or p.stat().st_size > MAX_RAW:
-                        raise ApiError(404, "not_found", "not an image")
-                    return self._send(200, p.read_bytes(), ct)
-                if r == "/export":
-                    with app.lock:
-                        html, name = app.export_html()
-                    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in name.lower()).strip("-") or "project"
-                    return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8",
-                                      {"Content-Disposition": 'attachment; filename="%s-report.html"' % safe})
-                if r in ("/scan", "/checkpoints.post", "/ask", "/links/decide"):
-                    raise ApiError(405, "method_not_allowed", "use POST")
-                raise ApiError(404, "not_found", "unknown route")
-            # POST
-            if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask"):
-                if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
-                    raise ApiError(405, "method_not_allowed", "use GET")
-                raise ApiError(404, "not_found", "unknown route")
-            body = self._body()
-            if r == "/ask":
-                raise ApiError(501, "not_implemented", "Ask Claude why runs on your own Claude Code later; not available in this demo.")
-            if r == "/scan":
-                if not app.lock.acquire(blocking=False):
-                    raise ApiError(409, "busy", "a scan is running")
+    # --- body
+    def _body(self):
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            raise ApiError(400, "bad_request", "Content-Type must be application/json")
+        if not self._origin_ok():
+            raise ApiError(403, "forbidden", "origin not allowed")
+        try:
+            n = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            raise ApiError(400, "bad_request", "bad Content-Length")
+        if n > MAX_BODY:
+            raise ApiError(413, "too_large", "request body over 64 KB")
+        raw = self.rfile.read(n) if n else b""
+        try:
+            obj = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            raise ApiError(400, "bad_request", "body is not valid JSON")
+        if not isinstance(obj, dict):
+            raise ApiError(400, "bad_request", "body must be a JSON object")
+        return obj
+
+    # --- api
+    def _api(self, method, path, q):
+        eng = self.app.engine
+        r = path[len("/api"):]
+        gets = {"/health": lambda: {"ok": True, "version": __version__},
+                "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
+                "/checkpoints": eng.checkpoints, "/triage": eng.triage}
+        if method == "GET":
+            # engine reads wait for a running (re)scan: a half-built scan state must never be served
+            if r in gets:
+                with self.app.lock:
+                    data = gets[r]()
+                return self._json(data)
+            if r == "/events":
+                with self.app.lock:
+                    data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
+                return self._json(data)
+            if r == "/analyze":
+                if not q.get("group") or not q.get("node"):
+                    raise ApiError(400, "bad_request", "group and node are required")
+                with self.app.lock:
+                    data = eng.analyze(q["group"], q["node"])
+                return self._json(data)
+            if r == "/file":
                 try:
-                    return self._json(eng.scan())
-                finally:
-                    app.lock.release()
-            with app.lock:
-                if r == "/checkpoints":
-                    note = body.get("note", "")
-                    at = body.get("at")
-                    if not isinstance(note, str) or len(note) > 500 or not (at is None or isinstance(at, dict)):
-                        raise ApiError(400, "bad_request", "note must be text up to 500 characters; at must be an object or null")
-                    return self._json(eng.create_checkpoint(note=note, at=at), 201)
-                if r == "/triage":
-                    note = body.get("note", "")
-                    if not isinstance(note, str) or len(note) > 2000:
-                        raise ApiError(400, "bad_request", "note must be text up to 2000 characters")
-                    for k in ("target_type", "target_id", "state"):
-                        if not isinstance(body.get(k), str):
-                            raise ApiError(400, "bad_request", "%s is required" % k)
-                    return self._json(eng.set_triage(body["target_type"], body["target_id"], body["state"], note))
-                if r == "/links/decide":
-                    for k in ("edge_id", "decision"):
-                        if not isinstance(body.get(k), str):
-                            raise ApiError(400, "bad_request", "%s is required" % k)
-                    return self._json(eng.decide_link(body["edge_id"], body["decision"]))
+                    a = int(q.get("start", "1"))
+                    b = int(q["end"]) if q.get("end") else None
+                except ValueError:
+                    raise ApiError(400, "bad_request", "start/end must be integers")
+                return self._json(self.app.read_lines(q.get("repo", ""), q.get("path", ""), a, b))
+            if r == "/raw":
+                p = self.app.safe_path(q.get("repo", ""), q.get("path", ""))
+                ct = IMAGE_TYPES.get(p.suffix.lower())
+                if not ct or p.stat().st_size > MAX_RAW:
+                    raise ApiError(404, "not_found", "not an image")
+                return self._send(200, p.read_bytes(), ct)
+            if r == "/export":
+                with self.app.lock:
+                    html, name = self.app.export_html()
+                safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in name.lower()).strip("-") or "project"
+                return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8",
+                                  {"Content-Disposition": 'attachment; filename="%s-report.html"' % safe})
+            if r in ("/scan", "/checkpoints.post", "/ask", "/links/decide"):
+                raise ApiError(405, "method_not_allowed", "use POST")
+            raise ApiError(404, "not_found", "unknown route")
+        # POST
+        if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask"):
+            if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
+                raise ApiError(405, "method_not_allowed", "use GET")
+            raise ApiError(404, "not_found", "unknown route")
+        body = self._body()
+        if r == "/ask":
+            raise ApiError(501, "not_implemented", "Ask Claude why runs on your own Claude Code later; not available in this demo.")
+        if r == "/scan":
+            if not self.app.lock.acquire(blocking=False):
+                raise ApiError(409, "busy", "a scan is running")
+            try:
+                return self._json(eng.scan())
+            finally:
+                self.app.lock.release()
+        with self.app.lock:
+            if r == "/checkpoints":
+                note = body.get("note", "")
+                at = body.get("at")
+                if not isinstance(note, str) or len(note) > 500 or not (at is None or isinstance(at, dict)):
+                    raise ApiError(400, "bad_request", "note must be text up to 500 characters; at must be an object or null")
+                return self._json(eng.create_checkpoint(note=note, at=at), 201)
+            if r == "/triage":
+                note = body.get("note", "")
+                if not isinstance(note, str) or len(note) > 2000:
+                    raise ApiError(400, "bad_request", "note must be text up to 2000 characters")
+                for k in ("target_type", "target_id", "state"):
+                    if not isinstance(body.get(k), str):
+                        raise ApiError(400, "bad_request", "%s is required" % k)
+                return self._json(eng.set_triage(body["target_type"], body["target_id"], body["state"], note))
+            if r == "/links/decide":
+                for k in ("edge_id", "decision"):
+                    if not isinstance(body.get(k), str):
+                        raise ApiError(400, "bad_request", "%s is required" % k)
+                return self._json(eng.decide_link(body["edge_id"], body["decision"]))
 
-    return Handler
+
+def make_handler(app: App):
+    return type("Handler", (Handler,), {"app": app})
 
 
 def bind(engine, host="127.0.0.1", port=8765, tries=100):
