@@ -11,15 +11,15 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from rmap import __version__
+from lemmata import __version__
 
-MARKER = ".rmap-sample"
-HUB = ".rmap"
+MARKER = ".lemmata-sample"
+HUB = ".lemmata"
 
 
 def _engine_class(fixtures):
     if fixtures:
-        from rmap.fixture_engine import FixtureEngine
+        from lemmata.fixture_engine import FixtureEngine
 
         variant = fixtures if isinstance(fixtures, str) else "sample"
 
@@ -28,22 +28,22 @@ def _engine_class(fixtures):
 
         return make
     try:
-        from rmap.engine.api import Engine
+        from lemmata.engine.api import Engine
     except ImportError as e:
-        raise SystemExit("rmap: the engine is not available (%s). Use --fixtures to run the UI on fixture data." % e)
+        raise SystemExit("lemmata: the engine is not available (%s). Use --fixtures to run the UI on fixture data." % e)
     return Engine
 
 
 def _serve(engine, args):
-    from rmap.server import bind
+    from lemmata.server import bind
 
     try:
         srv = bind(engine, port=args.port)
     except OSError as e:
-        raise SystemExit("rmap: could not start the server: %s" % e)
+        raise SystemExit("lemmata: could not start the server: %s" % e)
     url = "http://127.0.0.1:%d" % srv.server_address[1]
     name = engine.project().get("name", "project")
-    print("rmap: serving %s at %s  (Ctrl-C to stop)" % (name, url), flush=True)
+    print("lemmata: serving %s at %s  (Ctrl-C to stop)" % (name, url), flush=True)
     if not args.no_open:
         threading.Timer(0.3, lambda: webbrowser.open(url)).start()
     try:
@@ -72,7 +72,7 @@ def _write_manifest(root: Path, paper, code):
     if not gi.exists():
         gi.write_text("*\n", encoding="utf-8")
     mf = hub / "project.json"
-    data = json.loads(mf.read_text(encoding="utf-8")) if mf.exists() else {"schema": "rmap.project/1", "name": root.name, "repos": []}
+    data = json.loads(mf.read_text(encoding="utf-8")) if mf.exists() else {"schema": "lemmata.project/1", "name": root.name, "repos": []}
     repos = {r["id"]: r for r in data.get("repos", [])}
     if not repos and not paper and not code:
         role = _detect_role(root)
@@ -95,14 +95,14 @@ def cmd_demo(args):
     if not args.keep:
         if root.exists():
             if not (root / MARKER).exists():
-                raise SystemExit("rmap: %s exists and is not a sample folder (no %s); refusing to delete it. Pick another --dir." % (root, MARKER))
+                raise SystemExit("lemmata: %s exists and is not a sample folder (no %s); refusing to delete it. Pick another --dir." % (root, MARKER))
             shutil.rmtree(root)
     if not root.exists() or not args.keep:
         if not make.exists():
-            raise SystemExit("rmap: demo needs a source checkout (app/samples/make_sample.py not found).")
+            raise SystemExit("lemmata: demo needs a source checkout (app/samples/make_sample.py not found).")
         r = subprocess.run([sys.executable, str(make), str(root)])
         if r.returncode:
-            raise SystemExit("rmap: building the sample failed")
+            raise SystemExit("lemmata: building the sample failed")
     engine = _engine_class(False)(root, online=args.online)
     engine.scan()
     return _serve(engine, args)
@@ -111,7 +111,7 @@ def cmd_demo(args):
 def cmd_open(args):
     root = Path(args.project_dir).expanduser().resolve()
     if not root.is_dir():
-        raise SystemExit("rmap: %s is not a folder" % root)
+        raise SystemExit("lemmata: %s is not a folder" % root)
     if args.fixtures:
         return _serve(_engine_class(args.fixtures)(root), args)
     _write_manifest(root, args.paper, args.code)
@@ -123,7 +123,7 @@ def cmd_open(args):
 def cmd_serve(args):
     root = Path(args.project_dir).expanduser().resolve()
     if not args.fixtures and not (root / HUB / "project.json").exists():
-        raise SystemExit("rmap: %s has no %s/project.json; use `rmap open` first." % (root, HUB))
+        raise SystemExit("lemmata: %s has no %s/project.json; use `lemmata open` first." % (root, HUB))
     engine = _engine_class(args.fixtures)(root, online=args.online)
     engine.scan()
     return _serve(engine, args)
@@ -134,7 +134,7 @@ def cmd_scan(args):
     engine = _engine_class(args.fixtures)(root, online=args.online)
     st = engine.scan()
     c = st.get("counts", {})
-    print("rmap: %s: %s nodes, %s edges, %s proposed links, %s findings, %s alarm groups" % (
+    print("lemmata: %s: %s nodes, %s edges, %s proposed links, %s findings, %s alarm groups" % (
         st.get("name", root.name), c.get("nodes"), c.get("edges"), c.get("proposed"), c.get("findings"), c.get("alarm_groups")))
     return 0
 
@@ -144,20 +144,20 @@ def cmd_checkpoint(args):
     at = {}
     for item in args.at or []:
         if "=" not in item:
-            raise SystemExit("rmap: --at expects repo=rev, got %r" % item)
+            raise SystemExit("lemmata: --at expects repo=rev, got %r" % item)
         k, v = item.split("=", 1)
         at[k] = v
     engine = _engine_class(args.fixtures)(root)
     engine.scan()
     out = engine.create_checkpoint(note=args.note or "", at=at or None)
     cp = out["checkpoint"]
-    print("rmap: created checkpoint %s (%s nodes)" % (cp["id"], cp.get("node_count")))
+    print("lemmata: created checkpoint %s (%s nodes)" % (cp["id"], cp.get("node_count")))
     return 0
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="rmap", description="Research Map: track paper, code and runs as a dependency graph.")
-    ap.add_argument("--version", action="version", version="rmap " + __version__)
+    ap = argparse.ArgumentParser(prog="lemmata", description="Lemmata: track paper, code and runs as a dependency graph.")
+    ap.add_argument("--version", action="version", version="lemmata " + __version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p, serving=True):
@@ -169,7 +169,7 @@ def build_parser():
             p.add_argument("--no-open", action="store_true", help="do not open the browser")
 
     d = sub.add_parser("demo", help="build the synthetic sample, scan it and serve it")
-    d.add_argument("--dir", default="~/rmap-demo")
+    d.add_argument("--dir", default="~/lemmata-demo")
     d.add_argument("--keep", action="store_true", help="keep an existing sample folder (keeps triage)")
     common(d)
     d.set_defaults(fn=cmd_demo)

@@ -7,7 +7,7 @@ last_reviewed: 2026-11-04
 ---
 # Product
 
-Specs and user stories for Research Map (CLI/package `rmap`). Product name is being renamed; `Research Map` and `rmap` are placeholders.
+Specs and user stories for Lemmata (CLI/package `lemmata`). Product name is being renamed; `Lemmata` and `lemmata` are placeholders.
 
 Evidence rule: no user interviews exist yet. Every story here comes from founder decisions, not user evidence. Hypotheses H1-H4 are untouched and remain hypotheses.
 

@@ -1,5 +1,5 @@
 {
- "schema": "rmap.project/1",
+ "schema": "lemmata.project/1",
  "version": "0.1.0",
  "name": "Sample: tiny transformer",
  "root": "/home/claude/lemmata/app/tests/fixtures/files",

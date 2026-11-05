@@ -13,8 +13,8 @@ from pathlib import Path
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP / "src"))
 
-from rmap.engine.api import Engine  # noqa: E402
-from rmap.engine.errors import BadRequest, NotFound  # noqa: E402
+from lemmata.engine.api import Engine  # noqa: E402
+from lemmata.engine.errors import BadRequest, NotFound  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("make_sample", str(APP / "samples" / "make_sample.py"))
 make_sample = importlib.util.module_from_spec(_spec)
@@ -42,7 +42,7 @@ GOLDEN = {
 
 
 def fresh_sample():
-    d = tempfile.mkdtemp(prefix="rmap-test-")
+    d = tempfile.mkdtemp(prefix="lemmata-test-")
     make_sample.build(d)
     return d
 
@@ -104,7 +104,7 @@ class TestGolden(SampleCase):
         for fd in self.eng.findings()["findings"]:
             for w in BANNED:
                 self.assertNotIn(w, (fd["message"] + fd["title"]).lower())
-        src = (APP / "src/rmap/engine/checks.py").read_text(encoding="utf-8").lower()
+        src = (APP / "src/lemmata/engine/checks.py").read_text(encoding="utf-8").lower()
         for w in BANNED:
             self.assertNotIn(w, src)
 
@@ -269,9 +269,9 @@ class TestMutations(unittest.TestCase):
         for r in ("paper", "code"):
             out = subprocess.run(["git", "-C", str(Path(self.dir) / r), "status", "--porcelain"], capture_output=True, text=True).stdout
             self.assertEqual(out, "")
-        self.assertEqual((Path(self.dir) / ".rmap" / ".gitignore").read_text(), "*\n")
+        self.assertEqual((Path(self.dir) / ".lemmata" / ".gitignore").read_text(), "*\n")
         for name in ("graph", "events", "findings", "alarms", "checkpoints", "project"):
-            self.assertTrue((Path(self.dir) / ".rmap" / (name + ".json")).is_file(), name)
+            self.assertTrue((Path(self.dir) / ".lemmata" / (name + ".json")).is_file(), name)
 
     def test_export_bundle(self):
         b = self.eng.export_bundle()

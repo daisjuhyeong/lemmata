@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rmap"
+name = "lemmata"
 version = "0.1.0"
-description = "Research Map: a researcher's guide that tracks paper, code and runs as a dependency graph (localhost demo)."
+description = "Lemmata: a researcher's guide that tracks paper, code and runs as a dependency graph (localhost demo)."
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-rmap = "rmap.cli:main"
+lemmata = "lemmata.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rmap"]
+packages = ["src/lemmata"]

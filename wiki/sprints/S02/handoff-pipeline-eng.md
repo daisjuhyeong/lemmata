@@ -14,17 +14,17 @@ last_reviewed: 2026-11-04
 # Handoff: S02-01 engine, sample generator, tests (pipeline-eng)
 
 ## What changed
-- `app/src/rmap/engine/`: `api.py` (facade, data-model §13 exactly), `errors.py`, `manifest.py`, `store.py`, `tree.py`, `classify.py`, `latex.py`, `bib.py`, `code.py`, `graph.py`, `history.py`, `alarms.py`, `analyze.py`, `checks.py`, `refs.py`, `triage.py`. Stdlib plus the `git` binary only; about 3,500 lines.
-- `app/samples/make_sample.py`: deterministic two-repo sample (paper P1-P3, code K1-K5), fixed identity/dates, isolated git config, tags `cp1`, writes `.rmap/project.json` (with `seed_checkpoint`), `.rmap/cache/refs.json` and a `.rmap-sample` marker. Writes only inside its target dir.
+- `app/src/lemmata/engine/`: `api.py` (facade, data-model §13 exactly), `errors.py`, `manifest.py`, `store.py`, `tree.py`, `classify.py`, `latex.py`, `bib.py`, `code.py`, `graph.py`, `history.py`, `alarms.py`, `analyze.py`, `checks.py`, `refs.py`, `triage.py`. Stdlib plus the `git` binary only; about 3,500 lines.
+- `app/samples/make_sample.py`: deterministic two-repo sample (paper P1-P3, code K1-K5), fixed identity/dates, isolated git config, tags `cp1`, writes `.lemmata/project.json` (with `seed_checkpoint`), `.lemmata/cache/refs.json` and a `.lemmata-sample` marker. Writes only inside its target dir.
 - `app/tests/test_engine.py`: 23 tests (golden set, evidence-vs-source lines, approvals, checkpoints, triage persistence + outdated, hash/revert, determinism across two builds, socket-blocked full pipeline, code-only mode, wording scan, real-repo smoke).
 - Did not touch: `pyproject.toml`, `__init__.py`, `cli.py`, `server.py`, `web/`, `tests/fixtures/`, `wiki/index.md`, `wiki/log.md`. No git commands run in the repo.
 
 ## How to run
 ```
-python3 app/samples/make_sample.py /tmp/rmap-sample
-PYTHONPATH=app/src python3 -m rmap scan /tmp/rmap-sample      # web-eng CLI
+python3 app/samples/make_sample.py /tmp/lemmata-sample
+PYTHONPATH=app/src python3 -m lemmata scan /tmp/lemmata-sample      # web-eng CLI
 PYTHONPATH=app/src python3 -m unittest discover -s app/tests -p 'test_engine*.py'   # 23 tests, about 4 s
-PYTHONPATH=app/src python3 -c "from rmap.engine.api import Engine; e=Engine('/tmp/rmap-sample'); e.scan(); print(e.alarms())"
+PYTHONPATH=app/src python3 -c "from lemmata.engine.api import Engine; e=Engine('/tmp/lemmata-sample'); e.scan(); print(e.alarms())"
 ```
 
 ## Golden set: expected vs actual (fresh sample, all pass)
@@ -77,4 +77,4 @@ Line numbers are generated from the frozen files; QA should record them from the
 - Should `no-op` stay in the no-change phrase list given its hit rate on the real repo?
 
 ## Log line (for lead)
-`2026-11-04 | pipeline-eng | build | app/src/rmap/engine/*, app/samples/make_sample.py, app/tests/test_engine.py, wiki/sprints/S02/handoff-pipeline-eng.md | S02-01 engine + sample + tests; golden set F01-F10, A1/A2 pass; real-repo scan 0.57 s; --online untested`
+`2026-11-04 | pipeline-eng | build | app/src/lemmata/engine/*, app/samples/make_sample.py, app/tests/test_engine.py, wiki/sprints/S02/handoff-pipeline-eng.md | S02-01 engine + sample + tests; golden set F01-F10, A1/A2 pass; real-repo scan 0.57 s; --online untested`

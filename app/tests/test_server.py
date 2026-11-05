@@ -8,8 +8,8 @@ import re
 import threading
 import unittest
 
-from rmap.fixture_engine import FixtureEngine
-from rmap.server import bind
+from lemmata.fixture_engine import FixtureEngine
+from lemmata.server import bind
 
 BANNED = re.compile(r"\b(wrong|fake|fabricated|mistake|error by|cheat)\b", re.I)
 
@@ -99,9 +99,9 @@ class ServerTest(unittest.TestCase):
         s, ct, out = self.req("GET", "/api/export")
         self.assertEqual(s, 200)
         html = out.decode()
-        self.assertIn('id="rmap-snapshot"', html)
+        self.assertIn('id="lemmata-snapshot"', html)
         self.assertNotRegex(html, r'<script[^>]+src=|<link[^>]+href="(?!data:)')
-        m = re.search(r'<script type="application/json" id="rmap-snapshot">(.*?)</script>', html, re.S)
+        m = re.search(r'<script type="application/json" id="lemmata-snapshot">(.*?)</script>', html, re.S)
         snap = json.loads(m.group(1).replace("<\\/", "</"))
         for k in ("project", "graph", "events", "findings", "alarms", "checkpoints", "triage", "exported_at"):
             self.assertIn(k, snap)
@@ -113,7 +113,7 @@ class ServerTest(unittest.TestCase):
 
     def test_ui_wording(self):
         from pathlib import Path
-        web = Path(__file__).resolve().parents[1] / "src" / "rmap" / "web"
+        web = Path(__file__).resolve().parents[1] / "src" / "lemmata" / "web"
         for f in ("app.js", "index.html", "app.css"):
             self.assertIsNone(BANNED.search((web / f).read_text(encoding="utf-8")), f)
 

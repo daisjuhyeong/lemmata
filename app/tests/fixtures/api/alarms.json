@@ -1,5 +1,5 @@
 {
- "schema": "rmap.alarms/1",
+ "schema": "lemmata.alarms/1",
  "computed_at": "2026-11-04T15:00:00+09:00",
  "checkpoint": {
   "id": "cp1",

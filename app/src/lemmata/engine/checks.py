@@ -202,4 +202,4 @@ def run(G, trees):
     for c, title, _ in CHECKS:
         out_checks.append({"check": c, "title": title, "status": status[c],
                            "count": sum(1 for f in findings if f["check"] == c), "note": notes[c]})
-    return {"schema": "rmap.findings/1", "checks": out_checks, "findings": findings}, warnings
+    return {"schema": "lemmata.findings/1", "checks": out_checks, "findings": findings}, warnings

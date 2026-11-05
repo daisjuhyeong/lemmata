@@ -6,7 +6,7 @@ sources: ["../../product/demo-spec.md", "founder decision, 1st presentation, 202
 last_reviewed: 2026-11-04
 ---
 # Task: S02-02 Server and UI
-- Goal: Build `app/src/rmap/server.py` (stdlib `http.server`, JSON API over the engine) and `web/` (static HTML/JS/CSS, no npm build, no CDN) that shows the interactive graph, alarms, analyzer, triage, link approval, findings and HTML export.
+- Goal: Build `app/src/lemmata/server.py` (stdlib `http.server`, JSON API over the engine) and `web/` (static HTML/JS/CSS, no npm build, no CDN) that shows the interactive graph, alarms, analyzer, triage, link approval, findings and HTML export.
 - Inputs: [demo-spec](../../product/demo-spec.md); engine API schema from S02-01 (agree in the first day; until then code against the stories and a fixture JSON).
 - Acceptance criteria:
   1. Server starts on 8765 or next free port, prints the URL, opens the browser unless `--no-open` (US-01.1, .2, .4). Works fully offline; all assets vendored or hand-written (US-01.3).

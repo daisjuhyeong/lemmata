@@ -1,5 +1,5 @@
 {
- "schema": "rmap.findings/1",
+ "schema": "lemmata.findings/1",
  "checks": [
   {
    "check": "reference_unmatched",

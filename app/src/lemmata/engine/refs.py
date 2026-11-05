@@ -5,7 +5,7 @@ import re
 import urllib.parse
 import urllib.request
 
-SCHEMA = "rmap.refs/1"
+SCHEMA = "lemmata.refs/1"
 
 
 def norm_title(t):
@@ -46,7 +46,7 @@ def lookup_state(cache, entry):
 
 # ---- online (opt-in; NOT exercised by the offline tests / demo) ----------------------------------
 def _get(url, timeout=10):
-    req = urllib.request.Request(url, headers={"User-Agent": "rmap/0.1 (reference check; local tool)"})
+    req = urllib.request.Request(url, headers={"User-Agent": "lemmata/0.1 (reference check; local tool)"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 

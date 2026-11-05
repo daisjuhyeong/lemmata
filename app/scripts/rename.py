@@ -2,9 +2,9 @@
 """Rename the product in one step.
 
 The current names live in app/branding.json:
-    {"slug": "rmap", "display": "Research Map"}
+    {"slug": "lemmata", "display": "Lemmata"}
 
-slug    = package, CLI command and hub folder (.rmap/), lowercase
+slug    = package, CLI command and hub folder (.lemmata/), lowercase
 display = the name shown in the UI and docs
 
 Usage (from the repo root):
@@ -60,7 +60,7 @@ def main() -> int:
         print("Nothing to do: names are unchanged.")
         return 0
 
-    # Word-bounded so that e.g. "rmap" inside another word is left alone.
+    # Word-bounded so that e.g. "lemmata" inside another word is left alone.
     slug_re = re.compile(rf"(?<![A-Za-z0-9]){re.escape(old_slug)}(?![A-Za-z0-9])")
     changed = 0
     for p in text_files():

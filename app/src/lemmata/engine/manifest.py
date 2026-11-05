@@ -25,7 +25,7 @@ def load_or_create(root, hub):
     man = hub.read_json("project.json", None)
     if man is None:
         role = detect_role(root)
-        man = {"schema": "rmap.project/1", "name": Path(root).name or "project",
+        man = {"schema": "lemmata.project/1", "name": Path(root).name or "project",
                "repos": [{"id": role, "role": role, "path": "."}]}
         hub.write_json("project.json", man)
     return man

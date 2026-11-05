@@ -1,10 +1,10 @@
-/* Research Map UI. Plain JS, no build step. Talks to the JSON API of data-model.md section 12,
+/* Lemmata UI. Plain JS, no build step. Talks to the JSON API of data-model.md section 12,
    or reads an embedded snapshot (exported report) and becomes read-only. */
 'use strict';
-const PRODUCT = 'Research Map';
-const HUB = '.rmap';
+const PRODUCT = 'Lemmata';
+const HUB = '.lemmata';
 const SNAP = (function () {
-  const el = document.getElementById('rmap-snapshot');
+  const el = document.getElementById('lemmata-snapshot');
   if (!el) return null;
   try { return JSON.parse(el.textContent); } catch (e) { return null; }
 })();
@@ -848,7 +848,7 @@ function renderTopbar() {
   const badge = (n, word) => h('span', { class: 'badge' + (n ? '' : ' zero'), 'aria-label': n + ' ' + word }, String(n));
   const cp = S.alarms && S.alarms.checkpoint;
   tb.append(...[
-    h('span', { class: 'brand' }, PRODUCT), h('span', { class: 'wname', title: 'The product name is not final' }, 'working name'),
+    h('span', { class: 'brand' }, PRODUCT), 
     h('button', { class: 'proj', title: 'Project and scan', onclick: () => openPicker() }, 'project: ', h('b', null, S.project.name)),
     h('div', { class: 'tabs', role: 'tablist' }, TABS.map(([id, label, key]) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), title: label + '  ' + key, onclick: () => setTab(id) }, label,
       id === 'alarms' ? badge(c.recheck, 'to recheck') : id === 'checks' ? badge(c.openF, 'open findings') : id === 'links' ? badge(c.prop, 'proposed links') : null))),
@@ -1561,12 +1561,12 @@ function renderLinkPanel() {
 /* ======================================================================
    PICKER / SCAN
    ====================================================================== */
-function recentProjects() { try { return JSON.parse(localStorage.getItem('rmap.recent') || '[]'); } catch (e) { return []; } }
+function recentProjects() { try { return JSON.parse(localStorage.getItem('lemmata.recent') || '[]'); } catch (e) { return []; } }
 function rememberProject() {
   if (!S.project || READONLY) return;
   const rec = recentProjects().filter(r => r.root !== S.project.root);
   rec.unshift({ name: S.project.name, root: S.project.root, at: new Date().toISOString() });
-  try { localStorage.setItem('rmap.recent', JSON.stringify(rec.slice(0, 5))); } catch (e) { }
+  try { localStorage.setItem('lemmata.recent', JSON.stringify(rec.slice(0, 5))); } catch (e) { }
 }
 function openPicker(state) {
   S.showPicker = true;
@@ -1580,9 +1580,9 @@ function openPicker(state) {
     h('div', { class: 'sub' }, PRODUCT + ' reads your paper, code and run logs on this computer. Nothing is uploaded.'),
     h('div', { class: 'cardp' }, h('h3', null, 'Project folder'),
       h('input', { type: 'text', id: 'pk-path', value: root, readonly: true, 'aria-label': 'Project folder', placeholder: '/path/to/your/paper-repo' }),
-      h('div', { class: 'hint' }, 'This session is serving the folder above. A browser cannot browse folders, so to open another one run ', h('code', { class: 'mono' }, 'rmap open /path/to/folder'), ' in a terminal. Paste the folder path that contains your .tex files and code.')),
+      h('div', { class: 'hint' }, 'This session is serving the folder above. A browser cannot browse folders, so to open another one run ', h('code', { class: 'mono' }, 'lemmata open /path/to/folder'), ' in a terminal. Paste the folder path that contains your .tex files and code.')),
     h('div', { class: 'cardp' }, h('h3', null, 'Bundled sample'), h('div', { class: 'muted' }, 'A small ML paper with planted inconsistencies, for trying ' + PRODUCT + '.'),
-      h('div', { class: 'hint' }, 'Start it with ', h('code', { class: 'mono' }, 'rmap demo'), '.')),
+      h('div', { class: 'hint' }, 'Start it with ', h('code', { class: 'mono' }, 'lemmata demo'), '.')),
     h('div', { class: 'cardp' }, h('h3', null, 'Recent projects'), rec.length ? rec.map(r => h('div', null, h('b', null, r.name), ' ', h('span', { class: 'mono muted' }, r.root), h('div', { class: 'hint' }, 'last scanned ' + fmtTime(r.at)))) : h('div', { class: 'muted' }, 'No recent projects.')),
     st.running ? h('div', { class: 'cardp' }, h('div', { 'aria-live': 'polite' }, 'Scanning… all seven steps run together in one pass.'), h('div', { class: 'bar', style: { marginTop: '8px' } }, h('i')),
       h('ol', { class: 'steps' }, ['Reading LaTeX sources', 'Reading references', 'Reading code and result files', 'Reading git history', 'Reading run logs', 'Building the graph', 'Running checks'].map(s => h('li', null, h('span', { class: 'mono' }, '◐ Running'), s)))) : null,

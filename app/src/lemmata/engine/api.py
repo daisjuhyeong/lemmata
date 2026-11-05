@@ -35,7 +35,7 @@ class Engine:
         t0 = time.time()
         self.hub.ensure()
         man = manifestmod.load_or_create(self.root, self.hub)
-        store.check_schema(man, "rmap.project")
+        store.check_schema(man, "lemmata.project")
         repos = manifestmod.resolve(self.root, man)
         trees, infos, hist = {}, {}, {}
         for r in repos:
@@ -69,7 +69,7 @@ class Engine:
             try:
                 cp = historymod.make_checkpoint(repos, infos, trees, G, cache, self.hub, seed.get("id", "cp1"), seed.get("note", ""),
                                                 seed.get("created_at") or scanned_at, seed.get("at"), [])
-                cps = {"schema": "rmap.checkpoints/1", "active": cp["id"], "checkpoints": [cp]}
+                cps = {"schema": "lemmata.checkpoints/1", "active": cp["id"], "checkpoints": [cp]}
                 self.hub.write_json("checkpoints.json", cps)
             except BadRequest as e:
                 warnings.append({"code": "seed_checkpoint_failed", "message": str(e), "evidence": None})
@@ -94,12 +94,12 @@ class Engine:
         events, replay = historymod.build_events(s["repos"], s["infos"], s["hist"], cp, s["G"], now, s["cache"])
         s["events"], s["replay"] = events, replay
         s["alarms"] = alarmsmod.compute(cp, s["G"].nodes, s["G"].edge_list(), events, replay, now)
-        self.hub.write_json("events.json", {"schema": "rmap.events/1", "events": events})
+        self.hub.write_json("events.json", {"schema": "lemmata.events/1", "events": events})
         self.hub.write_json("alarms.json", s["alarms"])
 
     def _graph_doc(self):
         s = self._s
-        return {"schema": "rmap.graph/1", "scanned_at": s["scanned_at"], "nodes": s["G"].node_list(), "edges": s["G"].edge_list(),
+        return {"schema": "lemmata.graph/1", "scanned_at": s["scanned_at"], "nodes": s["G"].node_list(), "edges": s["G"].edge_list(),
                 "warnings": s["warnings"]}
 
     def _ensure(self):
@@ -113,7 +113,7 @@ class Engine:
         cp = self._active_cp()
         edges = s["G"].edges.values()
         return {
-            "schema": "rmap.project/1", "version": VERSION, "name": s["man"].get("name", self.root.name), "root": str(self.root),
+            "schema": "lemmata.project/1", "version": VERSION, "name": s["man"].get("name", self.root.name), "root": str(self.root),
             "repos": [{"id": i["id"], "role": i["role"], "path": i["path"], "abs_path": i["abs_path"], "vcs": i["vcs"],
                        "head": i["head"], "branch": i["branch"], "dirty": i["dirty"]} for i in (s["infos"][r["id"]] for r in s["repos"])],
             "scanned_at": s["scanned_at"],
@@ -131,7 +131,7 @@ class Engine:
     def events(self, after_checkpoint=False):
         s = self._ensure()
         evs = [e for e in s["events"] if e["after_checkpoint"]] if after_checkpoint else s["events"]
-        return {"schema": "rmap.events/1", "events": evs}
+        return {"schema": "lemmata.events/1", "events": evs}
 
     def findings(self):
         return self._ensure()["findings"]
@@ -175,7 +175,7 @@ class Engine:
         now = now_iso()
         cp = historymod.make_checkpoint(s["repos"], s["infos"], s["trees"], s["G"], s["cache"], self.hub, cp_id, note,
                                         created_at or now, at, existing)
-        cps = {"schema": "rmap.checkpoints/1", "active": cp["id"], "checkpoints": existing + [cp]}
+        cps = {"schema": "lemmata.checkpoints/1", "active": cp["id"], "checkpoints": existing + [cp]}
         s["cps"] = cps
         self.hub.write_json("checkpoints.json", cps)
         self._recompute(now)
@@ -183,7 +183,7 @@ class Engine:
 
     def triage(self):
         s = self._ensure()
-        out = {"schema": "rmap.triage/1", "entries": {}, "links": s["tri"]["links"]}
+        out = {"schema": "lemmata.triage/1", "entries": {}, "links": s["tri"]["links"]}
         for key, ent in s["tri"]["entries"].items():
             out["entries"][key] = triagemod.with_effective(ent, self._target_hash(ent["target_type"], ent["target_id"]))
         return out

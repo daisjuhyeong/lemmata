@@ -71,7 +71,7 @@ def status_entries(path):
         xy, fp = e[:2], e[3:]
         if xy[0] in "RC":
             i += 1  # skip the "from" path
-        if fp.startswith(".rmap/"):
+        if fp.startswith(".lemmata/"):
             continue
         if xy == "??" or "A" in xy:
             st = "A"
@@ -107,7 +107,7 @@ class WorkTree:
                         names.add(rel)
             out = []
             for n in names:
-                if n.startswith(".rmap/"):
+                if n.startswith(".lemmata/"):
                     continue
                 fp = os.path.join(self.root, n)
                 if os.path.isfile(fp) and not os.path.islink(fp):

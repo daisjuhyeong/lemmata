@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from rmap import __version__
+from lemmata import __version__
 
 WEB = Path(__file__).resolve().parent / "web"
 MAX_BODY = 64 * 1024
@@ -59,7 +59,7 @@ class App:
         if not rel or rel.startswith("/") or "\x00" in rel:
             raise ApiError(400, "bad_request", "bad path")
         p = (root / rel).resolve()
-        # hidden files and folders (.git, .rmap, .env, ...) are never served; compare case-insensitively for macOS
+        # hidden files and folders (.git, .lemmata, .env, ...) are never served; compare case-insensitively for macOS
         if not p.is_relative_to(root) or any(part.startswith(".") for part in p.relative_to(root).parts) or not p.is_file():
             raise ApiError(404, "not_found", "file not found")
         return p
@@ -159,14 +159,14 @@ class App:
         html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % css.replace("</style", "<\\/style"))
         html = html.replace('<script src="vendor/cytoscape.min.js"></script>', "<script>\n%s\n</script>" % esc_script(vend))
         html = html.replace('<script src="app.js"></script>',
-                            '<script type="application/json" id="rmap-snapshot">%s</script>\n<script>\n%s\n</script>' % (data, esc_script(js)))
+                            '<script type="application/json" id="lemmata-snapshot">%s</script>\n<script>\n%s\n</script>' % (data, esc_script(js)))
         return html, snap["project"].get("name", "project")
 
 
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "rmap"
+        server_version = "lemmata"
 
         def log_message(self, fmt, *args):  # quiet by default
             pass

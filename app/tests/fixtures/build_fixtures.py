@@ -316,7 +316,7 @@ def ordkey(n):
 
 
 nodes.sort(key=ordkey)
-GRAPH = {"schema": "rmap.graph/1", "scanned_at": "2026-11-04T15:00:00+09:00", "nodes": nodes, "edges": edges}
+GRAPH = {"schema": "lemmata.graph/1", "scanned_at": "2026-11-04T15:00:00+09:00", "nodes": nodes, "edges": edges}
 
 # ---- events
 def commit(repo, sha12, t, subj, files, after, changed=None, flags=None, cp=False):
@@ -338,7 +338,7 @@ events = [
     commit("code", "3c8d1e4f7a2b", "2026-10-05T11:00:00+09:00", "tmp: edit comment in eval.py", [("eval.py", "M")], True, []),
     commit("code", "4d9e2f5a8b3c", "2026-10-05T11:30:00+09:00", "revert eval.py", [("eval.py", "M")], True, []),
 ]
-EVENTS = {"schema": "rmap.events/1", "events": events}
+EVENTS = {"schema": "lemmata.events/1", "events": events}
 
 # ---- findings
 def fnd(id, check, sev, title, msg, nodes_, evid, details):
@@ -388,12 +388,12 @@ TITLES = {"reference_unmatched": "Reference could not be matched", "main_appendi
           "untraced_number": "Number not traced to a result file", "figure_without_provenance": "Figure without provenance"}
 checks = [{"check": c, "title": TITLES[c], "status": "ran", "count": sum(1 for f in F if f["check"] == c),
            "note": "offline cache: 3 matched, 1 could not be matched, 0 not checked" if c == "reference_unmatched" else ""} for c in ORDER]
-FINDINGS = {"schema": "rmap.findings/1", "checks": checks, "findings": F}
+FINDINGS = {"schema": "lemmata.findings/1", "checks": checks, "findings": F}
 
 # ---- alarms (state 0)
 cfg = "file:code/configs/default.yaml"
 ALARMS = {
-    "schema": "rmap.alarms/1", "computed_at": "2026-11-04T15:00:00+09:00",
+    "schema": "lemmata.alarms/1", "computed_at": "2026-11-04T15:00:00+09:00",
     "checkpoint": {"id": "cp1", "created_at": "2026-10-01T18:00:00+09:00", "note": "CP1: draft v2 validated"},
     "excluded_repos": [],
     "groups": [
@@ -421,7 +421,7 @@ CP = {"id": "cp1", "created_at": "2026-10-01T18:00:00+09:00", "note": "CP1: draf
       "node_count": len(nodes), "active": True}
 CHECKPOINTS = {"active": "cp1", "checkpoints": [CP]}
 PROJECT = {
-    "schema": "rmap.project/1", "version": "0.1.0", "name": "Sample: tiny transformer", "root": str(FILES),
+    "schema": "lemmata.project/1", "version": "0.1.0", "name": "Sample: tiny transformer", "root": str(FILES),
     "repos": [
         {"id": "paper", "role": "paper", "path": "paper", "abs_path": str(FILES / "paper"), "vcs": "git", "head": "2b7e5d1c" * 5, "branch": "main", "dirty": False},
         {"id": "code", "role": "code", "path": "code", "abs_path": str(FILES / "code"), "vcs": "git", "head": "4d9e2f5a" * 5, "branch": "main", "dirty": False}],
@@ -431,7 +431,7 @@ PROJECT = {
     "capabilities": {"paper": True, "online_lookup": False, "ask_ai": False},
     "warnings": [],
 }
-TRIAGE = {"schema": "rmap.triage/1", "entries": {}, "links": {}}
+TRIAGE = {"schema": "lemmata.triage/1", "entries": {}, "links": {}}
 ANALYZE = {
     "group_id": "ev:commit:code:9f1c2e7a4b3d", "node_id": "tex:tab:main",
     "chain": {"nodes": [cfg, "run:code/train_main", "file:code/results/table2.csv", "tex:tab:main"],

@@ -5,7 +5,7 @@ status: draft
 sources: ["founder brief to designer, 2026-11-04 (task message, S02 localhost demo); palette and fonts fixed by designer role card"]
 last_reviewed: 2026-11-04
 ---
-# Research Map design system (v0.1, desktop >= 1280px)
+# Lemmata design system (v0.1, desktop >= 1280px)
 
 Proposal for Juhyeong's approval. Screens: [demo-screens.md](screens/demo-screens.md).
 Contrast ratios are WCAG relative-luminance values computed by hand against Paper #F6F4EE (L about 0.90); the engineer should re-check with a tool before release.
@@ -131,4 +131,4 @@ Distinguishing low confidence from Recheck: different word, different icon, dash
 
 ## Open design decisions (for Juhyeong)
 1. Layer order. Proposed top-down: Thesis, Question, Section, Reference, Paper item, Result, Code, Run. References as their own band is a simplification of "extra dimension"; alternative is a right-hand lane.
-2. Product name replaces every `Research Map`; wordmark not designed yet.
+2. Product name replaces every `Lemmata`; wordmark not designed yet.

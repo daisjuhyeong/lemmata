@@ -18,14 +18,14 @@ How the localhost demo for the 2nd presentation is built. Decision and scope cut
 
 ## 1. Components
 ```
- Terminal: uv run --project app rmap demo | open <dir> | scan <dir> | checkpoint <dir>
+ Terminal: uv run --project app lemmata demo | open <dir> | scan <dir> | checkpoint <dir>
    │
    ▼
- cli.py ──(demo)──► samples/make_sample.py  ──► ~/rmap-demo/{paper/.git, code/.git, .rmap/project.json, .rmap/cache/refs.json}
+ cli.py ──(demo)──► samples/make_sample.py  ──► ~/lemmata-demo/{paper/.git, code/.git, .lemmata/project.json, .lemmata/cache/refs.json}
    │
    ├──► engine.Engine(project_root).scan()        [pure Python + git binary, no network unless --online]
    │       manifest → trees → nodes → edges/proposals → events/replay → alarms → checks
-   │       └── writes <project>/.rmap/{graph,events,findings,alarms}.json (+ checkpoints, triage on demand)
+   │       └── writes <project>/.lemmata/{graph,events,findings,alarms}.json (+ checkpoints, triage on demand)
    │
    └──► server.py  ThreadingHTTPServer @127.0.0.1:8765 (next free if busy)
             ├── /            → web/index.html, app.js, app.css, vendor/cytoscape.min.js
@@ -37,11 +37,11 @@ How the localhost demo for the 2nd presentation is built. Decision and scope cut
 ## 2. Package layout and owners
 ```
 app/
-  pyproject.toml            [lead/web-eng] name=rmap, requires-python>=3.10, dependencies=[], script rmap=rmap.cli:main, build backend hatchling
+  pyproject.toml            [lead/web-eng] name=lemmata, requires-python>=3.10, dependencies=[], script lemmata=lemmata.cli:main, build backend hatchling
   README.md                 [web-eng] how to run (one command + zero-install fallback)
-  src/rmap/
+  src/lemmata/
     __init__.py             __version__ = "0.1.0"
-    __main__.py             python -m rmap → cli.main()
+    __main__.py             python -m lemmata → cli.main()
     cli.py                  [web-eng] subcommands demo / open / scan / checkpoint; port and browser handling
     server.py               [web-eng] routing, guards, static files, export, error mapping
     web/                    [web-eng] index.html, app.js, app.css, vendor/{cytoscape.min.js, LICENSE, README.md}
@@ -67,18 +67,18 @@ app/
     fixtures/api/*.json     example payloads copied from data-model.md (web-eng starts here)
 ```
 Rules:
-- `server.py` and `cli.py` import only `rmap.engine.api` and `rmap.engine.errors`. The engine never imports the server.
+- `server.py` and `cli.py` import only `lemmata.engine.api` and `lemmata.engine.errors`. The engine never imports the server.
 - Third-party code is limited to the vendored front-end library. `web/vendor/README.md` records the version, source URL and licence.
 
 ## 3. Runtime flow
-### 3.1 `rmap demo [--dir ~/rmap-demo] [--port 8765] [--no-open] [--keep] [--online]`
-1. Unless `--keep`, delete `--dir` **only if it contains the marker file `.rmap-sample`** (otherwise refuse), then run `make_sample.py <dir>` with `sys.executable`. It is located at `<package>/../../samples/make_sample.py`; if missing, print "demo needs a source checkout".
-2. `make_sample.py` creates two git repos, `paper/` (P1–P3) and `code/` (K1–K5), with fixed identity, fixed dates and an isolated git config (`GIT_CONFIG_GLOBAL` → empty file, `GIT_CONFIG_NOSYSTEM=1`, `commit.gpgsign=false`), so the SHAs are identical on every run. It tags `cp1` at P2/K2 and writes `.rmap/project.json` (with `seed_checkpoint`) and `.rmap/cache/refs.json`.
+### 3.1 `lemmata demo [--dir ~/lemmata-demo] [--port 8765] [--no-open] [--keep] [--online]`
+1. Unless `--keep`, delete `--dir` **only if it contains the marker file `.lemmata-sample`** (otherwise refuse), then run `make_sample.py <dir>` with `sys.executable`. It is located at `<package>/../../samples/make_sample.py`; if missing, print "demo needs a source checkout".
+2. `make_sample.py` creates two git repos, `paper/` (P1–P3) and `code/` (K1–K5), with fixed identity, fixed dates and an isolated git config (`GIT_CONFIG_GLOBAL` → empty file, `GIT_CONFIG_NOSYSTEM=1`, `commit.gpgsign=false`), so the SHAs are identical on every run. It tags `cp1` at P2/K2 and writes `.lemmata/project.json` (with `seed_checkpoint`) and `.lemmata/cache/refs.json`.
 3. `Engine(dir).scan()`: no `checkpoints.json` exists, so CP1 is seeded from the tags with its fixed `created_at`, and the full pipeline runs (3.3).
-4. Start the server, print `rmap: serving <name> at http://127.0.0.1:<port>  (Ctrl-C to stop)`, and open the browser unless `--no-open`.
+4. Start the server, print `lemmata: serving <name> at http://127.0.0.1:<port>  (Ctrl-C to stop)`, and open the browser unless `--no-open`.
 
-### 3.2 `rmap open <project_dir> [--paper DIR] [--code DIR] [--port] [--no-open] [--online]`
-If `.rmap/project.json` is missing, create it. With no flags, `<project_dir>` is a single repo `{"id":"code"|"paper","path":"."}`, with the role auto-detected (paper if it contains a `.tex` with `\documentclass`). `--paper` and `--code` add or replace repos. Then scan and serve. `rmap scan <dir>` scans and prints a one-line summary (QA and CI). `rmap checkpoint <dir> [--at repo=rev …] [--note TEXT]` creates a checkpoint.
+### 3.2 `lemmata open <project_dir> [--paper DIR] [--code DIR] [--port] [--no-open] [--online]`
+If `.lemmata/project.json` is missing, create it. With no flags, `<project_dir>` is a single repo `{"id":"code"|"paper","path":"."}`, with the role auto-detected (paper if it contains a `.tex` with `\documentclass`). `--paper` and `--code` add or replace repos. Then scan and serve. `lemmata scan <dir>` scans and prints a one-line summary (QA and CI). `lemmata checkpoint <dir> [--at repo=rev …] [--note TEXT]` creates a checkpoint.
 
 ### 3.3 Scan pipeline (Engine.scan)
 1. **Manifest** → repo list. For each repo, build a `WorkTree`; check git (`git rev-parse`), HEAD, branch and dirty state.
@@ -120,11 +120,11 @@ One `Tree` abstraction serves the working tree, a past commit (`--at`, replay) a
 
 ## 5. Security and privacy
 - Binds 127.0.0.1 only. Host and Origin checks plus a JSON content type on POST (blocks DNS-rebinding and cross-site POSTs from other tabs). Static paths are confined to `web/`. Request bodies are capped at 64 KB.
-- File writes happen only under `<project>/.rmap/` (engine) or the sample target dir (`make_sample.py`). The tool never runs git commands that write (no commit, checkout or config changes in the user's repos); read-only git plumbing only.
+- File writes happen only under `<project>/.lemmata/` (engine) or the sample target dir (`make_sample.py`). The tool never runs git commands that write (no commit, checkout or config changes in the user's repos); read-only git plumbing only.
 - No network except opt-in `--online` (bib titles/DOIs → OpenAlex, Crossref). A test blocks sockets and runs the full pipeline (S02-01 AC8). No model or API calls anywhere; the runtime never touches anyone's Claude plan.
 
 ## 6. Performance targets (QA measures)
-- Sample: `rmap demo` reaches a served page in < 5 s on a Mac (US-01.1); a rescan takes < 2 s.
+- Sample: `lemmata demo` reaches a served page in < 5 s on a Mac (US-01.1); a rescan takes < 2 s.
 - `alarm-analyzer-eval` (~240 tracked files, 114 commits): scan < 10 s. Replay covers only commits after the checkpoint; diff-tree blob ids avoid reading file contents.
 - UI stays interactive with ~300 nodes and ~500 edges.
 
@@ -139,7 +139,7 @@ One `Tree` abstraction serves the working tree, a past commit (`--at`, replay) a
 Hand-off point: the facade signatures in data-model §13. Neither side changes a shape without a CTO edit to data-model.md and a note to QA (S02-03).
 
 ## 8. Demo runbook (for the presenter; PM owns the script)
-- Sample: `uv run --project app rmap demo` (fallback: `PYTHONPATH=app/src python3 -m rmap demo`). Fresh state on every run; `--keep` preserves triage. Optional live moment: edit `~/rmap-demo/code/configs/default.yaml`, then click Rescan to see a "worktree" alarm group.
-- Real repo, code-only: `uv run --project app rmap open /path/to/alarm-analyzer-eval`, then optionally `rmap checkpoint /path/to/alarm-analyzer-eval --at code=<rev> --note "..."`. HEAD `baa9f7d` is the code-only release tree, so a checkpoint from 9/17 shows mass removals. For the prototype-comparable view, Juhyeong checks out `308dab9` into a separate folder himself (the tool does not run writing git commands).
-- Paper layer later: unzip the Overleaf project, then `rmap open <code repo> --paper <unzipped dir>`. Run once with `--online` before the talk to fill the reference cache.
+- Sample: `uv run --project app lemmata demo` (fallback: `PYTHONPATH=app/src python3 -m lemmata demo`). Fresh state on every run; `--keep` preserves triage. Optional live moment: edit `~/lemmata-demo/code/configs/default.yaml`, then click Rescan to see a "worktree" alarm group.
+- Real repo, code-only: `uv run --project app lemmata open /path/to/alarm-analyzer-eval`, then optionally `lemmata checkpoint /path/to/alarm-analyzer-eval --at code=<rev> --note "..."`. HEAD `baa9f7d` is the code-only release tree, so a checkpoint from 9/17 shows mass removals. For the prototype-comparable view, Juhyeong checks out `308dab9` into a separate folder himself (the tool does not run writing git commands).
+- Paper layer later: unzip the Overleaf project, then `lemmata open <code repo> --paper <unzipped dir>`. Run once with `--online` before the talk to fill the reference cache.
 - Prerequisites: Python ≥ 3.10 and git on the Mac; run once with network so `uv` can fetch Python and the build backend; after that, everything runs offline.

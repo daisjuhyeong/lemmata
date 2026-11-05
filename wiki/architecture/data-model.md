@@ -13,12 +13,12 @@ last_reviewed: 2026-11-04
 ---
 # Data model and API contract (S02 localhost demo)
 
-**This is the contract two engineers build against in parallel.** pipeline-eng produces these shapes (engine, hub files); web-eng consumes them (server, UI). Change it only through the CTO, and tell QA, because `app/tests/golden.json` depends on ids. Placeholders: package/CLI `rmap`, schema prefix `rmap.` (the lead renames both). Architecture: [demo-architecture](demo-architecture.md). Decision: [ADR-002](../decisions/ADR-002-localhost-demo.md).
+**This is the contract two engineers build against in parallel.** pipeline-eng produces these shapes (engine, hub files); web-eng consumes them (server, UI). Change it only through the CTO, and tell QA, because `app/tests/golden.json` depends on ids. Placeholders: package/CLI `lemmata`, schema prefix `lemmata.` (the lead renames both). Architecture: [demo-architecture](demo-architecture.md). Decision: [ADR-002](../decisions/ADR-002-localhost-demo.md).
 
 Example values below use the synthetic sample. Commit SHAs and hashes are illustrative.
 
 ## 0. Conventions (apply everywhere)
-- JSON is UTF-8, written with `ensure_ascii=False` and `indent=1`. Readers ignore unknown fields. Every hub file has a `"schema": "rmap.<thing>/1"` field; a reader refuses an unknown major version.
+- JSON is UTF-8, written with `ensure_ascii=False` and `indent=1`. Readers ignore unknown fields. Every hub file has a `"schema": "lemmata.<thing>/1"` field; a reader refuses an unknown major version.
 - **Times**: ISO 8601 with offset, seconds precision (`2026-10-02T10:00:00+09:00`). Commit times use the committer date (`%cI`).
 - **Paths**: repo-relative POSIX (`configs/default.yaml`), never absolute, except `abs_path` fields in `/api/project`.
 - **Repo ids**: `^[a-z][a-z0-9_-]{0,15}$`, e.g. `paper` and `code`.
@@ -34,11 +34,11 @@ Example values below use the synthetic sample. Commit SHAs and hashes are illust
 ```
 `text` is the exact source line, right-stripped and truncated to 300 chars. `role` is a short string listed per check/edge kind. `page` is always `null` in the demo (no PDF).
 
-## 1. Hub folder `<project_root>/.rmap/`
+## 1. Hub folder `<project_root>/.lemmata/`
 | File | Kind | Written by | Notes |
 |---|---|---|---|
 | `.gitignore` | fixed | engine | content `*\n` |
-| `project.json` | user/manifest | `rmap open`, `make_sample.py` | §2 |
+| `project.json` | user/manifest | `lemmata open`, `make_sample.py` | §2 |
 | `graph.json` | derived | scan | §3, §4 (edge `status` already merged with link decisions) |
 | `events.json` | derived | scan | §5 |
 | `findings.json` | derived | scan | §6 |
@@ -48,12 +48,12 @@ Example values below use the synthetic sample. Commit SHAs and hashes are illust
 | `cache/refs.json` | cache | `make_sample.py`, `--online` scan | §6.2 |
 | `cache/blobs/<hex>` | cache | checkpoint | raw bytes of text files ≤ 1 MB at checkpoint time, named by blob hex; used for diffs |
 
-Writes are atomic (`<file>.tmp` then `os.replace`). Scans skip `.rmap/` and never write outside it. Deleting `checkpoints.json` and `triage.json` resets user state; the next scan re-seeds the checkpoint from `seed_checkpoint` if present.
+Writes are atomic (`<file>.tmp` then `os.replace`). Scans skip `.lemmata/` and never write outside it. Deleting `checkpoints.json` and `triage.json` resets user state; the next scan re-seeds the checkpoint from `seed_checkpoint` if present.
 
 ## 2. Project manifest `project.json`
 ```json
 {
- "schema": "rmap.project/1",
+ "schema": "lemmata.project/1",
  "name": "Sample: tiny transformer",
  "repos": [
   {"id": "paper", "role": "paper", "path": "paper", "main_tex": "main.tex", "exclude": []},
@@ -66,7 +66,7 @@ Writes are atomic (`<file>.tmp` then `os.replace`). Scans skip `.rmap/` and neve
 - `main_tex` is optional. Auto-detection: the `.tex` file with both `\documentclass` and `\begin{document}`; prefer `main.tex`, else the first alphabetically.
 - `exclude`: optional list of glob patterns (`fnmatch`, repo-relative), e.g. `["models/**"]`.
 - `seed_checkpoint` is optional (the sample uses it). `at` values are any git rev (tags `cp1` here). It is used once, only when `checkpoints.json` does not exist.
-- Code-only real repo: `{"schema":"rmap.project/1","name":"alarm-analyzer-eval","repos":[{"id":"code","role":"code","path":"."}]}`. Adding the paper later appends `{"id":"paper","role":"paper","path":"/Users/.../www27-paper"}`.
+- Code-only real repo: `{"schema":"lemmata.project/1","name":"alarm-analyzer-eval","repos":[{"id":"code","role":"code","path":"."}]}`. Adding the paper later appends `{"id":"paper","role":"paper","path":"/Users/.../www27-paper"}`.
 
 ## 3. Nodes
 ### 3.1 Shape
@@ -105,7 +105,7 @@ Writes are atomic (`<file>.tmp` then `os.replace`). Scans skip `.rmap/` and neve
 | `reference` | `null` | `ref:<bibkey>` | `.bib` entries | `bib_key`, `title`, `year`, `doi`, `lookup` (`matched`, `not_found`, `unchecked`, `error`) |
 
 - **Output dir**: any path segment in `results, result, outputs, output, out, figures, figs, plots, tables, logs`.
-- **Files that are not nodes**: `.tex .bib .cls .sty .bst` (the paper is represented by its units); hidden paths; `.rmap/`; files > 50 MB; `runs/*.json` run records (they become `run` nodes); anything matched by `exclude`; extensions not listed above. For git repos the file set is `git ls-files` plus untracked, non-ignored files (`--others --exclude-standard`). Non-git repos are walked.
+- **Files that are not nodes**: `.tex .bib .cls .sty .bst` (the paper is represented by its units); hidden paths; `.lemmata/`; files > 50 MB; `runs/*.json` run records (they become `run` nodes); anything matched by `exclude`; extensions not listed above. For git repos the file set is `git ls-files` plus untracked, non-ignored files (`--others --exclude-standard`). Non-git repos are walked.
 - **Slug**: lowercase, non-alphanumerics collapsed to `-`, trimmed (`"Experimental Setup"` → `experimental-setup`). `<n>` in unlabelled float ids is the 1-based ordinal of that environment kind within its file.
 - **Display `name`**: `Thesis`, `RQ1`, `§4 Experimental setup`, `App. B Hyperparameters`, `Fig. 1`, `Table 2`, `Eq. 3`, `Fig. 5 (README)`, the repo-relative path for files, `run train_main`, `[vaswani2017attention]`.
 - **Numbering** (approximate): `\section` counter 1..n in the main part and A, B, … after `\appendix`. `figure`/`figure*` share one counter, likewise `table`/`table*`, with no reset at `\appendix`.
@@ -156,7 +156,7 @@ Direction is fixed: **`from` depends on `to`**. Reading top-down follows edges `
 ## 5. Events (`events.json`)
 ```json
 {
- "schema": "rmap.events/1",
+ "schema": "lemmata.events/1",
  "events": [
   {
    "id": "ev:commit:code:9f1c2e7a4b3d",
@@ -186,7 +186,7 @@ Direction is fixed: **`from` depends on `to`**. Reading top-down follows edges `
 ### 6.1 Shape
 ```json
 {
- "schema": "rmap.findings/1",
+ "schema": "lemmata.findings/1",
  "checks": [
   {"check": "reference_unmatched", "title": "Reference could not be matched", "status": "ran", "count": 1, "note": "offline cache: 5 matched, 1 could not be matched, 0 not checked"},
   {"check": "untraced_number", "title": "Number not traced to a result file", "status": "ran", "count": 1, "note": ""}
@@ -228,7 +228,7 @@ Direction is fixed: **`from` depends on `to`**. Reading top-down follows edges `
 
 Rules (the minimum pipeline-eng must implement; anything smarter is out of scope):
 - `reference_unmatched`: the entry's cache record (key = normalised title: lowercase alphanumerics only; DOI lowercased if present) has `status: "not_found"`. Missing record → counted as "not checked", **no finding**. `details.lookup` = the cache record. Message: `Reference could not be matched: "<title>" (<key>) was not found in OpenAlex or Crossref (lookup <date>).`
-- Cache `cache/refs.json`: `{"schema":"rmap.refs/1","entries":{"<norm title or doi:…>":{"status":"matched|not_found|error","source":"openalex|crossref|seed","checked_at":"…","match":{"title":"…","year":2017,"doi":"…","url":"…"}|null}}}`. Online match: difflib ratio of normalised titles ≥ 0.9, and |year difference| ≤ 1 when both years exist. Query OpenAlex first, Crossref second; 10 s timeout; sequential requests.
+- Cache `cache/refs.json`: `{"schema":"lemmata.refs/1","entries":{"<norm title or doi:…>":{"status":"matched|not_found|error","source":"openalex|crossref|seed","checked_at":"…","match":{"title":"…","year":2017,"doi":"…","url":"…"}|null}}}`. Online match: difflib ratio of normalised titles ≥ 0.9, and |year difference| ≤ 1 when both years exist. Query OpenAlex first, Crossref second; 10 s timeout; sequential requests.
 - `main_appendix_mismatch`: canonical names and aliases are `learning_rate` (learning rate, lr), `batch_size` (batch size), `epochs` (epochs), `weight_decay` (weight decay), `dropout` (dropout), `warmup_steps` (warmup steps), `optimizer` (optimizer; values Adam, AdamW, SGD, RMSprop, Adagrad), `seed` (seed). A value is the first number or optimizer word after the alias on the same line (prose or a `&` table row). Normalise `3\times10^{-4}`, `3e-4`, `3.0e-4` and `0.0003` to a float; strings are compared case-insensitively. Main = before `\appendix`, appendix = after. If a name occurs in both parts, compare the first occurrence in each; differ → one finding.
 - `uncited_reference`: a bib key never cited; `\nocite{*}` disables the check (`note`).
 - `unreferenced_float`: a figure or table whose label no `\ref`-family command targets, or a float with no `\label` at all.
@@ -240,7 +240,7 @@ Rules (the minimum pipeline-eng must implement; anything smarter is out of scope
 ## 7. Checkpoints (`checkpoints.json`)
 ```json
 {
- "schema": "rmap.checkpoints/1",
+ "schema": "lemmata.checkpoints/1",
  "active": "cp1",
  "checkpoints": [
   {
@@ -263,7 +263,7 @@ Rules (the minimum pipeline-eng must implement; anything smarter is out of scope
 ## 8. Alarms (`alarms.json`) — normative algorithm
 ```json
 {
- "schema": "rmap.alarms/1",
+ "schema": "lemmata.alarms/1",
  "computed_at": "2026-11-04T15:00:00+09:00",
  "checkpoint": {"id": "cp1", "created_at": "2026-10-01T18:00:00+09:00", "note": "CP1: draft v2 validated"},
  "excluded_repos": [],
@@ -326,7 +326,7 @@ Algorithm (the engine must match this; QA derives the golden set from it):
 ## 10. Triage and link decisions (`triage.json`)
 ```json
 {
- "schema": "rmap.triage/1",
+ "schema": "lemmata.triage/1",
  "entries": {
   "node:tex:tab:main": {
    "target_type": "node", "target_id": "tex:tab:main",
@@ -347,7 +347,7 @@ Algorithm (the engine must match this; QA derives the golden set from it):
 ## 11. Input conventions the scanner recognises
 ### 11.1 Run record `<code repo>/runs/<run_id>.json`
 ```json
-{"schema": "rmap.run/1", "run_id": "train_main", "started_at": "2026-09-30T14:00:00+09:00", "command": "python train.py --config configs/default.yaml",
+{"schema": "lemmata.run/1", "run_id": "train_main", "started_at": "2026-09-30T14:00:00+09:00", "command": "python train.py --config configs/default.yaml",
  "script": "train.py", "inputs": ["configs/default.yaml"], "outputs": ["results/table2.csv", "results/metrics.json"]}
 ```
 Creates node `run:code/train_main`, edges `executes` (→ script), `reads` (→ each input), `produced_by` (each output →), and event `ev:run:code/train_main`. Paths are repo-relative; missing targets are skipped with a scan warning.
@@ -378,14 +378,14 @@ Base `http://127.0.0.1:<port>`. JSON responses use `Content-Type: application/js
 | 2 | GET | `/api/health` | — | `{"ok": true, "version": "0.1.0"}` |
 | 3 | GET | `/api/project` | — | Project status (below) |
 | 4 | POST | `/api/scan` | `{}` | Project status, after a full rescan (uses the server's `--online` setting) |
-| 5 | GET | `/api/graph` | — | `{"schema":"rmap.graph/1","scanned_at":…,"nodes":[Node],"edges":[Edge]}` |
-| 6 | GET | `/api/events` | `after_checkpoint=1` (optional filter) | `{"schema":"rmap.events/1","events":[Event]}` |
-| 7 | GET | `/api/findings` | — | `{"schema":"rmap.findings/1","checks":[…],"findings":[Finding]}` |
+| 5 | GET | `/api/graph` | — | `{"schema":"lemmata.graph/1","scanned_at":…,"nodes":[Node],"edges":[Edge]}` |
+| 6 | GET | `/api/events` | `after_checkpoint=1` (optional filter) | `{"schema":"lemmata.events/1","events":[Event]}` |
+| 7 | GET | `/api/findings` | — | `{"schema":"lemmata.findings/1","checks":[…],"findings":[Finding]}` |
 | 8 | GET | `/api/alarms` | — | Alarms (§8) |
 | 9 | GET | `/api/analyze` | `group=<group id>&node=<node id>` (both required) | Analysis (§9); 404 if the group is unknown or the node is not in that group's changed/downstream lists |
 | 10 | GET | `/api/checkpoints` | — | `{"active":"cp1","checkpoints":[Checkpoint summary]}` (newest first) |
 | 11 | POST | `/api/checkpoints` | `{"note": "<≤500 chars>", "at": {"<repo>": "<rev>"} \| null}` | **201** `{"checkpoint": Checkpoint summary, "alarms": Alarms}` |
-| 12 | GET | `/api/triage` | — | `{"schema":"rmap.triage/1","entries":{key: Entry + "effective_state","outdated"},"links":{…}}` |
+| 12 | GET | `/api/triage` | — | `{"schema":"lemmata.triage/1","entries":{key: Entry + "effective_state","outdated"},"links":{…}}` |
 | 13 | POST | `/api/triage` | `{"target_type":"node"\|"finding","target_id":"…","state":"unreviewed"\|"reviewed"\|"needs_fixing"\|"ignored","note":"…"}` | `{"entry": Entry + "effective_state","outdated"}`; 404 for an unknown target |
 | 14 | POST | `/api/links/decide` | `{"edge_id":"…","decision":"approved"\|"rejected"\|"proposed"}` | `{"edge": Edge, "alarms": Alarms}`; 400 if the edge was not created as `proposed` |
 | 15 | GET | `/api/export` | — | `text/html; charset=utf-8`, `Content-Disposition: attachment; filename="<project-name>-report.html"`; single file (see below) |
@@ -394,10 +394,10 @@ Base `http://127.0.0.1:<port>`. JSON responses use `Content-Type: application/js
 **Project status** (routes 3, 4):
 ```json
 {
- "schema": "rmap.project/1", "version": "0.1.0", "name": "Sample: tiny transformer", "root": "/Users/juhyeong/rmap-demo",
+ "schema": "lemmata.project/1", "version": "0.1.0", "name": "Sample: tiny transformer", "root": "/Users/juhyeong/lemmata-demo",
  "repos": [
-  {"id": "paper", "role": "paper", "path": "paper", "abs_path": "/Users/juhyeong/rmap-demo/paper", "vcs": "git", "head": "2b7e5d1c…", "branch": "main", "dirty": false},
-  {"id": "code", "role": "code", "path": "code", "abs_path": "/Users/juhyeong/rmap-demo/code", "vcs": "git", "head": "c81f0a2e…", "branch": "main", "dirty": false}
+  {"id": "paper", "role": "paper", "path": "paper", "abs_path": "/Users/juhyeong/lemmata-demo/paper", "vcs": "git", "head": "2b7e5d1c…", "branch": "main", "dirty": false},
+  {"id": "code", "role": "code", "path": "code", "abs_path": "/Users/juhyeong/lemmata-demo/code", "vcs": "git", "head": "c81f0a2e…", "branch": "main", "dirty": false}
  ],
  "scanned_at": "2026-11-04T15:00:00+09:00",
  "counts": {"nodes": 34, "edges": 61, "proposed": 2, "events": 9, "findings": 10, "alarm_groups": 2},
@@ -406,9 +406,9 @@ Base `http://127.0.0.1:<port>`. JSON responses use `Content-Type: application/js
  "warnings": [{"code": "marker_target_missing", "message": "% source: results/old.csv not found", "evidence": {"repo": "paper", "path": "main.tex", "line": 120, "text": "% source: results/old.csv", "role": "marker", "page": null}}]
 }
 ```
-**Export file**: `index.html` with `app.css`, `app.js` and `vendor/*.js` inlined, plus `<script type="application/json" id="rmap-snapshot">{"exported_at":…,"project":…,"graph":…,"events":…,"findings":…,"alarms":…,"checkpoints":…,"triage":…}</script>`. Every `</` in the JSON is written as `<\/`. On load, the UI uses the snapshot if the element exists and becomes read-only (POST controls disabled and labelled "Read-only snapshot").
+**Export file**: `index.html` with `app.css`, `app.js` and `vendor/*.js` inlined, plus `<script type="application/json" id="lemmata-snapshot">{"exported_at":…,"project":…,"graph":…,"events":…,"findings":…,"alarms":…,"checkpoints":…,"triage":…}</script>`. Every `</` in the JSON is written as `<\/`. On load, the UI uses the snapshot if the element exists and becomes read-only (POST controls disabled and labelled "Read-only snapshot").
 
-## 13. Engine facade (the only seam; `rmap/engine/api.py`)
+## 13. Engine facade (the only seam; `lemmata/engine/api.py`)
 ```python
 class Engine:
     def __init__(self, project_root: str | Path, online: bool = False) -> None: ...
@@ -426,7 +426,7 @@ class Engine:
     def set_triage(self, target_type: str, target_id: str, state: str, note: str = "") -> dict: ...  # 13
     def decide_link(self, edge_id: str, decision: str) -> dict: ...  # 14 → {"edge","alarms"}
     def export_bundle(self) -> dict: ...             # 15 data part
-# rmap/engine/errors.py: class NotFound(Exception), class BadRequest(Exception)  → server maps to 404 / 400
+# lemmata/engine/errors.py: class NotFound(Exception), class BadRequest(Exception)  → server maps to 404 / 400
 ```
 The engine is thread-safe only behind the server's single lock: the server holds one `threading.Lock` around `scan`, `create_checkpoint`, `set_triage` and `decide_link`. GETs return the last computed dicts. Until the engine lands, web-eng develops against `app/tests/fixtures/api/*.json` (copies of the examples in this page).
 

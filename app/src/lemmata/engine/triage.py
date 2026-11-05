@@ -8,10 +8,10 @@ DECISIONS = ("approved", "rejected", "proposed")
 def load(hub):
     t = hub.read_json("triage.json", None)
     if not t:
-        return {"schema": "rmap.triage/1", "entries": {}, "links": {}}
+        return {"schema": "lemmata.triage/1", "entries": {}, "links": {}}
     t.setdefault("entries", {})
     t.setdefault("links", {})
-    t["schema"] = "rmap.triage/1"
+    t["schema"] = "lemmata.triage/1"
     return t
 
 

@@ -1,9 +1,9 @@
-"""Hub folder IO (<project>/.rmap/): atomic JSON writes, blob store, hub .gitignore."""
+"""Hub folder IO (<project>/.lemmata/): atomic JSON writes, blob store, hub .gitignore."""
 import json
 import os
 from pathlib import Path
 
-HUB_NAME = ".rmap"
+HUB_NAME = ".lemmata"
 
 
 class Hub:

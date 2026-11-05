@@ -13,9 +13,9 @@ from collections import deque
 from pathlib import Path
 
 try:
-    from rmap.engine.errors import BadRequest, NotFound
+    from lemmata.engine.errors import BadRequest, NotFound
 except ImportError:  # engine not present yet
-    from rmap.engine_errors import BadRequest, NotFound
+    from lemmata.engine_errors import BadRequest, NotFound
 
 FIX = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 STATES = ("unreviewed", "reviewed", "needs_fixing", "ignored")
@@ -205,7 +205,7 @@ class FixtureEngine:
         ev = self._events["events"]
         if after_checkpoint:
             ev = [e for e in ev if e["after_checkpoint"]]
-        return {"schema": "rmap.events/1", "events": ev}
+        return {"schema": "lemmata.events/1", "events": ev}
 
     def findings(self):
         return self._findings

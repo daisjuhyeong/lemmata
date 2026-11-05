@@ -6,7 +6,7 @@ sources: ["../../product/demo-spec.md", "founder decision, 1st presentation, 202
 last_reviewed: 2026-11-04
 ---
 # Task: S02-01 Engine, sample generator, tests
-- Goal: Build `app/src/rmap/engine/`: scan a LaTeX project and a git repo into a graph, events, findings and alarms; build the synthetic sample generator; ship tests. Stdlib only (plus the `git` binary), offline, no AI calls.
+- Goal: Build `app/src/lemmata/engine/`: scan a LaTeX project and a git repo into a graph, events, findings and alarms; build the synthetic sample generator; ship tests. Stdlib only (plus the `git` binary), offline, no AI calls.
 - Inputs: [demo-spec](../../product/demo-spec.md) (vocabulary, stories, Golden set); founder decisions in spec header.
 - Acceptance criteria:
   1. `engine` exposes a documented JSON-serialisable API (graph, links with detected/proposed/approved/rejected state, checkpoints, alarms with groups, findings with `path:line` and quoted line, analyzer chain+diff). Agree schema with web-eng (S02-02) in the first day; write it to the handoff note. Covers US-02, US-04, US-05.

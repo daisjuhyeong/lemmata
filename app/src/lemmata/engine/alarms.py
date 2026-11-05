@@ -5,7 +5,7 @@ OUTPUT_KINDS = ("result", "asset")
 
 
 def empty(now_iso):
-    return {"schema": "rmap.alarms/1", "computed_at": now_iso, "checkpoint": None, "excluded_repos": [], "groups": [],
+    return {"schema": "lemmata.alarms/1", "computed_at": now_iso, "checkpoint": None, "excluded_repos": [], "groups": [],
             "summary": {"groups": 0, "changed": 0, "removed": 0, "downstream": 0, "flagged_nodes": 0}}
 
 

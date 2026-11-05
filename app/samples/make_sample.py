@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MARKER = ".rmap-sample"
+MARKER = ".lemmata-sample"
 TZ = "+0900"
 IDENT = {"name": "Sample Author", "email": "author@example.invalid"}
 
@@ -212,7 +212,7 @@ CONFIG_YAML_OLD = "# default training configuration\nlearning_rate: 3.0e-4\nbatc
 CONFIG_YAML_NEW = CONFIG_YAML_OLD.replace("3.0e-4", "1.0e-3")
 TABLE2_CSV = "model,f1,precision,recall\nbaseline,0.871,0.862,0.880\nours,0.912,0.905,0.919\n"
 METRICS_JSON = '{"loss": 0.311, "accuracy": 0.894}\n'
-RUN_RECORD = {"schema": "rmap.run/1", "run_id": "train_main", "started_at": "2026-09-30T14:00:00+09:00",
+RUN_RECORD = {"schema": "lemmata.run/1", "run_id": "train_main", "started_at": "2026-09-30T14:00:00+09:00",
               "command": "python train.py --config configs/default.yaml", "script": "train.py",
               "inputs": ["configs/default.yaml"], "outputs": ["results/table2.csv"]}
 CODE_README = "# Sample code repo\n\nSynthetic code for the sample project.\n"
@@ -312,16 +312,16 @@ def build(target):
     commit(code, "tmp: edit comment in eval.py", "2026-10-05T11:00:00", {"eval.py": EVAL_PY_K4})
     commit(code, "revert eval.py", "2026-10-05T11:30:00", {"eval.py": EVAL_PY})
 
-    hub = target / ".rmap"
+    hub = target / ".lemmata"
     (hub / "cache").mkdir(parents=True)
     manifest = {
-        "schema": "rmap.project/1", "name": "Sample: tiny transformer",
+        "schema": "lemmata.project/1", "name": "Sample: tiny transformer",
         "repos": [{"id": "paper", "role": "paper", "path": "paper", "main_tex": "main.tex", "exclude": []},
                   {"id": "code", "role": "code", "path": "code", "exclude": []}],
         "seed_checkpoint": {"id": "cp1", "note": "CP1: draft v2 validated", "created_at": "2026-10-01T18:00:00+09:00",
                             "at": {"paper": "cp1", "code": "cp1"}},
     }
-    refs = {"schema": "rmap.refs/1", "entries": {}}
+    refs = {"schema": "lemmata.refs/1", "entries": {}}
     for key, title, year, status in REFS_CACHE_ENTRIES:
         refs["entries"][_norm(title)] = {
             "status": status, "source": "seed", "checked_at": "2026-10-01T12:00:00+09:00",

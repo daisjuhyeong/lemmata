@@ -7,12 +7,12 @@ last_reviewed: 2026-11-04
 ---
 # Demo spec, Sprint S02 (localhost demo of the MVP)
 
-Product: Research Map (package/CLI `rmap`). For the 2nd presentation. Runs on Juhyeong's Mac, one command, opens http://localhost:8765 (default port; falls back to the next free port and prints the URL).
+Product: Lemmata (package/CLI `lemmata`). For the 2nd presentation. Runs on Juhyeong's Mac, one command, opens http://localhost:8765 (default port; falls back to the next free port and prints the URL).
 
 ## Provenance and status
 - Source of every story: **founder decision, 1st presentation, 2026-11-03**. This is NOT user evidence. No interview has been done; H1-H4 remain hypotheses and nothing here confirms them.
 - Proposed defaults marked "(PM proposal)" are not founder decisions; Juhyeong confirms or changes them.
-- Constraints (founder decision): Python stdlib-first, no npm build, fully offline, no AI call per commit, no AI cost to run. Layout: `app/src/rmap/engine/`, `app/src/rmap/server.py`, `web/`, `app/samples/make_sample.py`, `app/tests/`.
+- Constraints (founder decision): Python stdlib-first, no npm build, fully offline, no AI call per commit, no AI cost to run. Layout: `app/src/lemmata/engine/`, `app/src/lemmata/server.py`, `web/`, `app/samples/make_sample.py`, `app/tests/`.
 - Wording rule (founder decision): findings never accuse. Use "could not be matched", "differs", "not traced". Never "wrong", "fake", "fabricated", "error by author".
 
 ## Vocabulary
@@ -118,7 +118,7 @@ As an ML author before a deadline, I want each finding to show where it comes fr
 
 ### US-13 Real repository mode (code-only)
 As an ML author before a deadline, I want to point the tool at my own repo, so that I can see it on real work.
-1. Given `alarm-analyzer-eval` (code-only), When I run `rmap open <path>` (PM proposal), Then the graph shows code files, result files and runs without error and without a paper layer.
+1. Given `alarm-analyzer-eval` (code-only), When I run `lemmata open <path>` (PM proposal), Then the graph shows code files, result files and runs without error and without a paper layer.
 2. Given no paper, When checks run, Then paper-dependent checks are shown as "not applicable (no paper)" and not as passed.
 3. Given the Overleaf zip is later supplied, When I add it, Then the paper layer appears and links to code form without changing the code-only results.
 4. Given the real repo, When the tool runs, Then it only reads the repo (no writes except its own state directory, which is gitignored).
@@ -169,13 +169,13 @@ State 2 (after approving PL1 as well): A1 additionally lists `sec:setup` (Sectio
 State 3 (after setting a new checkpoint): 0 alarms; F01-F10 unchanged (findings do not depend on checkpoints).
 
 ## 5-minute demo walkthrough (synthetic sample, presenter script)
-Updated 2026-11-04 to the built UI, using [QA report section 5](../sprints/S02/qa-S02-localhost-demo.md) and [web-eng control names](../sprints/S02/handoff-web-eng.md). Product is "Research Map", CLI `rmap`, state folder `.rmap/`.
+Updated 2026-11-04 to the built UI, using [QA report section 5](../sprints/S02/qa-S02-localhost-demo.md) and [web-eng control names](../sprints/S02/handoff-web-eng.md). Product is "Lemmata", CLI `lemmata`, state folder `.lemmata/`.
 
-Setup before the audience arrives: run the command once and confirm the page loads at the printed URL (default http://127.0.0.1:8765). No cleanup needed: `rmap demo` rebuilds the sample in `~/rmap-demo` with CP1 seeded and empty triage on every run (unless `--keep`). Use a window at least 1280 CSS px wide if you can; from 1024 to 1279 px the side panels narrow, and below 1024 px the UI shows only a notice (QA D1, fixed by the lead). The F-numbers and PL1/PL2 are spec labels; the UI does not show them, so use the titles below.
+Setup before the audience arrives: run the command once and confirm the page loads at the printed URL (default http://127.0.0.1:8765). No cleanup needed: `lemmata demo` rebuilds the sample in `~/lemmata-demo` with CP1 seeded and empty triage on every run (unless `--keep`). Use a window at least 1280 CSS px wide if you can; from 1024 to 1279 px the side panels narrow, and below 1024 px the UI shows only a notice (QA D1, fixed by the lead). The F-numbers and PL1/PL2 are spec labels; the UI does not show them, so use the titles below.
 
 | Time | Click / action | Say / show | Story |
 |------|----------------|-----------|-------|
-| 0:00 | In Terminal run `uv run --project app rmap demo` | "One command, offline, my own machine. No AI call per commit." Browser opens at the localhost URL. | US-01 |
+| 0:00 | In Terminal run `uv run --project app lemmata demo` | "One command, offline, my own machine. No AI call per commit." Browser opens at the localhost URL. | US-01 |
 | 0:30 | Look at the main graph, top to bottom | Bands: Thesis, Questions, Sections, Paper items (figures, tables, equations), Repo results, Runs, Code. Paper and code are separate repos, one graph (repo is shown in the side panel on selection). | US-02.1, .5 |
 | 1:00 | Click Table 2; in the side panel click `Trace down` | Highlight from Table 2 to `results/table2.csv`, the run, the code. "Read top-down." Then click `train.py` and `Trace up`: "work bottom-up." | US-02.2-.3 |
 | 1:30 | Click a citing section (for example Section 1), then toggle `References` | Reference column appears; citation edges show for the selected section. "Citations are an extra dimension." Toggle off. | US-02.4 |
@@ -184,12 +184,12 @@ Setup before the audience arrives: run the command once and confirm the page loa
 | 2:45 | Point at what is NOT listed | "I edited and reverted `eval.py`. Same bytes as the checkpoint, so no alarm." | US-04.2 |
 | 3:00 | Click `Analyze` on the A1 header | Chain config, run, `table2.csv`, Table 2, plus the diff `learning_rate: 3.0e-4` to `1.0e-3`. Optional layer; the "Ask Claude" button is disabled in this demo. | US-05 |
 | 3:30 | Open the `Links` tab, row "App. B Hyperparameters -> configs/default.yaml", click `Approve`; return to `Alarms` | "Inferred links wait for my approval." App. B now joins A1 (4 downstream). Leave the Section 4 link unapproved. Proposed links are drawn dashed in the graph (select App. B or use Show: Proposed links); approval itself is only in the `Links` tab. | US-07 |
-| 3:50 | In `Alarms` select the Table 2 row; type the note "rerun train with lr 1e-3" first, then click `✕ Needs fixing`. Select App. B, click `✓✓ Reviewed` | Saved locally in `.rmap/`; filter counts update. | US-06 |
+| 3:50 | In `Alarms` select the Table 2 row; type the note "rerun train with lr 1e-3" first, then click `✕ Needs fixing`. Select App. B, click `✓✓ Reviewed` | Saved locally in `.lemmata/`; filter counts update. | US-06 |
 | 4:10 | Open the `Checks` tab, find the card "Learning rate differs..." (3rd card, after batch size), click `Open evidence` | Main text says 3e-4 (main.tex:33), appendix says 1e-3 (appendix.tex:7). Neutral wording: "differs". Click "§4 Experimental Setup -> graph". | US-10, US-12 |
 | 4:30 | Scroll `Checks`; open the 1st card (reference could not be matched) and the 9th (number not traced) | "Reference could not be matched" (offline cache, refs.bib:21); "92.4 not traced to any result file" (main.tex:48). | US-08, US-11 |
 | 4:50 | Click `Export HTML report` (top bar); say closing line | "Use AI, don't depend on AI." Next: Overleaf zip for my own repo `alarm-analyzer-eval` (code-only today). | US-12.4, US-13 |
 
-Optional live-edit moment (not in the 5 minutes): edit `code/train.py` in `~/rmap-demo`, click Rescan; a new group "Uncommitted changes" appears. Do not edit `default.yaml` for this; it already changed in K3 and adds no new group.
+Optional live-edit moment (not in the 5 minutes): edit `code/train.py` in `~/lemmata-demo`, click Rescan; a new group "Uncommitted changes" appears. Do not edit `default.yaml` for this; it already changed in K3 and adds no new group.
 
 Known deviations to keep off screen or mention honestly: sections are not in paper order; graph nodes have no repo label; the Section 4 evidence text may read "linked by you" for an unapproved link (QA D2).
 

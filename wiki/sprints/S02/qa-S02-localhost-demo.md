@@ -12,7 +12,7 @@ sources:
   - "local repo /home/claude/alarm-analyzer-eval @ baa9f7d (not in raw/)"
 last_reviewed: 2026-11-04
 ---
-# QA report: S02 localhost demo (Research Map / `rmap`)
+# QA report: S02 localhost demo (Lemmata / `lemmata`)
 
 ## Verdict: ship for the demo with caveats (no blocker)
 Everything the demo depends on works and matches the golden set when checked over the HTTP API. That covers 10/10 findings with the exact file:line, 2 unapproved proposed links, A1/A2, the eval.py revert, approval states 1 and 2, the new-checkpoint state 3, and triage after a restart. The 33 unit tests pass on Python 3.13 and on Python 3.10. Builds are byte-identical across three runs. The tool works fully offline. The localhost guards hold and the exported report opens offline.
@@ -22,17 +22,17 @@ Fix before the talk: D1 (the UI disappears below 1280 px, which includes browser
 ## 1. What was run
 | Step | Command / method | Result |
 |---|---|---|
-| Clean install | `python3 -m venv /tmp/qa-venv && /tmp/qa-venv/bin/pip install -e app` | OK, 4.3 s; `rmap --version` -> `rmap 0.1.0` |
-| Demo (pip) | `rmap demo --no-open --dir /tmp/qa-sample --port 8790` | URL printed 0.35 s after launch |
-| Demo (uv, documented) | `uv run --project app rmap demo --dir /tmp/qa-uv-sample --port 8790` (8790 busy; `UV_PROJECT_ENVIRONMENT` pointed to /tmp so the repo stayed untouched; `$BROWSER` stub) | fell back to 8791, printed URL correct, browser stub received `http://127.0.0.1:8791` |
-| Python 3.10 | `uv python install 3.10` (3.10.20); tests and `uv run --python 3.10 ... rmap demo` | 33/33 tests OK (5.1 s); demo serves; all GET routes 200 |
+| Clean install | `python3 -m venv /tmp/qa-venv && /tmp/qa-venv/bin/pip install -e app` | OK, 4.3 s; `lemmata --version` -> `lemmata 0.1.0` |
+| Demo (pip) | `lemmata demo --no-open --dir /tmp/qa-sample --port 8790` | URL printed 0.35 s after launch |
+| Demo (uv, documented) | `uv run --project app lemmata demo --dir /tmp/qa-uv-sample --port 8790` (8790 busy; `UV_PROJECT_ENVIRONMENT` pointed to /tmp so the repo stayed untouched; `$BROWSER` stub) | fell back to 8791, printed URL correct, browser stub received `http://127.0.0.1:8791` |
+| Python 3.10 | `uv python install 3.10` (3.10.20); tests and `uv run --python 3.10 ... lemmata demo` | 33/33 tests OK (5.1 s); demo serves; all GET routes 200 |
 | Tests on 3.13 | `PYTHONPATH=app/src python3 -m unittest discover -s app/tests -p 'test_*.py'` | 33/33 OK (4.5 s) |
-| Zero-install fallback | `PYTHONPATH=app/src python3 -m rmap demo --no-open ...` | serves |
-| Ctrl-C | demo in a pty, send `^C` | prints `rmap: stopped`, exits |
+| Zero-install fallback | `PYTHONPATH=app/src python3 -m lemmata demo --no-open ...` | serves |
+| Ctrl-C | demo in a pty, send `^C` | prints `lemmata: stopped`, exits |
 | Browser | Playwright Chromium, 1440x900, deviceScaleFactor 1 | 0 console errors, 0 non-localhost requests, 0 failed requests |
 | Offline | `unshare -n` (loopback only): build, scan, serve, UI, analyze, export | all work; strace shows 0 `socket()` calls for build+scan+analyze+checkpoint |
 
-Performance: the graph draws 0.9 s after page load on the sample and 0.74 s on the real repo. Rescanning the sample takes under 0.3 s. Scanning the real repo with `rmap scan` takes 0.63-0.71 s wall time (target is under 10 s). Every UI action finished in under 1 s.
+Performance: the graph draws 0.9 s after page load on the sample and 0.74 s on the real repo. Rescanning the sample takes under 0.3 s. Scanning the real repo with `lemmata scan` takes 0.63-0.71 s wall time (target is under 10 s). Every UI action finished in under 1 s.
 
 ## 2. Golden set (fresh sample; checked over the HTTP API, not through the engine tests)
 I read the expected line numbers by hand from the generated `paper/main.tex`, `paper/appendix.tex` and `paper/refs.bib`.
@@ -58,7 +58,7 @@ I read the expected line numbers by hand from the generated `paper/main.tex`, `p
 | State 1 (approve PL2) | A1 downstream 4 (+ `tex:app:hparams`) | 4, via the approved `value_match` edge | pass |
 | State 2 (approve PL1 too) | A1 downstream 5 (+ `tex:sec:setup`) | 5 | pass |
 | State 3 (new checkpoint) | 0 groups, findings unchanged | cp2, 0 groups, findings byte-equal | pass |
-| Triage after restart | unchanged | `rmap demo --keep` restart: 3 entries, notes and link decisions unchanged | pass |
+| Triage after restart | unchanged | `lemmata demo --keep` restart: 3 entries, notes and link decisions unchanged | pass |
 
 Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 92a5afd (cp1), P3 02c7676; code K1 fe00549, K2 4470a61 (cp1), K3 2836100, K4 93e7978, K5 784a21a. The code SHAs differ from the pipeline handoff (460abec / 17acc92b), most likely because the rename changed the committed run-record schema string. The paper SHAs are unchanged.
 
@@ -88,7 +88,7 @@ Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 9
 | US-05.2 | pass (note) | diff `learning_rate: 3.0e-4` -> `1.0e-3` with file name and hunk `@@ -1,4 +1,4 @@`; no explicit `file:line` label |
 | US-05.3 | pass | request log shows no `/api/analyze` call until Analyze is clicked |
 | US-05.4 | pass | `ai.available: false`; button reads "Ask Claude why — not available in this demo" |
-| US-06.1 | pass | state and note written to `.rmap/triage.json` (UI and API) |
+| US-06.1 | pass | state and note written to `.lemmata/triage.json` (UI and API) |
 | US-06.2 | pass | unchanged after restart |
 | US-06.3 | pass (API) | editing Appendix B gives `unreviewed` + `outdated: true` with history kept; reverting restores `reviewed` |
 | US-06.4 | pass | filter buttons show Recheck 3, Needs fixing 1, Reviewed 1; the "Needs fixing" filter lists only Table 2 |
@@ -111,7 +111,7 @@ Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 9
 | US-13.1 | partial | code-only open works without errors (242 nodes); the repo has no run records or tracked results, so none can be shown; README items appear in a "Paper items" band |
 | US-13.2 | pass (weak) | all 8 checks say "Not applicable (no paper repo)", but only inside a collapsed "Status of all 8 checks"; the headline says "0 findings" |
 | US-13.3 | not testable | no Overleaf zip. Partial check: adding `--paper` to a copy keeps all 242 code nodes and 481 edges unchanged |
-| US-13.4 | pass | `git status` clean, `.rmap/` self-ignored, `GIT_OPTIONAL_LOCKS=0`, no file outside `.rmap/` written |
+| US-13.4 | pass | `git status` clean, `.lemmata/` self-ignored, `GIT_OPTIONAL_LOCKS=0`, no file outside `.lemmata/` written |
 | US-14.1 | pass | 3 builds (pip 3.13, uv 3.13, uv 3.10): identical trees, SHAs, hub JSON (volatile fields excluded) and blobs |
 | US-14.2 | pass | two git repos, fixed committer dates |
 | US-14.3 | pass | F01-F10 once each; negative controls raise nothing |
@@ -123,16 +123,16 @@ Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 9
 | Bind | 127.0.0.1 only (`/proc/net/tcp`); connecting via host IP 192.0.2.2 is refused |
 | Host header | `evil.com`, `evil.com:8790`, `127.0.0.1` (no port), wrong port -> 403; `localhost:<port>` -> 200 |
 | POST Origin | foreign origin, `null`, `localhost:<other port>` -> 403; `text/plain` or form body -> 400; 70 KB body -> 413; no CORS headers; OPTIONS -> 501 |
-| `/api/file`, `/api/raw` | `../`, `..%2F`, `../../../etc/passwd`, absolute, `//`, NUL, unknown repo, symlink to /etc/passwd, symlink to `.rmap/triage.json`, dir symlink to `.rmap`, `loop/.rmap/...`, direct `.rmap/...` -> all refused. **Served: `.env`, `.git/config`** (D6) |
+| `/api/file`, `/api/raw` | `../`, `..%2F`, `../../../etc/passwd`, absolute, `//`, NUL, unknown repo, symlink to /etc/passwd, symlink to `.lemmata/triage.json`, dir symlink to `.lemmata`, `loop/.lemmata/...`, direct `.lemmata/...` -> all refused. **Served: `.env`, `.git/config`** (D6) |
 | Static | traversal (`/../`, `%2e%2e`, `..%2f`) -> 404 |
 | Network | 0 sockets without `--online` (strace); full UI works inside `unshare -n` |
-| User repo | sample and real repo `git status` clean; `.rmap/` ignored via its own `.gitignore` |
-| `rmap demo --dir` | refuses to delete a folder without `.rmap-sample` (the file inside was kept) |
+| User repo | sample and real repo `git status` clean; `.lemmata/` ignored via its own `.gitignore` |
+| `lemmata demo --dir` | refuses to delete a folder without `.lemmata-sample` (the file inside was kept) |
 
 ## 5. Walkthrough (demo-spec, click by click) — mismatches for PM
 | Time | Spec says | What exists |
 |---|---|---|
-| 0:00 | browser opens at the localhost URL | opens `http://127.0.0.1:8765`; the command is `uv run --project app rmap demo` (there is no `./demo.sh`). The setup step "delete the state directory" is unnecessary: `rmap demo` rebuilds fresh unless `--keep` |
+| 0:00 | browser opens at the localhost URL | opens `http://127.0.0.1:8765`; the command is `uv run --project app lemmata demo` (there is no `./demo.sh`). The setup step "delete the state directory" is unnecessary: `lemmata demo` rebuilds fresh unless `--keep` |
 | 0:30 | "thesis, RQs, sections, figures/tables, result files, code, runs"; separate repos in one graph | bands read Thesis, Questions, Sections, Paper items, Repo results, **Runs, Code**; nodes carry no repo label to point at; section nodes are not in paper order (§3, App. A, §1, §2, §5, …) |
 | 1:00 | Table 2 -> "trace down"; train.py -> "trace up" | works; buttons are in the side panel. After Trace down the toolbar shows "▲ Rests on" pressed (arrow points up) |
 | 1:30 | toggle "references": citations appear | the `References` button shows a reference column; citation edges appear only after clicking a citing section (e.g. §1) |
@@ -148,10 +148,10 @@ Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 9
 | runbook (arch §8) | "edit `configs/default.yaml`, Rescan -> a worktree alarm group" | **no new group**: the config already changed in K3, so the edit goes into A1's `also_changed_in`. Editing `train.py` does create A3 "Uncommitted changes" |
 
 ## 6. Real repository (`/home/claude/alarm-analyzer-eval` @ baa9f7d, code-only)
-- `rmap scan`: 242 nodes (203 code, 16 README items, 13 doc, 8 data, 2 config), 481 edges (448 imports, 29 generated_by, 4 produced_by), 113 events (first-parent; 114 commits in total), 0 findings, 0 alarm groups (no checkpoint), 0 warnings. Wall time 0.63-0.71 s. This matches the handoffs.
-- `rmap open --port 8795`: served in 0.73 s; UI loads with 0 console errors and 0 foreign requests. The graph draws 29 elements (folders collapsed). Alarms say "Set a Last known good checkpoint…". Checks show 8 x not applicable.
+- `lemmata scan`: 242 nodes (203 code, 16 README items, 13 doc, 8 data, 2 config), 481 edges (448 imports, 29 generated_by, 4 produced_by), 113 events (first-parent; 114 commits in total), 0 findings, 0 alarm groups (no checkpoint), 0 warnings. Wall time 0.63-0.71 s. This matches the handoffs.
+- `lemmata open --port 8795`: served in 0.73 s; UI loads with 0 console errors and 0 foreign requests. The graph draws 29 elements (folders collapsed). Alarms say "Set a Last known good checkpoint…". Checks show 8 x not applicable.
 - README provenance: 16 items (Fig. 1, 3-10, Tables 1, 2, 3, 5, App. B, D.1, F). All 29 `generated_by` targets exist and match the README rows. Example: **Fig. 7 -> `experiments/RQ3_consistency/f4_combined.py` is correct**, and Fig. 8/10 -> `RQ3_consistency/f6_operating_point.py` + `f5_windows.py` is also correct. Eight of the 29 come from parenthetical helper mentions ("label-built predictions", "window re-fits", "variants") but are labelled "is generated by", the same as the main script (D13).
-- `git status` stays clean. **`.rmap/` was not removed.** It was created at 14:12 by a server I did not start (PID 2410, `python3 -m rmap open /home/claude/alarm-analyzer-eval --port 8766`, cwd the lemmata repo) and was rewritten by the unit tests (D8). Deleting it under a running server would break that server. Stop PID 2410 first, then `rm -rf /home/claude/alarm-analyzer-eval/.rmap`.
+- `git status` stays clean. **`.lemmata/` was not removed.** It was created at 14:12 by a server I did not start (PID 2410, `python3 -m lemmata open /home/claude/alarm-analyzer-eval --port 8766`, cwd the lemmata repo) and was rewritten by the unit tests (D8). Deleting it under a running server would break that server. Stop PID 2410 first, then `rm -rf /home/claude/alarm-analyzer-eval/.lemmata`.
 
 ## 7. Precision and false positives
 - Sample checks: 10/10 true positives, 0 false positives; all negative controls raise nothing.
@@ -163,16 +163,16 @@ Commit SHAs for `golden.json` (same on all three builds): paper P1 296ce7e, P2 9
 | # | Severity | Defect | Reproduction |
 |---|---|---|---|
 | D1 | Medium (demo risk) | Below 1280 CSS px the whole UI is replaced by "needs a window at least 1280 px wide". That includes browser zoom: 125% on a 1440 px screen is 1152 CSS px. At 1280x720 the top-bar buttons are clipped and the legend overlaps the Code band | Open the app in a 1279x800 window (or zoom to 125% at 1440 px) -> notice only. Screenshots `6x-viewport-*.png` |
-| D2 | Medium (wording, visible at 4:10) | The side-panel Evidence says "§4 Experimental Setup was linked by you to configs/default.yaml (proposed)" for an **unapproved** heuristic link. `app.js` `evidenceFor()` applies `EDGE_PHRASE.value_match` ("was linked by you to") whatever the status | `rmap demo` -> Checks -> "Learning rate differs…" -> Open evidence -> "§4 Experimental Setup -> graph" -> Evidence section |
+| D2 | Medium (wording, visible at 4:10) | The side-panel Evidence says "§4 Experimental Setup was linked by you to configs/default.yaml (proposed)" for an **unapproved** heuristic link. `app.js` `evidenceFor()` applies `EDGE_PHRASE.value_match` ("was linked by you to") whatever the status | `lemmata demo` -> Checks -> "Learning rate differs…" -> Open evidence -> "§4 Experimental Setup -> graph" -> Evidence section |
 | D3 | Medium (walkthrough) | Proposed links are not shown or clickable in the graph on load (US-07.1 partial), so walkthrough step 3:30 cannot be done as written | Load the app; 0 edges are drawn; edges have no tap handler |
 | D4 | Low-Medium | Graph nodes have no repo label (US-02.5; arch §3.4 says "Each node shows its repo badge") | Load the graph; labels are glyph + name only |
 | D5 | Low | Band order puts Runs above Code; spec and script say code, then runs (US-02.1). Needs a PM/CTO decision | Load the graph |
 | D6 | Low (hardening) | `/api/file` serves any file under a repo root, including hidden ones. Same-origin only (Host check, no CORS), but the route is not in the contract. Suggest limiting it to graph-node paths | `curl "http://127.0.0.1:<port>/api/file?repo=code&path=.git/config"` -> 200 |
-| D7 | Low (macOS only, from reading the code) | `safe_path` excludes `.rmap` by exact-case path part. On the Mac's default case-insensitive disk, `path=.RMAP/triage.json` would probably be served for a repo at path `.` | Not reproducible on Linux; check on the Mac |
-| D8 | Low (process) | `TestRealRepoSmoke` scans `/home/claude/alarm-analyzer-eval` in place and leaves `.rmap/` there (S02-03 AC8 says "on a copy") | Run the test suite; `.rmap/*.json` mtimes update |
+| D7 | Low (macOS only, from reading the code) | `safe_path` excludes `.lemmata` by exact-case path part. On the Mac's default case-insensitive disk, `path=.RMAP/triage.json` would probably be served for a repo at path `.` | Not reproducible on Linux; check on the Mac |
+| D8 | Low (process) | `TestRealRepoSmoke` scans `/home/claude/alarm-analyzer-eval` in place and leaves `.lemmata/` there (S02-03 AC8 says "on a copy") | Run the test suite; `.lemmata/*.json` mtimes update |
 | D9 | Low (doc) | The runbook's "edit default.yaml -> worktree alarm group" moment does not happen (section 5) | Edit `code/configs/default.yaml`, Rescan -> still 2 groups |
 | D10 | Low (wording) | The "✓ Confirmed" chip marks nodes that are merely unchanged since the checkpoint; §4 shows "Confirmed" while it has F02/F03. Design question | Select §4 in the graph |
-| D11 | Low | Code-only mode: the Checks headline says "0 findings … from the checks that ran" when none ran; the outline says "No sections found. Check that your main .tex file uses \section" | `rmap open <code repo>` -> Checks, outline |
+| D11 | Low | Code-only mode: the Checks headline says "0 findings … from the checks that ran" when none ran; the outline says "No sections found. Check that your main .tex file uses \section" | `lemmata open <code repo>` -> Checks, outline |
 | D12 | Low | No-change flag false positives (section 7); the flag text reads "content changed in 1 files" | Real repo events e.g. 1c479d7, d1c8370 |
 | D13 | Nit | README helper scripts are shown as "is generated by"; findings show F03 before F02; the reference check note says "offline cache" even with `--online`; export filename has a double hyphen | as described |
 
