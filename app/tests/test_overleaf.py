@@ -314,6 +314,53 @@ class OverleafTest(Base):
         self.ov.rate_limit = False
         self.assertEqual(self.hub.mgr.sync_all(), None)  # loop path
 
+    def test_concurrent_syncs_fetch_once_in_window(self):
+        self.set_token()
+        pid = self.new_project(paper_overleaf=self.p1)["id"]
+        self.hub.cfg.update(overleaf_min_interval=120)
+        m = self.hub.mgr.meta(pid)
+        m["overleaf_last_fetch"] -= 500
+        self.hub.mgr._save_meta(pid, m)
+        n = self.ov.fetches[self.p1]
+        res = []
+        ts = [threading.Thread(target=lambda: res.append(self.api("POST", "/api/hub/projects/%s/sync" % pid))) for _ in range(4)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(self.ov.fetches[self.p1], n + 1)
+        self.assertEqual(sorted(bool(r["paper"].get("skipped")) for _, r in res), [False, True, True, True])
+
+    def test_overleaf_errors_are_short_and_mapped(self):
+        self.set_token()
+        pid = self.new_project(paper_overleaf=self.p1)["id"]
+        self.ov.rate_limit = True
+        s, r = self.api("POST", "/api/hub/projects/%s/sync" % pid)
+        self.assertEqual(r["paper"]["error"], {"code": "overleaf_rate_limited", "message": "Overleaf is rate-limiting; will retry at the next sync."})
+        s, r = self.api("POST", "/api/hub/projects/%s/paper-source" % pid, {"kind": "overleaf", "project": self.p2})
+        self.assertEqual((s, r["error"]["code"]), (429, "overleaf_rate_limited"))
+        self.assertNotIn("git ", r["error"]["message"])
+        self.ov.rate_limit = False
+
+    def test_size_cap_and_stall_flags(self):
+        self.set_token()
+        pid = self.new_project()["id"]
+        old = projects.MAX_UNPACKED
+        projects.MAX_UNPACKED = 10
+        try:
+            s, r = self.api("POST", "/api/hub/projects/%s/paper-source" % pid, {"kind": "overleaf", "project": self.p1})
+        finally:
+            projects.MAX_UNPACKED = old
+        self.assertEqual((s, r["error"]["code"]), (413, "overleaf_too_large"))
+        self.assertEqual(self.api("GET", "/api/hub/projects/%s" % pid)[1]["paper_source"], {"kind": "zip"})
+        self.assertEqual(list((self.data / "tmp").iterdir()), [])
+        argvs = []
+        real = projects.subprocess.run
+        projects.subprocess.run = lambda a, *x, **k: (argvs.append(list(a)), real(a, *x, **k))[1]
+        try:
+            self.api("POST", "/api/hub/projects/%s/paper-source" % pid, {"kind": "overleaf", "project": self.p1})
+        finally:
+            projects.subprocess.run = real
+        self.assertTrue(any("http.lowSpeedLimit=1000" in a and "clone" in a for a in argvs))
+
     def test_loop_syncs_paper(self):
         self.set_token()
         pid = self.new_project(paper_overleaf=self.p1)["id"]

@@ -17,16 +17,19 @@
       "properties": {
         "lemmata.serverUrl": {
           "type": "string",
+          "scope": "application",
           "default": "http://100.111.135.94:8765",
-          "markdownDescription": "Address of your Lemmata hub (http or https). The token is kept in VS Code's secret storage, never in settings."
+          "markdownDescription": "Address of your Lemmata hub (http or https). Machine-wide only: a repo's .vscode/settings.json cannot change it. The token is kept in VS Code's secret storage, never in settings."
         },
         "lemmata.project": {
           "type": "string",
+          "scope": "resource",
           "default": "",
           "markdownDescription": "Hub project id to use for this workspace. Leave empty to match the workspace's git remotes against your hub projects."
         },
         "lemmata.refreshSeconds": {
           "type": "number",
+          "scope": "application",
           "default": 30,
           "minimum": 10,
           "description": "How often to fetch alarms and findings from the hub (also on window focus and file save)."

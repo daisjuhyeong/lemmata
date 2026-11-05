@@ -90,6 +90,17 @@ def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900, user
     return p.stdout.decode("utf-8", "replace").strip()
 
 
+def _tree_size(path):
+    total = 0
+    for dp, _dn, fn in os.walk(str(path)):
+        for f in fn:
+            try:
+                total += os.lstat(os.path.join(dp, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
 def valid_branch(b):
     if not isinstance(b, str) or not BRANCH_RE.match(b) or ".." in b:
         return False
@@ -450,16 +461,24 @@ class Manager:
         return {"version": version, "commit": sha, "files": files}
 
     # --- Overleaf
-    def _overleaf_git(self, cwd, args, token):
-        """git against Overleaf: the token only in the child's environment, errors mapped to the API's codes."""
+    def _overleaf_git(self, cwd, args, token, timeout=300):
+        """git against Overleaf: the token only in the child's environment, errors mapped to short API messages, and a time
+        cap (plus a stall cap: under 1 kB/s for 30 s aborts)."""
         try:
-            return git(cwd, args, token=token, scope_url=self.ol.base(), user="git")
+            return git(cwd, ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"] + list(args), token=token,
+                       scope_url=self.ol.base(), user="git", timeout=timeout)
         except ProjectError as e:
+            if e.code == "git_timeout":
+                raise ProjectError(504, "overleaf_unavailable", "Overleaf did not answer in time; will retry at the next sync.")
             if e.code != "git_failed":
                 raise
             t = e.message.lower()
+            if re.search(r"returned error: 429\b", t) or "too many requests" in t:
+                raise ProjectError(429, "overleaf_rate_limited", "Overleaf is rate-limiting; will retry at the next sync.")
+            if re.search(r"returned error: 5\d\d\b", t) or "unable to access" in t or "could not resolve" in t or "failed to connect" in t or "timed out" in t:
+                raise ProjectError(502, "overleaf_unavailable", "Overleaf is not reachable right now; will retry at the next sync.")
             if re.search(r"returned error: 40[13]\b", t) or any(k in t for k in ("authentication failed", "terminal prompts disabled", "could not read username", "invalid credentials")):
-                raise ProjectError(502, "overleaf_auth_failed", "Overleaf refused access: token missing or expired, or the project isn't yours/shared.")
+                raise ProjectError(502, "overleaf_auth_failed", "Overleaf token missing or expired, or the project isn't yours/shared.")
             if re.search(r"returned error: 404\b", t) or "not found" in t or "does not exist" in t:
                 raise ProjectError(404, "overleaf_not_found", "Overleaf has no project with that id.")
             raise
@@ -471,6 +490,9 @@ class Manager:
         tpl = self.data.hub / "empty-template"
         tpl.mkdir(mode=0o700, exist_ok=True)
         self._overleaf_git(None, ["clone", "--no-tags", "--no-recurse-submodules", "--template=" + str(tpl), "--", self.ol.url(project_id), str(dest)], token)
+        if _tree_size(dest) > MAX_UNPACKED:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise ProjectError(413, "overleaf_too_large", "The Overleaf project is larger than 500 MB.")
         return git(dest, ["rev-parse", "HEAD"])
 
     def set_paper_source(self, pid, kind, project=None):
@@ -527,13 +549,14 @@ class Manager:
 
     # --- sync
     def sync(self, pid):
-        m = self.meta(pid)
+        self.root(pid)
         code = self.root(pid) / "code"
         paper = self.root(pid) / "paper"
         token = self.gh.token()
         if not token:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
         with self.oplock(pid):
+            m = self.meta(pid)  # read under the project lock: the throttle check-and-set below is atomic
             before = git(code, ["rev-parse", "HEAD"])
             git(code, ["fetch", "--no-tags", "origin", m["branch"]], token=token, scope_url=self.cfg.load()["github_web"])
             a = self.app(pid)
@@ -574,7 +597,9 @@ class Manager:
             return res
         m["overleaf_last_fetch"] = time.time()
         try:
-            self._overleaf_git(paper, ["fetch", "--no-tags", "origin", "HEAD"], token)
+            self._overleaf_git(paper, ["fetch", "--no-tags", "origin", "HEAD"], token, timeout=120)
+            if _tree_size(paper / ".git") > 2 * MAX_UNPACKED:
+                raise ProjectError(413, "overleaf_too_large", "The Overleaf paper history is larger than 1 GB; not merged.")
             with a.lock:
                 try:
                     git(paper, ["merge", "--ff-only", "-q", "FETCH_HEAD"])
@@ -596,9 +621,9 @@ class Manager:
     def set_online_refs(self, pid, value):
         if not isinstance(value, bool):
             raise ProjectError(400, "bad_request", "online_refs must be true or false.")
-        m = self.meta(pid)
         a = self.app(pid)
         with self.oplock(pid):
+            m = self.meta(pid)
             m["online_refs"] = value
             self._save_meta(pid, m)
             with a.lock:

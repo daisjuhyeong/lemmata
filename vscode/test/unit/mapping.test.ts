@@ -36,3 +36,7 @@ test('clean strips ANSI and control characters', () => {
   assert.equal(clean('x'.repeat(10), 5), 'xxxx…');
   assert.equal(clean(undefined), '');
 });
+test('mapPath ignores inherited keys such as __proto__', () => {
+  assert.equal(mapPath({ code: 'A' }, '__proto__', 'x.py'), null);
+  assert.equal(mapPath({ code: 'A' }, 'constructor', 'x.py'), null);
+});

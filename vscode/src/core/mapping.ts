@@ -17,7 +17,7 @@ export interface Mapped { folder: string; rel: string }
 
 /** `folders` is the binding's role -> folder key table ({code: key, paper: key}). */
 export function mapPath(folders: { [role: string]: string | undefined }, repo: string, rel: string): Mapped | null {
-  const key = folders[repo];
+  const key = Object.prototype.hasOwnProperty.call(folders, repo) ? folders[repo] : undefined;
   const r = safeRel(rel);
   if (!key || !r) return null;
   return { folder: key, rel: r };

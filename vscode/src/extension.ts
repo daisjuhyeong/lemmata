@@ -8,11 +8,10 @@ import { mapPath, hubPath } from './core/mapping';
 import { formatWhy } from './core/why';
 import { isPrivateHost, normalizeServerUrl } from './core/url';
 import { oneLine } from './core/text';
+import { DEFAULT_URL, TOKEN_PREFIX, serverFromInspect, tokenFor, tokenKey } from './core/settings';
 import { HubProject, TriageState } from './core/types';
 
-const TOKEN_KEY = 'lemmata.token';
 const WHY_SCHEME = 'lemmata-why';
-const DEFAULT_URL = 'http://100.111.135.94:8765';
 
 interface Bound { binding: Binding; model: Model | null; error: string | null }
 type Status = 'unconfigured' | 'offline' | 'unauthorized' | 'ok';
@@ -63,13 +62,15 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
 
   /* ---------- connection ---------- */
   async setup(): Promise<boolean> {
-    const token = await this.ctx.secrets.get(TOKEN_KEY);
-    const url = normalizeServerUrl(String(this.cfg().get('serverUrl', DEFAULT_URL)));
+    const url = this.serverSetting();
+    const token = url.ok ? await tokenFor(url.url, k => this.ctx.secrets.get(k)) : undefined;   // token of THIS origin only
     if (!token || !url.ok) { this.client = null; this.status = 'unconfigured'; return false; }
     if (!this.client || this.serverUrl !== url.url) { this.client = new HubClient(url.url, token); this.serverUrl = url.url; }
     return true;
   }
   ctx_secrets(): vscode.SecretStorage { return this.ctx.secrets; }
+  /** serverUrl is application-scoped; also read via inspect() so workspace values can never win. */
+  serverSetting() { return serverFromInspect(this.cfg().inspect<string>('serverUrl')); }
   serverBase(): string { return this.serverUrl; }
   clientOrNull(): HubClient | null { return this.client; }
   resetClient() { this.client = null; }
@@ -304,7 +305,8 @@ async function pickProject(arg?: Item): Promise<{ client: HubClient; pid: string
 const fail = (what: string, e: unknown) => vscode.window.showErrorMessage('Lemmata: ' + what + ': ' + (e instanceof Error ? e.message : String(e)));
 
 async function connect() {
-  const cur = String(CTRL.cfg().get('serverUrl', DEFAULT_URL));
+  const curS = CTRL.serverSetting();
+  const cur = curS.ok ? curS.url : DEFAULT_URL;
   const typed = await vscode.window.showInputBox({ title: 'Lemmata: server address', prompt: 'Address of your Lemmata hub', value: cur || DEFAULT_URL, ignoreFocusOut: true,
     validateInput: v => { const r = normalizeServerUrl(v); return r.ok ? undefined : r.reason; } });
   if (typed === undefined) return;
@@ -319,7 +321,7 @@ async function connect() {
   if (!token) return;
   try {
     const projects = await new HubClient(norm.url, token.trim()).projects();   // proves the token works
-    await CTRL.ctx_secrets().store(TOKEN_KEY, token.trim());
+    await CTRL.ctx_secrets().store(tokenKey(norm.url), token.trim());
     await CTRL.cfg().update('serverUrl', norm.url, vscode.ConfigurationTarget.Global);
     CTRL.resetClient();
     void vscode.window.showInformationMessage('Lemmata: connected. ' + projects.length + ' project' + (projects.length === 1 ? '' : 's') + ' on the server.');
@@ -352,7 +354,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.window.createTreeView('lemmata.panel', { treeDataProvider: CTRL, showCollapseAll: true }),
     vscode.workspace.registerTextDocumentContentProvider(WHY_SCHEME, CTRL),
     c('lemmata.connect', connect),
-    c('lemmata.disconnect', async () => { await ctx.secrets.delete(TOKEN_KEY); CTRL.resetClient(); await CTRL.refresh(); void vscode.window.showInformationMessage('Lemmata: token removed from this computer.'); }),
+    c('lemmata.disconnect', async () => { const u = CTRL.serverSetting(); if (u.ok) await ctx.secrets.delete(tokenKey(u.url)); CTRL.resetClient(); await CTRL.refresh(); void vscode.window.showInformationMessage('Lemmata: token removed from this computer.'); }),
     c('lemmata.refresh', () => CTRL.refresh()),
     c('lemmata.showPanel', async () => { await vscode.commands.executeCommand('workbench.view.extension.lemmata'); void CTRL.refresh(); }),
     c('lemmata.openItem', async (uri: vscode.Uri, line0: number) => {
@@ -401,9 +403,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeWorkspaceFolders(() => void CTRL.refresh()),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('lemmata.refreshSeconds')) CTRL.restartTimer();
-      if (e.affectsConfiguration('lemmata')) { CTRL.resetClient(); void CTRL.refresh(); }
+      if (e.affectsConfiguration('lemmata')) { CTRL.resetClient(); void CTRL.refresh(); }   // a changed address has no token until you Connect again
     }),
-    ctx.secrets.onDidChange(e => { if (e.key === TOKEN_KEY) { CTRL.resetClient(); void CTRL.refresh(); } }),
+    ctx.secrets.onDidChange(e => { if (e.key.startsWith(TOKEN_PREFIX)) { CTRL.resetClient(); void CTRL.refresh(); } }),
     { dispose: () => CTRL.dispose() },
   );
   await CTRL.start();

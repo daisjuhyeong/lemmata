@@ -36,3 +36,7 @@ date | agent | operation | files touched | note
 2026-11-05 | lead | build | wiki/sprints/S05/S05-brief.md | founder decisions: Overleaf premium -> pull paper via Overleaf Git; VS Code extension; Notion not now
 2026-11-05 | pipeline-eng | build | app/src/lemmata/hub/{overleaf,projects,routes,config,github,sync}.py, tests | Overleaf paper source, both repos synced; 110 tests
 2026-11-05 | web-eng | build | web/hub/*, web/app.js, vscode/**, s05 screenshots | Overleaf hub UI; VS Code extension 0.1.0 (19 unit + 8 integration tests)
+2026-11-05 | qa | lint | wiki/sprints/S05/qa-S05.md | S05 QA: block on D1 (VS Code serverUrl workspace-overridable -> token exfiltration); Overleaf token/parsing/switch/sync pass
+2026-11-05 | web-eng | build | vscode/** | D1 fixed: serverUrl application scope, token bound to its origin; D4/D6; 23 unit + 8 integration
+2026-11-05 | pipeline-eng | build | app/src/lemmata/hub/projects.py, test_overleaf.py | D2 sync lock/throttle atomic, D3 short Overleaf errors, D5 clone/fetch caps; 113 tests
+2026-11-05 | lead | lint | vscode/package.json, settings.ts | verified D1 fix (scopes, per-origin token key); 23 unit + 113 py pass
