@@ -56,6 +56,11 @@ class Guard:
         ips, names = tailscale_info() if detect else (set(), set())
         self.hosts = {"localhost", "127.0.0.1", "::1"} | {i.lower() for i in ips} | names | {h.lower() for h in extra_hosts}
 
+    def refresh(self):
+        """Re-detect Tailscale addresses/names (it may have come up after the hub started)."""
+        ips, names = tailscale_info()
+        self.hosts |= {i.lower() for i in ips} | names
+
     def host_ok(self, header):
         return bool(header) and _hostname(header) in self.hosts
 

@@ -4,7 +4,7 @@ name: mac-app
 # as a downloadable artifact (Actions tab -> this run -> Artifacts).
 on:
   push:
-    branches: [s03-mac-app]
+    branches: [s03-mac-app, s04-hub-remote]
     paths: ["app/**", "desktop/**", ".github/workflows/mac-app.yml"]
   workflow_dispatch:
 

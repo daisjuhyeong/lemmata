@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
+import zlib
 import re
 import secrets
 import shutil
@@ -26,7 +28,16 @@ AUTHOR = {"GIT_AUTHOR_NAME": "Lemmata", "GIT_AUTHOR_EMAIL": "lemmata@localhost",
           "GIT_COMMITTER_NAME": "Lemmata", "GIT_COMMITTER_EMAIL": "lemmata@localhost"}
 ALLOWED_PROTOCOLS = ["https"]  # tests (local fake GitHub over http) extend this; production never speaks http/ssh/file
 PID_RE = re.compile(r"^[a-z0-9-]{1,64}$")
-CODE_REPO_RE = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
+CODE_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
+MAX_FILE = 50 * 1024 * 1024
+MASKS = []  # absolute data paths that must never appear in an error message
+
+
+def mask(text):
+    text = str(text)
+    for m in sorted(MASKS, key=len, reverse=True):
+        text = text.replace(m, "<data>")
+    return text
 
 
 def safe_flags(scope_url=None):
@@ -72,7 +83,7 @@ def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900):
     except OSError as e:
         raise ProjectError(500, "git_missing", "git could not run: %s" % scrub(e, token))
     if p.returncode != 0:
-        msg = scrub(p.stderr.decode("utf-8", "replace").strip()[-600:], token)
+        msg = mask(scrub(p.stderr.decode("utf-8", "replace").strip()[-600:], token))
         raise ProjectError(502, "git_failed", "git %s failed: %s" % (args[0], msg))
     return p.stdout.decode("utf-8", "replace").strip()
 
@@ -90,6 +101,26 @@ def slug(s):
 
 
 # ---------------------------------------------------------------- zip ingest
+def _has_format_chars(s):
+    return any(unicodedata.category(c) == "Cf" for c in s)
+
+
+def is_git_alias(comp):
+    """True if a path component could be `.git` on NTFS/HFS+/APFS: NFC/NFKC, format chars dropped, trailing dots/spaces
+    stripped, case-folded; also the 8.3 short name git~N."""
+    for form in ("NFC", "NFKC"):
+        c = unicodedata.normalize(form, comp)
+        c = "".join(ch for ch in c if unicodedata.category(ch) != "Cf").rstrip(". ").casefold()
+        c = c.lstrip(" ") if c.startswith(" ") else c
+        if c == ".git" or re.fullmatch(r"git~\d+", c):
+            return True
+    return False
+
+
+def _bad(msg):
+    return ProjectError(400, "bad_zip", msg)
+
+
 def safe_extract(zip_path, dest):
     """Extract an Overleaf zip into the empty folder `dest`. Rejects absolute paths, `..`, symlinks/special files, encrypted
     entries, more than 5,000 files or 500 MB unpacked (counted while writing, not from headers). Strips one top-level folder."""
@@ -117,8 +148,10 @@ def safe_extract(zip_path, dest):
             parts = [p for p in norm.split("/") if p not in ("", ".")]
             if ".." in parts:
                 raise ProjectError(400, "bad_zip", "Path escapes the folder: %r" % name[:80])
-            if any(p.lower() == ".git" for p in parts):
-                raise ProjectError(400, "bad_zip", "The zip contains a .git folder.")
+            if any(_has_format_chars(p) for p in parts):
+                raise _bad("Invisible formatting characters in a file name are not allowed.")
+            if any(is_git_alias(p) for p in parts):
+                raise _bad("The zip contains a .git folder.")
             mode = (i.external_attr >> 16) & 0o170000
             if mode and mode not in (0o100000, 0o040000):
                 raise ProjectError(400, "bad_zip", "Links and special files are not allowed: %r" % name[:80])
@@ -127,34 +160,51 @@ def safe_extract(zip_path, dest):
             if not parts or parts[-1] == ".DS_Store":
                 continue
             entries.append((i, parts, i.is_dir() or norm.endswith("/")))
-        seen = set()
+        files_seen, dirs_seen = set(), set()
         for _i, parts, is_dir in entries:
-            key = "/".join(parts).casefold()
-            if key in seen and not is_dir:
-                raise ProjectError(400, "bad_zip", "Duplicate file names (ignoring case): %r" % "/".join(parts)[:80])
-            seen.add(key)
+            segs = [unicodedata.normalize("NFC", x).casefold() for x in parts]
+            for k in range(1, len(segs) if not is_dir else len(segs) + 1):
+                dirs_seen.add("/".join(segs[:k]))
+            if not is_dir:
+                key = "/".join(segs)
+                if key in files_seen:
+                    raise _bad("Duplicate file names (ignoring case and accents form): %r" % "/".join(parts)[:80])
+                files_seen.add(key)
+        if files_seen & dirs_seen:
+            raise _bad("A name is used both as a file and as a folder.")
         top = {p[0] for _, p, d in entries}
         if len(top) == 1 and all(len(p) > 1 or d for _, p, d in entries) and any(len(p) > 1 for _, p, _d in entries):
             entries = [(i, p[1:], d) for i, p, d in entries if len(p) > 1 or not d]
-        total = files = 0
-        for info, parts, is_dir in entries:
-            target = (dest.joinpath(*parts)).resolve()
-            if target != dest and not target.is_relative_to(dest):
-                raise ProjectError(400, "bad_zip", "Path escapes the folder.")
-            if is_dir:
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(info) as src, open(target, "wb") as out:
-                while True:
-                    chunk = src.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > MAX_UNPACKED:
-                        raise ProjectError(400, "bad_zip", "The zip unpacks to more than 500 MB.")
-                    out.write(chunk)
-            files += 1
+        try:
+            total = files = 0
+            for info, parts, is_dir in entries:
+                target = (dest.joinpath(*parts)).resolve()
+                if target != dest and not target.is_relative_to(dest):
+                    raise ProjectError(400, "bad_zip", "Path escapes the folder.")
+                if is_dir:
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                one = 0
+                with zf.open(info) as src, open(target, "wb") as out:
+                    while True:
+                        chunk = src.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        one += len(chunk)
+                        if total > MAX_UNPACKED:
+                            raise _bad("The zip unpacks to more than 500 MB.")
+                        if one > MAX_FILE:
+                            raise _bad("A file in the zip is larger than 50 MB.")
+                        out.write(chunk)
+                files += 1
+        except ProjectError:
+            raise
+        except (zipfile.BadZipFile, zlib.error, EOFError, RuntimeError, NotImplementedError, ValueError):
+            raise _bad("The zip is damaged or its sizes do not match its content.")
+        except OSError:
+            raise _bad("The zip could not be unpacked (conflicting or unusable file names).")
     return files
 
 
@@ -183,6 +233,8 @@ class Manager:
         self.apps = {}
         self.mlock = threading.Lock()
         self.oplocks = {}
+        MASKS.append(str(Path(data.root).resolve()))
+        MASKS.append(str(data.root))
         self.write_lock = threading.RLock()
 
     # --- lookup
@@ -214,7 +266,7 @@ class Manager:
             a = self.apps.get(pid)
             if a is None:
                 from lemmata.engine.api import Engine
-                a = App(Engine(root))
+                a = App(Engine(root, online=bool((read_json(root / "project.json", {}) or {}).get("online_refs", False))))
                 self.apps[pid] = a
         return a
 
@@ -239,7 +291,7 @@ class Manager:
             versions = int(git(paper, ["rev-list", "--count", "HEAD"])) if (paper / ".git").exists() else 0
         except ProjectError:
             versions = 0
-        return {"id": pid, "name": m.get("name", pid), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
+        return {"id": pid, "name": m.get("name", pid), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
                 "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"),
                 "counts": {"recheck": al.get("summary", {}).get("flagged_nodes", 0), "findings": st["counts"]["findings"]}}
 
@@ -314,29 +366,64 @@ class Manager:
 
     # --- paper upload
     def upload(self, pid, zip_path):
+        """Atomic: the zip is unpacked and committed through a throw-away index first; paper/ is only touched once the new
+        commit exists, and is restored from a backup if the swap itself fails."""
         root = self.root(pid)
         paper = root / "paper"
         with self.oplock(pid):
             work = Path(self.data.tmp) / ("up-" + secrets.token_hex(6))
+            backup = Path(self.data.tmp) / ("bk-" + secrets.token_hex(6))
             work.mkdir(mode=0o700)
             try:
                 files = safe_extract(zip_path, work)
                 a = self.app(pid)
-                with a.lock:
-                    for child in paper.iterdir():
-                        if child.name == ".git":
-                            continue
-                        shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
-                    for child in work.iterdir():
-                        shutil.move(str(child), str(paper / child.name))
-                    git(paper, ["add", "-A", "-f"])
-                    git(paper, ["commit", "-q", "--allow-empty", "--no-verify", "--no-gpg-sign", "-m", "Overleaf upload " + now_iso()],
-                        extra_env=AUTHOR)
-                    sha = git(paper, ["rev-parse", "HEAD"])
-                    version = int(git(paper, ["rev-list", "--count", "HEAD"]))
-                    a.engine.scan()
+                gd = str(paper / ".git")
+                idx = Path(self.data.tmp) / ("idx-" + secrets.token_hex(6))
+                try:
+                    env = dict(AUTHOR, GIT_DIR=gd, GIT_WORK_TREE=str(work), GIT_INDEX_FILE=str(idx))
+                    try:
+                        git(work, ["add", "-A", "-f"], extra_env=env)
+                        tree = git(work, ["write-tree"], extra_env=env)
+                    except ProjectError as e:
+                        raise ProjectError(400, "bad_zip", "The zip contains a file name git cannot store.")
+                    with a.lock:
+                        parent = None
+                        try:
+                            parent = git(paper, ["rev-parse", "-q", "--verify", "HEAD"])
+                        except ProjectError:
+                            pass
+                        args = ["commit-tree", tree, "-m", "Overleaf upload " + now_iso()] + (["-p", parent] if parent else [])
+                        sha = git(paper, args, extra_env=AUTHOR)
+                        backup.mkdir(mode=0o700)
+                        moved = []
+                        try:
+                            for child in list(paper.iterdir()):
+                                if child.name != ".git":
+                                    shutil.move(str(child), str(backup / child.name))
+                                    moved.append(child.name)
+                            for child in work.iterdir():
+                                shutil.move(str(child), str(paper / child.name))
+                            git(paper, ["update-ref", "-m", "overleaf upload", "HEAD", sha])
+                            git(paper, ["reset", "-q"])
+                        except BaseException:
+                            for child in list(paper.iterdir()):
+                                if child.name != ".git":
+                                    shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
+                            for name in moved:
+                                shutil.move(str(backup / name), str(paper / name))
+                            if parent:
+                                git(paper, ["reset", "-q"])
+                            raise
+                        version = int(git(paper, ["rev-list", "--count", "HEAD"]))
+                        a.engine.scan()
+                finally:
+                    try:
+                        idx.unlink()
+                    except OSError:
+                        pass
             finally:
                 shutil.rmtree(work, ignore_errors=True)
+                shutil.rmtree(backup, ignore_errors=True)
         return {"version": version, "commit": sha, "files": files}
 
     # --- sync
@@ -370,6 +457,19 @@ class Manager:
             except Exception as e:
                 print("lemmata hub: sync %s failed: %s" % (pid, scrub(str(e), self.gh.token())), flush=True)
 
+    def set_online_refs(self, pid, value):
+        if not isinstance(value, bool):
+            raise ProjectError(400, "bad_request", "online_refs must be true or false.")
+        m = self.meta(pid)
+        a = self.app(pid)
+        with self.oplock(pid):
+            m["online_refs"] = value
+            self._save_meta(pid, m)
+            with a.lock:
+                a.engine.online = value
+                a.engine.scan()
+        return self.summary(pid)
+
     # --- delete
     def delete(self, pid):
         root = self.root(pid)
@@ -383,9 +483,10 @@ class Manager:
 class HubContext:
     """The interface lemmata.mcp expects (S04 brief)."""
 
-    def __init__(self, mgr, device=None):
+    def __init__(self, mgr, device=None, device_id=None):
         self.mgr = mgr
         self.device = device
+        self.device_id = device_id
         self.write_lock = mgr.write_lock
 
     def list_projects(self):

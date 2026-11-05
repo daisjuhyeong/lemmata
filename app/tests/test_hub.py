@@ -63,6 +63,8 @@ class HubBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        from lemmata.engine import tree
+        tree.GIT_ENV_EXTRA.clear()
         cls.srv.shutdown()
         cls.srv.server_close()
         cls.fake.close()
@@ -89,7 +91,7 @@ class HubBase(unittest.TestCase):
 
     def api(self, method, path, body=None, token=None, headers=None, ctype="application/json", raw=None):
         h = {"Authorization": "Bearer " + (token or self.token)}
-        data = raw if raw is not None else (json.dumps(body if body is not None else {}).encode() if method in ("POST",) else None)
+        data = raw if raw is not None else (json.dumps(body if body is not None else {}).encode() if method in ("POST", "PATCH") else None)
         if data is not None:
             h["Content-Type"] = ctype
         h.update(headers or {})
@@ -208,6 +210,31 @@ class ZipUnits(unittest.TestCase):
         finally:
             projects.MAX_FILES, projects.MAX_UNPACKED = old
 
+    def test_git_aliases_and_unicode(self):
+        for name in (".git./config", "GIT~1/config", ".git /config", ".g\u200cit/x", ".\u200bgit/x", ".GIT/x", "a/.git../x", "git~12/x", ".git\u2060/x"):
+            self.bad(make_zip({}, extra=[(name, "x")]))
+        self.bad(make_zip({"caf\u00e9.tex": "1", "cafe\u0301.tex": "2"}))  # NFC vs NFD
+        self.bad(make_zip({"zero\u200bwidth.tex": "1"}))
+        self.bad(make_zip({}, extra=[("a", "file"), ("a/b.tex", "x")]))  # file then folder of the same name
+        self.assertEqual(self.extract(make_zip({"gitlab.tex": "x", "my.git.tex": "y"}))[0], 2)  # innocent look-alikes pass
+
+    def test_per_file_cap_and_error_mapping(self):
+        old = projects.MAX_FILE
+        try:
+            projects.MAX_FILE = 100
+            self.bad(make_zip({"big.tex": "0" * 500}))
+        finally:
+            projects.MAX_FILE = old
+        for name in sorted(Path("/tmp/qa-s04/zips").glob("*.zip")) if os.environ.get("QA_ZIPS") else []:  # QA corpus, when present
+            if name.name.startswith(("08_", "16_", "18_", "30_", "31_", "32_")) and not name.name.startswith(("08_", "16_", "18_")):
+                continue
+            with tempfile.TemporaryDirectory() as d:
+                (Path(d) / "o").mkdir()
+                try:
+                    projects.safe_extract(name, Path(d) / "o")
+                except projects.ProjectError as e:
+                    self.assertEqual(e.status, 400, name.name)
+
     def test_lying_header_is_caught_while_writing(self):
         old = projects.MAX_UNPACKED
         data = bytearray(make_zip({"big.bin": "0" * 5000}))
@@ -222,7 +249,7 @@ class ZipUnits(unittest.TestCase):
                 zp = Path(d) / "x.zip"
                 zp.write_bytes(bytes(data))
                 (Path(d) / "o").mkdir()
-                with self.assertRaises((projects.ProjectError, Exception)):
+                with self.assertRaises(projects.ProjectError) as cm:
                     projects.safe_extract(zp, Path(d) / "o")
         finally:
             projects.MAX_UNPACKED = old
@@ -494,6 +521,150 @@ class HubTest(HubBase):
     def test_pid_validation(self):
         for p in ("/api/hub/projects/Bad_Pid", "/api/hub/projects/" + "a" * 65, "/p/../x/api/project", "/p/UP/api/project"):
             self.assertIn(self.api("GET", p)[0], (404, 405), p)
+
+    # ------------------------------------------------------------ QA round: D1..D12
+    def raw_socket(self, head, body=b""):
+        import socket
+        s = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        s.sendall(head.encode() + body)
+        out = b""
+        try:
+            while True:
+                c = s.recv(65536)
+                if not c:
+                    break
+                out += c
+        except socket.timeout:
+            pass
+        s.close()
+        return out
+
+    def test_bad_content_length(self):
+        host = "Host: 127.0.0.1:%d\r\n" % self.port
+        for cl in ("-1", "abc", "1e3", "-0", "\u0661"):
+            for path, ctype, extra in (("/api/hub/pair", "application/json", ""), ("/mcp", "application/json", "Authorization: Bearer %s\r\n" % self.token),
+                                       ("/api/hub/projects/x/paper", "application/zip", "Authorization: Bearer %s\r\n" % self.token)):
+                if cl == "\u0661":
+                    continue
+                out = self.raw_socket("POST %s HTTP/1.1\r\n%sContent-Type: %s\r\n%sContent-Length: %s\r\nConnection: close\r\n\r\n" % (path, host, ctype, extra, cl))
+                code = out.split(b" ", 2)[1]
+                self.assertIn(code, (b"400", b"404"), (path, cl, out[:80]))  # 404 only for the unknown project, before reading
+        # missing length on /mcp and on the zip route
+        out = self.raw_socket("POST /mcp HTTP/1.1\r\n%sContent-Type: application/json\r\nAuthorization: Bearer %s\r\nConnection: close\r\n\r\n" % (host, self.token))
+        self.assertTrue(out.startswith(b"HTTP/1.1 400"), out[:60])
+        self.signin()
+        pid = self.make_project()
+        out = self.raw_socket("POST /api/hub/projects/%s/paper HTTP/1.1\r\n%sContent-Type: application/zip\r\nAuthorization: Bearer %s\r\nContent-Length: -5\r\nConnection: close\r\n\r\n" % (pid, host, self.token))
+        self.assertTrue(out.startswith(b"HTTP/1.1 400"), out[:60])
+        out = self.raw_socket("POST /api/hub/projects/%s/paper HTTP/1.1\r\n%sContent-Type: application/zip\r\nAuthorization: Bearer %s\r\nConnection: close\r\n\r\n" % (pid, host, self.token))
+        self.assertTrue(out.startswith(b"HTTP/1.1 400"), out[:60])
+        from lemmata.hub.routes import HubHandler
+        self.assertEqual(HubHandler.timeout, 30)
+
+    def test_funnel_header_and_other_methods(self):
+        s, _, _ = self.raw("GET", "/api/hub/status", None, {"Tailscale-Funnel-Request": "?1"})
+        self.assertEqual(s, 403)
+        s, _, _ = self.raw("GET", "/api/hub/projects", None, {"Authorization": "Bearer " + self.token, "Tailscale-Funnel-Request": "?1"})
+        self.assertEqual(s, 403)
+        for m in ("PUT", "OPTIONS", "TRACE", "PROPFIND"):
+            s, hd, out = self.raw(m, "/api/hub/projects")
+            self.assertEqual(s, 405, m)
+            self.assertIn("frame-ancestors", hd["content-security-policy"])
+            self.assertEqual(json.loads(out)["error"]["code"], "method_not_allowed")
+        s, hd, out = self.raw("PUT", "/mcp", b"{}", {"Content-Type": "application/json"})
+        self.assertEqual(s, 405)
+
+    def test_repo_validation(self):
+        for bad in ("-x/y", "a/.", "a/..", "alice/" + "n" * 101, "a" * 40 + "/x", "alice/-x", "alice/x y", "al ice/x", "alice/x.git", "../x", "a/b/c", "-/x", "alice/"):
+            self.assertFalse(projects.CODE_REPO_RE.match(bad) and not bad.endswith(".git") and ".." not in bad, bad)
+        for good in ("alice/demo-code", "a/.github", "Org-1/repo.name_x", "a" * 39 + "/" + "n" * 100):
+            self.assertTrue(projects.CODE_REPO_RE.match(good), good)
+        self.signin()
+        s, r = self.api("POST", "/api/hub/projects", {"code_repo": "-x/y"})
+        self.assertEqual(s, 400)
+
+    def test_atomic_upload_restores_paper(self):
+        self.signin()
+        pid = self.make_project()
+        s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({"main.tex": TEX1, "a.tex": "A"}), ctype="application/zip")
+        self.assertEqual(s, 200)
+        paper = self.data / "projects" / pid / "paper"
+        before = sorted(p.name for p in paper.iterdir())
+        head = projects.git(paper, ["rev-parse", "HEAD"])
+        real = projects.git
+
+        def flaky(cwd, args, *a, **kw):
+            if args and args[0] == "update-ref":  # fail after the files were swapped
+                raise projects.ProjectError(502, "git_failed", "boom")
+            return real(cwd, args, *a, **kw)
+        projects.git = flaky
+        try:
+            s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({"main.tex": "NEW", "b.tex": "B"}), ctype="application/zip")
+        finally:
+            projects.git = real
+        self.assertEqual(s, 502)
+        self.assertEqual(sorted(p.name for p in paper.iterdir()), before)
+        self.assertEqual((paper / "main.tex").read_text(), TEX1)
+        self.assertEqual(projects.git(paper, ["rev-parse", "HEAD"]), head)
+        self.assertEqual(projects.git(paper, ["status", "--porcelain"]), "")
+        self.assertFalse(list(self.data.glob("tmp/*")))
+        # a zip git cannot store never touches the tree either
+        s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({"main.tex": "X"}, extra=[(".git./config", "x")]), ctype="application/zip")
+        self.assertEqual((s, r["error"]["code"]), (400, "bad_zip"))
+        self.assertEqual((paper / "main.tex").read_text(), TEX1)
+        # no absolute server path in error messages
+        s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({}, extra=[("a", "f"), ("a/b.tex", "x")]), ctype="application/zip")
+        self.assertEqual(s, 400)
+        self.assertNotIn(str(self.data), json.dumps(r))
+        self.assertEqual(projects.mask("fatal: %s/projects/x" % self.data), "fatal: <data>/projects/x")
+
+    def test_online_refs_default_off_and_check_status(self):
+        from unittest import mock
+        self.signin()
+        pid = self.make_project()
+        tex = TEX1.replace("\\end{document}", "\\cite{k1}\n\\bibliographystyle{plain}\\bibliography{refs}\n\\end{document}")
+        bib = "@article{k1,\n title={A paper},\n author={X},\n year={2020}\n}\n"
+        s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({"main.tex": tex, "refs.bib": bib}), ctype="application/zip")
+        self.assertEqual(s, 200, r)
+        p = self.api("GET", "/api/hub/projects/%s" % pid)[1]
+        self.assertIs(p["online_refs"], False)
+        chk = [c for c in self.api("GET", "/p/%s/api/findings" % pid)[1]["checks"] if c["check"] == "reference_unmatched"][0]
+        self.assertEqual(chk["status"], "not_checked")
+        self.assertIn("not checked online", chk["note"].lower())
+        self.assertEqual(self.api("PATCH", "/api/hub/projects/%s" % pid, {"online_refs": "yes"})[0], 400)
+        with mock.patch("lemmata.engine.refs.online_fill", return_value=False) as m:
+            s, p = self.api("PATCH", "/api/hub/projects/%s" % pid, {"online_refs": True})
+            self.assertEqual(s, 200, p)
+            self.assertTrue(p["online_refs"])
+            self.assertTrue(m.called)
+        self.assertTrue(self.hub.mgr.app(pid).engine.online)
+        self.assertTrue(json.loads((self.data / "projects" / pid / "project.json").read_text())["online_refs"])
+        self.assertIs(self.api("PATCH", "/api/hub/projects/%s" % pid, {"online_refs": False})[1]["online_refs"], False)
+        self.assertFalse(self.hub.mgr.app(pid).engine.online)
+
+    def test_triage_records_device_and_engine_env(self):
+        from lemmata.engine import tree
+        self.assertEqual(tree.GIT_ENV_EXTRA["GIT_CONFIG_GLOBAL"], "/dev/null")
+        self.assertEqual(tree.GIT_ENV_EXTRA["GIT_CONFIG_NOSYSTEM"], "1")
+        self.signin()
+        pid = self.make_project()
+        self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=make_zip({"main.tex": TEX1}), ctype="application/zip")
+        g = self.api("GET", "/p/%s/api/graph" % pid)[1]
+        nid = [n["id"] for n in g["nodes"] if n["kind"] != "reference"][0]
+        s, r = self.api("POST", "/p/%s/api/triage" % pid, {"target_type": "node", "target_id": nid, "state": "reviewed"})
+        self.assertEqual(s, 200, r)
+        dev = [d for d in self.hub.auth.devices() if d["name"] == "test"][0]
+        self.assertEqual(r["entry"]["by"], "ui:" + dev["device_id"])
+
+    def test_token_cli_line(self):
+        import contextlib
+        from lemmata.cli import main
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["hub", "token", "--data", str(self.data), "--device", "VS Code", "--host", "mini.ts.net"])
+        out = buf.getvalue()
+        self.assertIn('claude mcp add --scope user --transport http lemmata http://mini.ts.net:8765/mcp --header "Authorization: Bearer ', out)
+        self.assertIn("WARNING", out)
 
     def test_hub_static(self):
         s, hd, out = self.raw("GET", "/")

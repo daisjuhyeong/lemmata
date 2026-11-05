@@ -81,8 +81,18 @@ def _label(n, with_loc=True):
     return s
 
 
+def _deep_clean(o):
+    if isinstance(o, str):
+        return _clean(o)
+    if isinstance(o, list):
+        return [_deep_clean(x) for x in o]
+    if isinstance(o, dict):
+        return {_clean(k) if isinstance(k, str) else k: _deep_clean(v) for k, v in o.items()}
+    return o
+
+
 def _cap(body, hint):
-    foot = "\n" + NOTICE
+    foot = NOTICE + "\n"
     room = MAX_TEXT - len(foot)
     if len(body) > room:
         cut = body[:room - 200]
@@ -91,7 +101,7 @@ def _cap(body, hint):
         if cut.count("<user-file-quote>") > cut.count("</user-file-quote>"):
             cut += "\n</user-file-quote>"
         body = cut + "\n[truncated: %d of %d characters shown. %s]" % (len(cut), len(body), hint)
-    return body + foot
+    return foot + body
 
 
 # ====================================================================================== context helpers
@@ -427,15 +437,15 @@ def t_set_triage(ctx, args):
     else:
         n = _need_node(eng, q)
         ttype, tid, label = "node", n["id"], _label(n, False)
-    by = _clean(getattr(ctx, "device", None) or "mcp")[:60]
-    note = ((note + " ") if note else "") + "[by %s]" % by   # the engine has no 'by' field; recorded in the note/history
+    dev = getattr(ctx, "device_id", None)
+    by = "mcp:%s" % _clean(dev)[:60] if dev else "mcp"
     lock = getattr(ctx, "write_lock", None)
     try:
         if lock is not None:
             with lock:
-                res = eng.set_triage(ttype, tid, state, note)
+                res = eng.set_triage(ttype, tid, state, note, by=by)
         else:
-            res = eng.set_triage(ttype, tid, state, note)
+            res = eng.set_triage(ttype, tid, state, note, by=by)
     except (NotFound, BadRequest) as e:
         raise _Fail(str(e))
     ent = res["entry"]
@@ -554,7 +564,7 @@ def _call_tool(ctx, name, args):
     tool = _BY_NAME[name]
     try:
         text, data, hint = tool["fn"](ctx, args)
-        return {"content": [{"type": "text", "text": _cap(text, hint)}], "structuredContent": data, "isError": False}
+        return {"content": [{"type": "text", "text": _cap(text, hint)}], "structuredContent": _deep_clean(data), "isError": False}
     except _Fail as e:
         return {"content": [{"type": "text", "text": str(e)}], "isError": True}
     except (NotFound, BadRequest) as e:

@@ -12,13 +12,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from lemmata import __version__
-from lemmata.server import WEB, ApiError, Handler, _map_exc
+from lemmata.engine import tree as _tree
+from lemmata.server import WEB, ApiError, Handler, _map_exc, parse_length
 
 from .auth import Auth, cookie_header, parse_cookie, COOKIE
 from .config import Config, DataDir
 from .github import GitHub, GitHubError, scrub
 from .guard import Guard, peer_ok
-from .projects import MAX_ZIP, HubContext, Manager, ProjectError
+from .projects import MAX_ZIP, HubContext, Manager, ProjectError, mask
 from .sync import SyncLoop
 
 HUB_WEB = WEB / "hub"
@@ -44,6 +45,8 @@ class Hub:
         self.ctx = HubContext(self.mgr)
         self.sync_interval = sync_interval if sync_interval is not None else c.get("sync_interval", 300)
         self.lock = threading.Lock()
+        # the engine's own git calls must not read user/system git config or run LFS filters inside cloned repos
+        _tree.GIT_ENV_EXTRA.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_LFS_SKIP_SMUDGE": "1"})
 
 
 class HubServer(ThreadingHTTPServer):
@@ -56,6 +59,29 @@ class HubServer(ThreadingHTTPServer):
 
 class HubHandler(Handler):
     hub: Hub = None
+    timeout = 30  # seconds of silence before a connection is dropped (slow-loris); the zip stream gets longer
+
+    def send_error(self, code, message=None, explain=None):
+        """Any method/protocol error the stdlib would answer with HTML: JSON + CSP instead."""
+        self.close_connection = True
+        try:
+            body = json.dumps({"error": {"code": "method_not_allowed" if code in (405, 501) else "bad_request",
+                                         "message": "method not allowed" if code in (405, 501) else (message or "bad request")}}).encode()
+            self.send_response(405 if code == 501 else code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+        except OSError:
+            pass
+
+    def do_PATCH(self):
+        self._dispatch("PATCH")
 
     # --- guards
     def _host_ok(self):
@@ -101,7 +127,10 @@ class HubHandler(Handler):
 
     def _dispatch(self, method):
         self.app = None
+        self.triage_by = None
         try:
+            if self.headers.get("Tailscale-Funnel-Request") is not None:  # a request that came in through Tailscale Funnel
+                raise ApiError(403, "forbidden", "public (Funnel) access is not allowed")
             if not self._host_ok():
                 raise ApiError(403, "forbidden", "host not allowed")
             url = urlsplit(self.path)
@@ -133,10 +162,13 @@ class HubHandler(Handler):
                 return self._hub_api(method, path, q, via)
             m = PROJECT_RE.match(path)
             if m:
+                self.triage_by = "ui:%s" % dev["device_id"]
                 return self._project(method, m.group(1), m.group(2), q)
             if path.startswith("/api/"):
                 raise ApiError(404, "not_found", "unknown route")
             raise ApiError(404, "not_found", "not found")
+        except TimeoutError:
+            self.close_connection = True
         except ApiError as e:
             self._error(e.status, e.code, e.message)
         except ProjectError as e:
@@ -148,7 +180,7 @@ class HubHandler(Handler):
             if m:
                 self._error(m.status, m.code, m.message)
             else:
-                self._error(500, "internal", scrub("%s: %s" % (type(e).__name__, e), self.hub.gh.token()))
+                self._error(500, "internal", mask(scrub("%s: %s" % (type(e).__name__, e), self.hub.gh.token()))[:300])
 
     # --- static
     def _hub_static(self, path):
@@ -168,10 +200,7 @@ class HubHandler(Handler):
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype != "application/json":
             raise ApiError(400, "bad_request", "Content-Type must be application/json")
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-        except ValueError:
-            raise ApiError(400, "bad_request", "bad Content-Length")
+        n = parse_length(self.headers.get("Content-Length"))
         if n > MAX_BODY:
             raise ApiError(413, "too_large", "request body over 64 KB")
         raw = self.rfile.read(n)
@@ -179,7 +208,7 @@ class HubHandler(Handler):
             from lemmata import mcp  # lazy import
         except ImportError:
             raise ApiError(501, "not_implemented", "MCP is not available in this build")
-        out = mcp.handle(raw.decode("utf-8", "replace"), HubContext(self.hub.mgr, device=dev["name"]))
+        out = mcp.handle(raw.decode("utf-8", "replace"), HubContext(self.hub.mgr, device=dev["name"], device_id=dev["device_id"]))
         status, resp = out if isinstance(out, tuple) else (200 if out is not None else 202, out)
         if resp is None or resp == "":
             self.send_response(status)
@@ -251,6 +280,11 @@ class HubHandler(Handler):
                 return self._json(self._paper(pid))
             if sub is None and method == "GET":
                 return self._json(hub.mgr.summary(pid))
+            if sub is None and method == "PATCH":
+                body = self._body()
+                if "online_refs" not in body:
+                    raise ApiError(400, "bad_request", "nothing to change (online_refs)")
+                return self._json(hub.mgr.set_online_refs(pid, body["online_refs"]))
             raise ApiError(405, "method_not_allowed", "method not allowed")
         raise ApiError(404, "not_found", "unknown route")
 
@@ -260,14 +294,12 @@ class HubHandler(Handler):
             raise ApiError(400, "bad_request", "Content-Type must be application/zip")
         if not self._origin_ok():
             raise ApiError(403, "forbidden", "origin not allowed")
-        try:
-            n = int(self.headers.get("Content-Length") or "")
-        except ValueError:
-            raise ApiError(411, "length_required", "Content-Length is required")
+        n = parse_length(self.headers.get("Content-Length"))
         if n <= 0:
             raise ApiError(400, "bad_request", "empty upload")
         if n > MAX_ZIP:
             raise ApiError(413, "too_large", "zip over 100 MB")
+        self.connection.settimeout(120)  # the upload may be slow; individual reads still time out
         tmp = self.hub.data.tmp / ("zip-" + secrets.token_hex(6))
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
@@ -279,6 +311,7 @@ class HubHandler(Handler):
                         raise ApiError(400, "bad_request", "upload ended early")
                     f.write(chunk)
                     left -= len(chunk)
+            self.connection.settimeout(self.timeout)
             return self.hub.mgr.upload(pid, tmp)
         finally:
             try:

@@ -8,8 +8,12 @@ class GitError(Exception):
     pass
 
 
+GIT_ENV_EXTRA = {}  # hub mode: GIT_CONFIG_NOSYSTEM / GIT_CONFIG_GLOBAL=/dev/null / GIT_LFS_SKIP_SMUDGE; empty in single-project mode
+
+
 def run_git(cwd, args, check=True):
     env = dict(os.environ)
+    env.update(GIT_ENV_EXTRA)
     env["GIT_OPTIONAL_LOCKS"] = "0"  # read-only: never take index locks
     env["GIT_TERMINAL_PROMPT"] = "0"
     p = subprocess.run(["git", "-c", "core.quotepath=false"] + list(args), cwd=str(cwd),
@@ -211,6 +215,7 @@ class GitTree:
     def _cat(self, obj):
         if self._proc is None or self._proc.poll() is not None:
             env = dict(os.environ)
+            env.update(GIT_ENV_EXTRA)
             env["GIT_OPTIONAL_LOCKS"] = "0"
             self._proc = subprocess.Popen(["git", "cat-file", "--batch"], cwd=self.root, env=env,
                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)

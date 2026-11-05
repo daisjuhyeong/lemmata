@@ -196,14 +196,14 @@ class Engine:
         f = next((f for f in s["findings"]["findings"] if f["id"] == target_id), None)
         return f["fingerprint"] if f else None
 
-    def set_triage(self, target_type, target_id, state, note=""):
+    def set_triage(self, target_type, target_id, state, note="", by=None):
         s = self._ensure()
         if target_type not in ("node", "finding"):
             raise BadRequest("target_type must be 'node' or 'finding'")
         h = self._target_hash(target_type, target_id)
         if h is None:
             raise NotFound("unknown %s %r" % (target_type, target_id))
-        ent = triagemod.set_entry(s["tri"], target_type, target_id, state, note, h, now_iso())
+        ent = triagemod.set_entry(s["tri"], target_type, target_id, state, note, h, now_iso(), by)
         self.hub.write_json("triage.json", s["tri"])
         return {"entry": triagemod.with_effective(ent, h)}
 

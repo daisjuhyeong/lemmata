@@ -25,7 +25,7 @@ def with_effective(entry, current_hash):
     return e
 
 
-def set_entry(tri, target_type, target_id, state, note, current_hash, now):
+def set_entry(tri, target_type, target_id, state, note, current_hash, now, by=None):
     if state not in STATES:
         raise BadRequest("state must be one of %s" % ", ".join(STATES))
     note = note or ""
@@ -33,10 +33,10 @@ def set_entry(tri, target_type, target_id, state, note, current_hash, now):
         raise BadRequest("note must be a string of at most 2000 characters")
     key = "%s:%s" % (target_type, target_id)
     ent = tri["entries"].get(key)
-    rec = {"state": state, "note": note, "at": now, "hash": current_hash}
+    rec = {"state": state, "note": note, "at": now, "hash": current_hash, "by": by}
     if ent is None:
         ent = {"target_type": target_type, "target_id": target_id, "history": []}
-    ent.update({"state": state, "note": note, "hash_at_triage": current_hash, "updated_at": now})
+    ent.update({"state": state, "note": note, "hash_at_triage": current_hash, "updated_at": now, "by": by})
     ent["history"].append(rec)
     tri["entries"][key] = ent
     return ent

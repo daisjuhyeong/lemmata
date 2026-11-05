@@ -36,7 +36,7 @@
   /* ---------- state ---------- */
   const S = { status: null, view: 'home', gh: null, flow: null, pollTimer: null, error: null };
 
-  function pairedOf(st) { return st.paired !== undefined ? !!st.paired : (st.authenticated !== undefined ? !!st.authenticated : !!st.session); }
+  function pairedOf(st) { return st.authenticated !== undefined ? !!st.authenticated : (st.paired !== undefined ? !!st.paired : !!st.session); }
   function ghUser(st) {
     const g = st.github;
     if (g && g.user) return g.user;
@@ -218,7 +218,11 @@
           c.recheck ? h('span', { class: 'chip recheck' }, '↻ ' + c.recheck + ' Recheck') : h('span', { class: 'chip ok' }, '✓ 0 Recheck'),
           h('span', { class: 'chip ' + (c.findings ? 'bad' : 'plain') }, (c.findings ? '≠ ' : '') + plural(c.findings, 'finding')),
           v ? h('span', { class: 'chip plain' }, 'Paper v' + v) : h('span', { class: 'chip none' }, '∅ No paper yet'),
-          h('span', null, 'Last sync ' + ago(p.last_sync)))),
+          h('span', null, 'Last sync ' + ago(p.last_sync))),
+        h('label', { class: 'meta', style: 'display:block;margin-top:6px' },
+          h('input', { type: 'checkbox', checked: !!p.online_refs, 'aria-label': 'Check references online',
+            onchange: async ev => { const box = ev.target; box.disabled = true; try { await api('PATCH', '/api/hub/projects/' + encodeURIComponent(p.id), { online_refs: box.checked }); } catch (e) { box.checked = !box.checked; alert(e.message); } box.disabled = false; } }),
+          ' Check references online (sends bibliography titles/DOIs to OpenAlex and Crossref)')),
       h('a', { class: 'btn', href: '/p/' + encodeURIComponent(p.id) + '/', 'aria-label': 'Open ' + p.name }, 'Open'));
   }
 

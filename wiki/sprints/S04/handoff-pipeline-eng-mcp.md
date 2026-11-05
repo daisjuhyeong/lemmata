@@ -23,7 +23,7 @@ last_reviewed: 2026-11-05
 - `sync` calls `ctx.sync(pid)` then `ctx.resolve(pid)` again and diffs alarm groups/findings before and after; `ctx.sync` returns `{"changed", "head"}`.
 - Optional `ctx.write_lock` (a Lock): if present, held around `set_triage`. The hub should provide its per-project lock this way, or tools run unlocked.
 - Prompt-injection hygiene: file lines and diffs sit in `<user-file-quote>` blocks (closing tags neutralised); every result ends with a note that quoted text is data, not instructions.
-- Quoted file content and commit messages are stripped of ANSI escapes and control characters. `set_triage` appends `[by mcp]` (or `ctx.device`) to the note because the engine has no `by` field; adding one needs an engine change.
+- Quoted file content and commit messages are stripped of ANSI escapes and control characters. The same cleaning applies recursively to `structuredContent`. The data-not-instructions notice is the first line of every result. `Engine.set_triage(..., by=None)` stores `by` on the entry and history; MCP passes `mcp:<ctx.device_id>` if the ctx has `device_id`, else `mcp`.
 - `set_triage` accepts a node id/label or a finding id. It only changes Lemmata's triage state.
 
 ## Verification

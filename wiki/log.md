@@ -24,3 +24,8 @@ date | agent | operation | files touched | note
 2026-11-05 | pipeline-eng-hub | build | app/src/lemmata/hub/*, server.py, cli.py, engine/tree.py, fake_github.py, test_hub.py, handoff | multi-project hub, pairing, GitHub device flow, zip ingest, sync, MCP route; CTO items 1-7,10,11
 2026-11-05 | web-eng | build | web/hub/*, web/app.js, desktop/launcher/*, desktop/src-tauri/*, mock_hub.py, s04 screenshots, handoff | hub pages, API base, Tauri connect flow
 2026-11-05 | lead | build | app/src/lemmata/hub/routes.py | CSP allows inline styles (vendored Cytoscape)
+2026-11-05 | qa | lint | wiki/sprints/S04/qa-S04.md, wiki/index.md | S04 QA: block. 85 tests OK, e2e/browser/MCP SDK pass, golden set pass; M9 fails, M3/M6/M8 partial, new DoS via negative Content-Length (D2)
+2026-11-05 | qa | lint | wiki/sprints/S04/qa-S04.md | S04 re-test: ship with caveats. 95 tests OK; M3/M6/M9 now pass, M8 passes except UI display of triage by; D2/D3/D6/D7/D8/D9/D11/D12 fixed; online_refs needs founder approval
+2026-11-05 | pipeline-eng-hub | build | app/src/lemmata/hub/*, server.py, engine/tree.py, test_hub.py | QA round-1 fixes D1-D12 (negative Content-Length DoS, atomic zip ingest, .git aliases, Tailscale retry, Funnel header, online_refs opt-in); 95 tests
+2026-11-05 | pipeline-eng-mcp | build | app/src/lemmata/mcp.py, engine/api.py, engine/triage.py | notice first, recursive cleaning, structured triage `by`
+2026-11-05 | lead | build | docs/SETUP-two-macs.md, .github/workflows/mac-app.yml | two-Mac setup guide; CI builds the dmg for s04-hub-remote

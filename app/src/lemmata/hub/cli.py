@@ -61,12 +61,43 @@ def cmd_serve(args):
         pass
     for s in servers[1:]:
         threading.Thread(target=s.serve_forever, daemon=True).start()
+    extra = []
+    if not args.host:
+        stop = threading.Event()
+
+        def watch_tailscale():
+            """Tailscale may come up after login/boot: bind its addresses when they appear, then keep watching for new ones."""
+            logged = False
+            while not stop.wait(15):
+                try:
+                    bound = {s.server_address[0] for s in servers + extra}
+                    new = [a for a in guard.bind_addresses() if a not in bound and a not in ("127.0.0.1", "::1")]
+                    if not new:
+                        continue
+                    hub.guard.refresh()
+                    for a in new:
+                        try:
+                            s = make_hub_servers(hub, [a])[0]
+                        except (OSError, IndexError):
+                            continue
+                        extra.append(s)
+                        threading.Thread(target=s.serve_forever, daemon=True).start()
+                        if not logged:
+                            print("lemmata hub: Tailscale is up; now also listening on %s" % ", ".join(sorted({x.server_address[0] for x in extra})), flush=True)
+                            logged = True
+                except Exception as e:
+                    print("lemmata hub: tailscale watch: %s" % e, flush=True)
+
+        threading.Thread(target=watch_tailscale, name="lemmata-ts-watch", daemon=True).start()
     try:
         servers[0].serve_forever()
     except KeyboardInterrupt:
         print("\nlemmata hub: stopped", flush=True)
     finally:
         loop.stop()
+        for s in extra:
+            s.shutdown()
+            s.server_close()
         for s in servers[1:]:
             s.shutdown()
         for s in servers:
@@ -112,7 +143,9 @@ def cmd_token(args):
     print("device %s (%s)" % (did, args.device))
     print("token (shown once): %s" % token)
     print()
-    print('claude mcp add --transport http lemmata http://%s:%d/mcp --header "Authorization: Bearer %s"' % (host, port, token))
+    print('claude mcp add --scope user --transport http lemmata http://%s:%d/mcp --header "Authorization: Bearer %s"' % (host, port, token))
+    print()
+    print("WARNING: this token grants full access to the hub; keep it only in Claude Code's user config (--scope user), never in a project's .mcp.json or a repo.")
     return 0
 
 

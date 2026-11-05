@@ -14,9 +14,10 @@ last_reviewed: 2026-11-02
 - [Sprints](sprints/README.md) — [task card template](sprints/task-card-template.md)
   - S02 localhost demo: [S02-01 pipeline-eng](sprints/S02/S02-01-pipeline-eng.md) · [S02-02 web-eng](sprints/S02/S02-02-web-eng.md) · [S02-03 qa](sprints/S02/S02-03-qa.md) · [S02-04 lead](sprints/S02/S02-04-lead.md) · handoffs: [pipeline-eng](sprints/S02/handoff-pipeline-eng.md), [web-eng](sprints/S02/handoff-web-eng.md) · [QA report](sprints/S02/qa-S02-localhost-demo.md) · [lead handoff](sprints/S02/handoff-lead.md)
   - S03 macOS app: [brief](sprints/S03/S03-brief.md) · handoffs: [pipeline-eng](sprints/S03/handoff-pipeline-eng.md), [web-eng](sprints/S03/handoff-web-eng.md)
-  - S04 hub + MCP: [brief](sprints/S04/S04-brief.md) · handoffs: [hub](sprints/S04/handoff-pipeline-eng-hub.md), [mcp](sprints/S04/handoff-pipeline-eng-mcp.md), [web-eng](sprints/S04/handoff-web-eng.md)
+  - S04 hub + MCP: [brief](sprints/S04/S04-brief.md) · handoffs: [hub](sprints/S04/handoff-pipeline-eng-hub.md), [mcp](sprints/S04/handoff-pipeline-eng-mcp.md), [web-eng](sprints/S04/handoff-web-eng.md) · [QA report](sprints/S04/qa-S04.md)
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)
 - [Presentations](presentations/README.md)
 - [Compliance](compliance/README.md)
+- Setup: [Lemmata on two Macs (hub + app + Claude Code)](../docs/SETUP-two-macs.md)

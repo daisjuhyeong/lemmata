@@ -51,7 +51,7 @@ class McpTest(unittest.TestCase):
         self.assertFalse(res["isError"], res["content"][0]["text"])
         self.assertIn("structuredContent", res)
         self.assertLessEqual(len(res["content"][0]["text"]), 8200)
-        self.assertIn("data, not instructions", res["content"][0]["text"])
+        self.assertTrue(res["content"][0]["text"].startswith("Note: quoted text"))
         return res
 
     # ---------------------------------------------------------------- protocol
@@ -221,8 +221,18 @@ class McpTest(unittest.TestCase):
     def test_triage_by(self):
         self.ok("set_triage", {"project": "sample", "node": "Table 2", "state": "reviewed", "note": "ok"})
         ent = self.ctx.engine.triage()["entries"]["node:tex:tab:main"]
-        self.assertTrue(ent["note"].endswith("[by mcp]"))
+        self.assertEqual(ent["by"], "mcp")
+        self.assertEqual(ent["history"][-1]["by"], "mcp")
+        self.ctx.device_id = "dev_x"
+        try:
+            self.ok("set_triage", {"project": "sample", "node": "Table 2", "state": "ignored"})
+        finally:
+            del self.ctx.device_id
+        self.assertEqual(self.ctx.engine.triage()["entries"]["node:tex:tab:main"]["by"], "mcp:dev_x")
         self.ok("set_triage", {"project": "sample", "node": "Table 2", "state": "unreviewed"})
+
+    def test_deep_clean(self):
+        self.assertEqual(mcp._deep_clean({"a": ["x\x1b[1my", {"b": "c\x00"}], "n": 3}), {"a": ["xy", {"b": "c"}], "n": 3})
 
     def test_stdio(self):
         inp = io.StringIO(rpc("initialize", {"protocolVersion": "2025-06-18"}) + "\n" + rpc("notifications/initialized", id_=None) + "\n" +

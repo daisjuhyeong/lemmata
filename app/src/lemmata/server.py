@@ -25,6 +25,26 @@ STATIC_TYPES = {".js": "application/javascript; charset=utf-8", ".css": "text/cs
                 ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
 
 
+def parse_length(value, default=None):
+    """Content-Length as a non-negative int. Missing -> `default` (None = 400); negative or non-numeric -> 400 before any read."""
+    if value is None or not str(value).strip():
+        if default is None:
+            raise ApiError(400, "bad_request", "Content-Length is required")
+        return default
+    v = str(value).strip()
+    if not (v.isascii() and v.isdigit()):
+        raise ApiError(400, "bad_request", "bad Content-Length")
+    return int(v)
+
+
+def _accepts_by(engine):
+    import inspect
+    try:
+        return "by" in inspect.signature(engine.set_triage).parameters
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 class ApiError(Exception):
     def __init__(self, status, code, message):
         super().__init__(message)
@@ -254,10 +274,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "bad_request", "Content-Type must be application/json")
         if not self._origin_ok():
             raise ApiError(403, "forbidden", "origin not allowed")
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-        except ValueError:
-            raise ApiError(400, "bad_request", "bad Content-Length")
+        n = parse_length(self.headers.get("Content-Length"), default=0)
         if n > MAX_BODY:
             raise ApiError(413, "too_large", "request body over 64 KB")
         raw = self.rfile.read(n) if n else b""
@@ -343,6 +360,9 @@ class Handler(BaseHTTPRequestHandler):
                 for k in ("target_type", "target_id", "state"):
                     if not isinstance(body.get(k), str):
                         raise ApiError(400, "bad_request", "%s is required" % k)
+                by = getattr(self, "triage_by", None)
+                if by and _accepts_by(eng):
+                    return self._json(eng.set_triage(body["target_type"], body["target_id"], body["state"], note, by=by))
                 return self._json(eng.set_triage(body["target_type"], body["target_id"], body["state"], note))
             if r == "/links/decide":
                 for k in ("edge_id", "decision"):

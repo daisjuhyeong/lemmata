@@ -1463,8 +1463,9 @@ function renderChecks() {
       READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export report (HTML)')));
   const body = h('div', { class: 'pad', style: { flex: 1 } });
   const det = h('details', { style: { marginBottom: '12px' } }, h('summary', { class: 'muted' }, 'Status of all ' + S.findings.checks.length + ' checks'),
-    h('table', { class: 'tbl' }, S.findings.checks.map(c => h('tr', null, h('td', null, c.title), h('td', { class: 'mono' }, c.status === 'ran' ? 'Ran · ' + plural(c.count, 'finding') : 'Not applicable' + (c.note ? ' (' + c.note + ')' : '')), h('td', { class: 'muted' }, c.status === 'ran' ? c.note : '')))));
+    h('table', { class: 'tbl' }, S.findings.checks.map(c => h('tr', null, h('td', null, c.title), h('td', { class: 'mono' }, c.status === 'ran' ? 'Ran · ' + plural(c.count, 'finding') : c.status === 'not_checked' ? 'Not checked' : 'Not applicable' + (c.note ? ' (' + c.note + ')' : '')), h('td', { class: 'muted' }, c.status === 'ran' || c.status === 'not_checked' ? c.note : '')))));
   body.append(det);
+  for (const c of S.findings.checks.filter(c => c.status === 'not_checked')) body.append(h('div', { class: 'muted', style: { marginBottom: '8px' } }, 'References not checked online. ' + (c.note || '')));
   if (!all.length) body.append(h('div', { class: 'empty' }, na.length ? 'No findings from the checks that ran. ' + plural(na.length, 'check') + ' not applicable to this project.' : 'No findings. All checks passed on this scan. This does not guarantee the paper is correct.'));
   else if (!shown.length) body.append(h('div', { class: 'empty' }, 'No findings match this filter.'));
   for (const f of shown) {

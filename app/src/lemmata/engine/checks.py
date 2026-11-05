@@ -110,6 +110,10 @@ def run(G, trees):
                     cnt["unchecked"] += 1
             notes["reference_unmatched"] = "offline cache: %d matched, %d could not be matched, %d not checked" % (
                 cnt["matched"], cnt["not_found"], cnt["unchecked"])
+            if cnt["unchecked"] and not (cnt["matched"] or cnt["not_found"]):
+                status["reference_unmatched"] = "not_checked"
+                notes["reference_unmatched"] = "References not checked online: %d of %d entries unchecked (online lookup is off)" % (
+                    cnt["unchecked"], len(entries))
             # uncited
             if P.nocite_all:
                 notes["uncited_reference"] = "\\nocite{*} present; check disabled"
