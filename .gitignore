@@ -6,3 +6,11 @@ __pycache__/
 node_modules/
 *.log
 .claude/settings.local.json
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/*
+desktop/src-tauri/gen/
+app/dist/
+app/build/
+app/packaging/dist/
+app/packaging/build/
+app/packaging/.venv/

@@ -1,0 +1,55 @@
+name: mac-app
+
+# Builds Lemmata.app and Lemmata.dmg on an Apple Silicon runner and uploads the .dmg
+# as a downloadable artifact (Actions tab -> this run -> Artifacts).
+on:
+  push:
+    branches: [s03-mac-app]
+    paths: ["app/**", "desktop/**", ".github/workflows/mac-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14   # arm64 (M1)
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python tests
+        run: PYTHONPATH=app/src python -m unittest discover -s app/tests -p 'test_*.py'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Build Lemmata.app and .dmg
+        run: bash desktop/build-mac.sh
+
+      - name: Smoke-test the bundled sidecar
+        run: |
+          APP=$(find desktop/src-tauri/target -name 'Lemmata.app' -maxdepth 6 | head -1)
+          echo "app: $APP"
+          BIN=$(find "$APP/Contents/MacOS" -name 'lemmata-server*' | head -1)
+          "$BIN" demo --dir "$RUNNER_TEMP/sample" --port 0 --no-open --ready-json > ready.txt 2> err.txt &
+          PID=$!
+          for i in $(seq 1 60); do grep -q '"event"' ready.txt && break; sleep 1; done
+          cat ready.txt; tail -5 err.txt
+          URL=$(python -c "import json;print(json.loads(open('ready.txt').readline())['url'])")
+          curl -fsS "${URL}api/health"
+          kill -TERM $PID
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lemmata-macos-arm64
+          path: |
+            desktop/src-tauri/target/**/bundle/dmg/*.dmg
+          if-no-files-found: error

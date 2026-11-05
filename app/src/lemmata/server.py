@@ -274,14 +274,21 @@ def make_handler(app: App):
                     "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                     "/checkpoints": eng.checkpoints, "/triage": eng.triage}
             if method == "GET":
+                # engine reads wait for a running (re)scan: a half-built scan state must never be served
                 if r in gets:
-                    return self._json(gets[r]())
+                    with app.lock:
+                        data = gets[r]()
+                    return self._json(data)
                 if r == "/events":
-                    return self._json(eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true")))
+                    with app.lock:
+                        data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
+                    return self._json(data)
                 if r == "/analyze":
                     if not q.get("group") or not q.get("node"):
                         raise ApiError(400, "bad_request", "group and node are required")
-                    return self._json(eng.analyze(q["group"], q["node"]))
+                    with app.lock:
+                        data = eng.analyze(q["group"], q["node"])
+                    return self._json(data)
                 if r == "/file":
                     try:
                         a = int(q.get("start", "1"))
@@ -296,7 +303,8 @@ def make_handler(app: App):
                         raise ApiError(404, "not_found", "not an image")
                     return self._send(200, p.read_bytes(), ct)
                 if r == "/export":
-                    html, name = app.export_html()
+                    with app.lock:
+                        html, name = app.export_html()
                     safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in name.lower()).strip("-") or "project"
                     return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8",
                                       {"Content-Disposition": 'attachment; filename="%s-report.html"' % safe})

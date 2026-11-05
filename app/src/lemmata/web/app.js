@@ -1667,7 +1667,8 @@ document.addEventListener('keydown', ev => {
 /* ======================================================================
    BOOT
    ====================================================================== */
-async function loadAll() {
+async function loadAll(opts) {
+  opts = opts || {};
   try {
     const [project, graph, events, findings, alarms, checkpoints, triage] = await Promise.all(
       ['project', 'graph', 'events', 'findings', 'alarms', 'checkpoints', 'triage'].map(p => apiGet('/api/' + p)));
@@ -1680,17 +1681,60 @@ async function loadAll() {
   rebuildIndex();
   document.title = (S.project ? S.project.name + ' – ' : '') + PRODUCT;
   renderTopbar();
-  rebuildGraph();
+  rebuildGraph(opts.keepView ? { fit: false } : undefined);
   renderOutline(); renderTimeline();
   renderAlarms(); renderChecks(); renderLinks();
   renderDetail();
 }
+/* ---------- auto-refresh: poll /api/project every 5 s, reload in place when scanned_at changes ---------- */
+function scrollSnapshot() {
+  const out = [];
+  document.querySelectorAll('#app *').forEach(el => {
+    if (el.scrollTop > 0 || el.scrollLeft > 0) {
+      const key = el.id ? '#' + el.id : el.classList.length ? '.' + el.classList[0] : null;
+      if (!key) return;
+      out.push({ key, idx: [...document.querySelectorAll(key)].indexOf(el), top: el.scrollTop, left: el.scrollLeft });
+    }
+  });
+  return out;
+}
+function scrollRestore(snap) {
+  for (const s of snap) {
+    const el = document.querySelectorAll(s.key)[s.idx];
+    if (el) { el.scrollTop = s.top; el.scrollLeft = s.left; }
+  }
+}
+let refreshBusy = false;
+async function autoRefreshTick() {
+  if (READONLY || refreshBusy || document.hidden || S.loading || !S.project) return;
+  if (document.querySelector('.scrim')) return;   // a dialog is open; try again next tick
+  refreshBusy = true;
+  try {
+    const p = await apiGet('/api/project');
+    if (p.scanned_at && p.scanned_at !== S.project.scanned_at) {
+      const snap = scrollSnapshot();
+      await loadAll({ keepView: true });
+      requestAnimationFrame(() => scrollRestore(snap));
+      setTimeout(() => scrollRestore(snap), 60);
+      const d = new Date();
+      toast('Updated · ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'));
+    }
+  } catch (e) { /* server briefly busy or gone: stay quiet, retry next tick */ }
+  refreshBusy = false;
+}
+function startAutoRefresh() {
+  if (READONLY) return;
+  setInterval(autoRefreshTick, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); });
+}
+
 function boot() {
   buildShell();
   S.graph = { nodes: [], edges: [] }; rebuildIndex();
   setGraphMsg({ t: 'Building graph…' });
   setTab('graph');
   loadAll().then(() => {
+    startAutoRefresh();
     rememberProject();
     if (location.hash === '#/open') openPicker();
     if (location.hash === '#/alarms') setTab('alarms');

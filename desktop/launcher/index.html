@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lemmata</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="launcher.css">
+</head>
+<body>
+<main id="col">
+  <header>
+    <img src="lemmata-icon.svg" width="64" height="64" alt="">
+    <h1>Lemmata</h1>
+    <p class="tag">Check that your paper's claims rest on evidence.</p>
+  </header>
+
+  <div id="banner"></div>
+
+  <div class="actions">
+    <button id="btn-open" class="btn primary">Open Project…</button>
+    <button id="btn-sample" class="btn">Open Sample</button>
+  </div>
+  <p class="helper">Choose one folder that holds your paper, your code, or both.</p>
+  <p id="opening" class="opening hidden" role="status"></p>
+
+  <button id="adv-toggle" class="linkbtn" aria-expanded="false" aria-controls="adv">Choose paper and code folders separately</button>
+  <div id="adv" class="adv hidden">
+    <div class="row"><span class="lbl">Paper folder (.tex)</span><code id="paper-path" class="path">Not chosen</code><button id="pick-paper" class="btn sm">Choose…</button></div>
+    <div class="row"><span class="lbl">Code folder (git)</span><code id="code-path" class="path">Not chosen</code><button id="pick-code" class="btn sm">Choose…</button></div>
+    <button id="adv-open" class="btn sm" disabled>Open</button>
+  </div>
+
+  <h2>Recent projects</h2>
+  <ul id="recent" class="recent"></ul>
+  <div id="empty" class="well hidden"><strong>No projects yet</strong><br>Open a folder with your paper to begin, or try the sample first.</div>
+</main>
+<footer id="foot"></footer>
+<script src="launcher.js"></script>
+</body>
+</html>

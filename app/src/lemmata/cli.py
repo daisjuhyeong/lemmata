@@ -5,9 +5,10 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
+import signal
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -34,23 +35,121 @@ def _engine_class(fixtures):
     return Engine
 
 
+class Fatal(SystemExit):
+    """Fatal error with a short machine code (sidecar contract)."""
+
+
+def _fail(args, code, message):
+    """--ready-json: one JSON error line on stdout; otherwise a plain message on stderr. Exit code 1 either way."""
+    if getattr(args, "ready_json", False):
+        print(json.dumps({"event": "error", "code": code, "message": message}, ensure_ascii=False, separators=(",", ":")), flush=True)
+        print("lemmata: %s" % message, file=sys.stderr, flush=True)
+        raise Fatal(1)
+    raise Fatal("lemmata: %s" % message)
+
+
+def _need_git(args):
+    from lemmata.gitbin import ensure_git
+
+    if not ensure_git():
+        _fail(args, "git_missing", "git was not found. Install Apple's Command Line Tools (xcode-select --install) or git, then try again.")
+
+
+def _scan(engine, args):
+    try:
+        engine.scan()
+    except Exception as e:
+        _fail(args, "scan_failed", "scanning the project failed: %s: %s" % (type(e).__name__, e))
+
+
+def _looks_like_project(root: Path):
+    """A .lemmata/project.json, a git repo, or a .tex file within three levels."""
+    if (root / HUB / "project.json").exists():
+        return True
+    seen = 0
+    base = len(root.parts)
+    for dp, dns, fns in os.walk(root):
+        if ".git" in dns or ".git" in fns or any(f.endswith(".tex") for f in fns):
+            return True
+        dns[:] = [d for d in dns if not d.startswith(".") and d not in ("node_modules", "__pycache__")]
+        if len(Path(dp).parts) - base >= 3:
+            dns[:] = []
+        seen += len(fns)
+        if seen > 5000:
+            break
+    return False
+
+
+def _watch_parent(pid, srv):
+    """Exit (clean shutdown, hard exit after 1 s as a fallback) when process `pid` disappears."""
+    def alive():
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def loop():
+        while True:
+            time.sleep(0.5)
+            if not alive():
+                try:  # stderr may already be closed if the app was killed; never let that stop the exit
+                    print("lemmata: parent process %d is gone; exiting" % pid, file=sys.stderr, flush=True)
+                except Exception:
+                    pass
+                threading.Timer(1.0, lambda: os._exit(0)).start()
+                srv.shutdown()
+                return
+
+    threading.Thread(target=loop, name="lemmata-parent", daemon=True).start()
+
+
 def _serve(engine, args):
     from lemmata.server import bind
 
     try:
         srv = bind(engine, port=args.port)
     except OSError as e:
-        raise SystemExit("lemmata: could not start the server: %s" % e)
-    url = "http://127.0.0.1:%d" % srv.server_address[1]
-    name = engine.project().get("name", "project")
-    print("lemmata: serving %s at %s  (Ctrl-C to stop)" % (name, url), flush=True)
+        _fail(args, "bind_failed", "could not start the server: %s" % e)
+    port = srv.server_address[1]
+    url = "http://127.0.0.1:%d/" % port
+    proj = engine.project()
+    name = proj.get("name", "project")
+    root = str(Path(proj.get("root") or getattr(engine, "root", "") or ".").resolve())
+    if getattr(args, "ready_json", False):
+        print(json.dumps({"event": "ready", "url": url, "port": port, "project": name, "root": root}, ensure_ascii=False, separators=(",", ":")), flush=True)
+        print("lemmata: serving %s at %s" % (name, url), file=sys.stderr, flush=True)
+    else:
+        print("lemmata: serving %s at %s  (Ctrl-C to stop)" % (name, url.rstrip("/")), flush=True)
     if not args.no_open:
         threading.Timer(0.3, lambda: webbrowser.open(url)).start()
+    watcher = None
+    if getattr(args, "watch", False) and not args.fixtures:
+        from lemmata.watch import Watcher
+
+        watcher = Watcher(srv.app)
+        watcher.start()
+    if getattr(args, "parent_pid", None):
+        _watch_parent(args.parent_pid, srv)
+
+    def on_term(signum, frame):
+        threading.Thread(target=srv.shutdown, daemon=True).start()
+
+    try:
+        signal.signal(signal.SIGTERM, on_term)
+    except ValueError:  # not the main thread
+        pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\nrmap: stopped")
+        print("\nlemmata: stopped", file=sys.stderr, flush=True)
     finally:
+        if watcher:
+            watcher.stop()
         srv.server_close()
     return 0
 
@@ -91,46 +190,63 @@ def cmd_demo(args):
     if args.fixtures:
         engine = _engine_class(args.fixtures)(root, online=False)
         return _serve(engine, args)
-    make = Path(__file__).resolve().parents[2] / "samples" / "make_sample.py"
-    if not args.keep:
-        if root.exists():
-            if not (root / MARKER).exists():
-                raise SystemExit("lemmata: %s exists and is not a sample folder (no %s); refusing to delete it. Pick another --dir." % (root, MARKER))
+    _need_git(args)
+    if not args.keep and root.exists():
+        if root.is_dir() and not any(root.iterdir()):
+            pass  # an empty folder is fine
+        elif not (root / MARKER).exists():
+            _fail(args, "not_sample", "%s exists and is not a sample folder (no %s); refusing to delete it. Pick another --dir." % (root, MARKER))
+        else:
             shutil.rmtree(root)
     if not root.exists() or not args.keep:
-        if not make.exists():
-            raise SystemExit("lemmata: demo needs a source checkout (app/samples/make_sample.py not found).")
-        r = subprocess.run([sys.executable, str(make), str(root)])
-        if r.returncode:
-            raise SystemExit("lemmata: building the sample failed")
+        from lemmata.samples.make_sample import build
+
+        try:
+            build(root)
+        except SystemExit as e:
+            _fail(args, "scan_failed", "building the sample failed: %s" % (e.code,))
+        except Exception as e:
+            _fail(args, "scan_failed", "building the sample failed: %s: %s" % (type(e).__name__, e))
     engine = _engine_class(False)(root, online=args.online)
-    engine.scan()
+    _scan(engine, args)
     return _serve(engine, args)
 
 
 def cmd_open(args):
     root = Path(args.project_dir).expanduser().resolve()
     if not root.is_dir():
-        raise SystemExit("lemmata: %s is not a folder" % root)
+        _fail(args, "not_found", "%s is not a folder" % root)
+    for extra in (args.paper, args.code):
+        if extra and not Path(extra).expanduser().is_dir():
+            _fail(args, "not_found", "%s is not a folder" % extra)
     if args.fixtures:
         return _serve(_engine_class(args.fixtures)(root), args)
+    _need_git(args)
+    if not (args.paper or args.code or _looks_like_project(root)):
+        _fail(args, "no_project", "%s has no LaTeX files and no git repository; pick the folder that holds your paper and/or code." % root)
     _write_manifest(root, args.paper, args.code)
     engine = _engine_class(False)(root, online=args.online)
-    engine.scan()
+    _scan(engine, args)
     return _serve(engine, args)
 
 
 def cmd_serve(args):
     root = Path(args.project_dir).expanduser().resolve()
-    if not args.fixtures and not (root / HUB / "project.json").exists():
-        raise SystemExit("lemmata: %s has no %s/project.json; use `lemmata open` first." % (root, HUB))
+    if not root.is_dir():
+        _fail(args, "not_found", "%s is not a folder" % root)
+    if not args.fixtures:
+        _need_git(args)
+        if not (root / HUB / "project.json").exists():
+            _fail(args, "no_project", "%s has no %s/project.json; use `lemmata open` first." % (root, HUB))
     engine = _engine_class(args.fixtures)(root, online=args.online)
-    engine.scan()
+    _scan(engine, args)
     return _serve(engine, args)
 
 
 def cmd_scan(args):
     root = Path(args.project_dir).expanduser().resolve()
+    if not args.fixtures:
+        _need_git(args)
     engine = _engine_class(args.fixtures)(root, online=args.online)
     st = engine.scan()
     c = st.get("counts", {})
@@ -141,6 +257,8 @@ def cmd_scan(args):
 
 def cmd_checkpoint(args):
     root = Path(args.project_dir).expanduser().resolve()
+    if not args.fixtures:
+        _need_git(args)
     at = {}
     for item in args.at or []:
         if "=" not in item:
@@ -165,8 +283,11 @@ def build_parser():
                        help="run on fixture data instead of the engine (UI development)")
         p.add_argument("--online", action="store_true", help="opt in to online reference lookup (OpenAlex, Crossref)")
         if serving:
-            p.add_argument("--port", type=int, default=8765)
+            p.add_argument("--port", type=int, default=8765, help="0 = any free port")
             p.add_argument("--no-open", action="store_true", help="do not open the browser")
+            p.add_argument("--ready-json", action="store_true", help="print one JSON line (ready or error) on stdout; logs go to stderr")
+            p.add_argument("--parent-pid", type=int, default=None, help="exit within 2 s after this process disappears")
+            p.add_argument("--watch", action="store_true", help="rescan every time the project changes (polled every 3 s)")
 
     d = sub.add_parser("demo", help="build the synthetic sample, scan it and serve it")
     d.add_argument("--dir", default="~/lemmata-demo")
@@ -201,8 +322,18 @@ def build_parser():
 
 
 def main(argv=None):
+    from lemmata.gitbin import restore_loader_env
+
+    restore_loader_env()
     args = build_parser().parse_args(argv)
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except Fatal:
+        raise
+    except Exception as e:  # with --ready-json the caller always gets a JSON error line
+        if getattr(args, "ready_json", False):
+            _fail(args, "scan_failed", "%s: %s" % (type(e).__name__, e))
+        raise
 
 
 if __name__ == "__main__":

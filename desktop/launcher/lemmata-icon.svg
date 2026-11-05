@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Lemmata">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6F4EE"/>
+      <stop offset="1" stop-color="#EAE6DA"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#1F2A44" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#body)" filter="url(#shadow)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" ry="184.5" fill="none" stroke="#1F2A44" stroke-opacity="0.12"/>
+  <g stroke="#1F2A44" stroke-width="52" stroke-linecap="round" fill="none">
+    <path d="M512 300L360 512M512 300L664 512"/>
+    <path d="M360 512L280 724M360 512L512 724M664 512L512 724M664 512L744 724"/>
+  </g>
+  <g stroke="#F6F4EE" stroke-width="14">
+    <circle cx="512" cy="300" r="78" fill="#1F2A44"/>
+    <circle cx="360" cy="512" r="64" fill="#2A7354"/>
+    <circle cx="664" cy="512" r="64" fill="#1F2A44"/>
+    <circle cx="280" cy="724" r="56" fill="#1F2A44"/>
+    <circle cx="744" cy="724" r="56" fill="#1F2A44"/>
+  </g>
+  <circle cx="512" cy="724" r="58" fill="#E3B25E" stroke="#1F2A44" stroke-width="22"/>
+</svg>
