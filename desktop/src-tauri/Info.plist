@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Approved by Juhyeong on 2026-11-05: the Lemmata hub runs on his Mac mini over Tailscale with plain http
+       (Tailscale encrypts the link). App Transport Security blocks such loads in the web view by default.
+       The window's navigation guard (server.rs allow_navigation) still restricts the web view to the local
+       launcher, loopback and the one connected hub origin; every other URL opens in the default browser.
+       Follow-up: serve the hub over Tailscale HTTPS and drop this exception. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

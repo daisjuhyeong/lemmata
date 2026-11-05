@@ -38,6 +38,7 @@ jobs:
         run: |
           APP=$(find desktop/src-tauri/target -name 'Lemmata.app' -maxdepth 6 | head -1)
           echo "app: $APP"
+          plutil -p "$APP/Contents/Info.plist" | grep -E "NSAllowsArbitraryLoadsInWebContent|NSAllowsLocalNetworking"
           BIN=$(find "$APP/Contents/MacOS" -name 'lemmata-server*' | head -1)
           "$BIN" demo --dir "$RUNNER_TEMP/sample" --port 0 --no-open --ready-json > ready.txt 2> err.txt &
           PID=$!

@@ -32,3 +32,4 @@ date | agent | operation | files touched | note
 2026-11-05 | lead | build | app/src/lemmata/hub/launchd.py, app/tests/test_hub.py | hub install without --data used None (crash on Mac mini); default to ~/Lemmata; 96 tests pass on 3.13 and 3.15
 2026-11-05 | lead | build | app/src/lemmata/hub/guard.py, hub/cli.py, test_hub.py | hub under launchd did not detect Tailscale (CLI fails there) -> loopback only; detect Tailscale IPs from interfaces, cache names from interactive runs
 2026-11-05 | lead | build | app/src/lemmata/hub/launchd.py | reinstall hit 'Bootstrap failed: 5' (bootout is async); wait for teardown and retry
+2026-11-05 | lead | build | desktop/src-tauri/Info.plist, .github/workflows/mac-app.yml | app showed a broken launcher when connecting: macOS ATS blocks http in the web view; ATS exception approved by Juhyeong (navigation guard still limits the window to the hub); CI checks the key
