@@ -40,3 +40,12 @@ test('mapPath ignores inherited keys such as __proto__', () => {
   assert.equal(mapPath({ code: 'A' }, '__proto__', 'x.py'), null);
   assert.equal(mapPath({ code: 'A' }, 'constructor', 'x.py'), null);
 });
+test('mapPath with a paper subdir: paper/<rel> -> <folder>/<subdir>/<rel>; code is untouched', () => {
+  const f = { code: 'A', paper: 'A' }, sd = { paper: 'docs/paper/' };
+  assert.deepEqual(mapPath(f, 'paper', 'sec/intro.tex', sd), { folder: 'A', rel: 'docs/paper/sec/intro.tex' });
+  assert.deepEqual(mapPath(f, 'code', 'train.py', sd), { folder: 'A', rel: 'train.py' });
+  assert.deepEqual(mapPath(f, 'paper', 'main.tex', {}), { folder: 'A', rel: 'main.tex' });
+});
+test('mapPath refuses a hostile subdir from the server', () => {
+  for (const s of ['..', '../x', '/etc', 'a/../../b', 'C:/x', 'a\\b']) assert.equal(mapPath({ paper: 'A' }, 'paper', 'main.tex', { paper: s }), null, s);
+});

@@ -15,12 +15,20 @@ export function safeRel(rel: string): string | null {
 
 export interface Mapped { folder: string; rel: string }
 
-/** `folders` is the binding's role -> folder key table ({code: key, paper: key}). */
-export function mapPath(folders: { [role: string]: string | undefined }, repo: string, rel: string): Mapped | null {
+/**
+ * `folders` is the binding's role -> folder key table ({code: key, paper: key}).
+ * `subdirs` (role -> folder inside the workspace folder): when the paper lives in a subfolder of a repo, hub path
+ * paper/<rel> becomes <folder>/<subdir>/<rel>. The subdir comes from the server too, so it gets the same checks.
+ */
+export function mapPath(folders: { [role: string]: string | undefined }, repo: string, rel: string, subdirs?: { [role: string]: string | undefined }): Mapped | null {
   const key = Object.prototype.hasOwnProperty.call(folders, repo) ? folders[repo] : undefined;
   const r = safeRel(rel);
   if (!key || !r) return null;
-  return { folder: key, rel: r };
+  const sd = subdirs && Object.prototype.hasOwnProperty.call(subdirs, repo) ? subdirs[repo] : undefined;
+  if (sd === undefined || sd === '') return { folder: key, rel: r };
+  const s = safeRel(sd.replace(/\/+$/, ''));
+  if (!s) return null;
+  return { folder: key, rel: s + '/' + r };
 }
 
 /** Display form used in the panel for paths that are not mapped: code/configs/default.yaml. */

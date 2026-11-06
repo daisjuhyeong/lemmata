@@ -24,7 +24,8 @@ def parse_time(s):
 def read_commits(path):
     """First-parent history, chronological: [{rev, time, message, subject, files:[{path,status,sha,mode}]}]."""
     fmt = "%x01%H%x00%cI%x00%B%x02"
-    p = treemod.run_git(path, ["log", "--first-parent", "--no-renames", "--raw", "-r", "--no-abbrev", "--format=" + fmt, "HEAD"], check=False)
+    sub = ["--relative", "HEAD", "--", "."] if treemod.show_prefix(path) else ["HEAD"]  # repo = subfolder of a clone: history filtered to it
+    p = treemod.run_git(path, ["log", "--first-parent", "--no-renames", "--raw", "-r", "--no-abbrev", "--format=" + fmt] + sub, check=False)
     if p.returncode != 0:
         return []
     out = []

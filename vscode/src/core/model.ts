@@ -106,13 +106,13 @@ function sevFor(base: Sev, state: TriageState): Sev | null {
 }
 
 /** Diagnostics for the repos that matched a workspace folder (`folders`: repo id -> folder key). Others are panel-only. */
-export function toDiagnostics(model: Model, folders: { [repo: string]: string | undefined }): Diag[] {
+export function toDiagnostics(model: Model, folders: { [repo: string]: string | undefined }, subdirs?: { [repo: string]: string | undefined }): Diag[] {
   const out: Diag[] = [];
   for (const g of model.groups) {
     for (const n of g.nodes) {
       if (n.role === 'removed' || !n.loc) continue;
       const sev = sevFor('warning', n.triage);
-      const m = mapPath(folders, n.loc.repo, n.loc.path);
+      const m = mapPath(folders, n.loc.repo, n.loc.path, subdirs);
       if (!sev || !m) continue;
       out.push({ folder: m.folder, rel: m.rel, line0: (n.loc.line || 1) - 1, severity: sev, source: 'Lemmata', kind: 'alarm', targetId: n.nodeId, code: g.display,
         message: 'Recheck: ' + n.name + ' — ' + [g.short, g.subject].filter(Boolean).join(' ') + ' (' + n.relation + ')' });
@@ -123,7 +123,7 @@ export function toDiagnostics(model: Model, folders: { [repo: string]: string | 
       const sev = sevFor(f.severity === 'info' ? 'information' : 'warning', f.triage);
       if (!sev) continue;
       for (const l of f.locs) {
-        const m = mapPath(folders, l.repo, l.path);
+        const m = mapPath(folders, l.repo, l.path, subdirs);
         if (!m) continue;
         out.push({ folder: m.folder, rel: m.rel, line0: (l.line || 1) - 1, severity: sev, source: 'Lemmata', kind: 'finding', targetId: f.id, code: f.check, message: f.message });
       }

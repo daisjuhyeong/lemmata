@@ -232,13 +232,15 @@ class HubHandler(Handler):
             dev, _ = self._session()
             gh = hub.gh.stored()
             c = hub.cfg.load()
-            return self._json({"ok": True, "hub": True, "version": __version__, "authenticated": bool(dev),
+            st = {"ok": True, "hub": True, "version": __version__, "authenticated": bool(dev),
                                "paired": bool(hub.auth.devices()), "github_connected": bool(gh),
                                "github_configured": bool(c.get("github_client_id")),
-                               "overleaf_configured": hub.mgr.ol.configured(),
                                "owner": c.get("owner") if dev else None,
                                "user": hub.gh.user_public() if dev else None,
-                               "device": dev["name"] if dev else None})
+                               "device": dev["name"] if dev else None}
+            if hub.mgr.overleaf_on():
+                st["overleaf_configured"] = hub.mgr.ol.configured()
+            return self._json(st)
         if (method, r) == ("POST", "/pair"):
             body = self._json_body()
             code, device = body.get("code"), body.get("device", "device")
@@ -266,6 +268,8 @@ class HubHandler(Handler):
         if (method, r) == ("GET", "/github/repos"):
             return self._json(hub.gh.repos(q.get("q", "")))
         # --- Overleaf token (never echoed back)
+        if r.startswith("/overleaf") and not hub.mgr.overleaf_on():
+            return self._json({"error": "feature_disabled"}, 404)
         if r == "/overleaf/token":
             if method == "PUT":
                 body = self._body()
@@ -281,7 +285,10 @@ class HubHandler(Handler):
                 return self._json({"projects": hub.mgr.list()})
             if method == "POST":
                 body = self._body()
-                return self._json(hub.mgr.create(body.get("name"), body.get("code_repo"), body.get("branch"), body.get("paper_overleaf")), 201)
+                if body.get("paper_overleaf") not in (None, "") and not hub.mgr.overleaf_on():
+                    return self._json({"error": "feature_disabled"}, 404)
+                return self._json(hub.mgr.create(body.get("name"), body.get("code_repo"), body.get("branch"), body.get("paper_overleaf"),
+                                                 body.get("paper_repo"), body.get("paper_branch"), body.get("paper_subdir")), 201)
         m = re.match(r"^/projects/([a-z0-9-]{1,64})(/paper|/sync|/paper-source)?$", r)
         if m:
             pid, sub = m.group(1), m.group(2)
@@ -293,7 +300,9 @@ class HubHandler(Handler):
                 return self._json(hub.mgr.sync(pid))
             if sub == "/paper-source" and method == "POST":
                 body = self._body()
-                return self._json(hub.mgr.set_paper_source(pid, body.get("kind"), body.get("project")))
+                if body.get("kind") == "overleaf" and not hub.mgr.overleaf_on():
+                    return self._json({"error": "feature_disabled"}, 404)
+                return self._json(hub.mgr.set_paper_source(pid, body.get("kind"), body.get("project"), body.get("repo"), body.get("branch"), body.get("subdir")))
             if sub == "/paper" and method == "POST":
                 return self._json(self._paper(pid))
             if sub is None and method == "GET":

@@ -91,14 +91,14 @@ def main(work):
     call("POST", "/api/hub/projects/%s/paper" % pid, ctype="application/zip", raw=zip_of(sample / "paper", "cp1"))
     call("POST", "/p/%s/api/checkpoints" % pid, {"note": "CP1 from the sample", "at": {"code": cp1}})
     call("POST", "/api/hub/projects/%s/paper" % pid, ctype="application/zip", raw=zip_of(sample / "paper", "HEAD"))
-    # Pretend the paper is an Overleaf project (matching only; no fetch happens in these tests).
+    # Pretend the paper is its own GitHub repo (matching only; no fetch happens in these tests).
     meta_path = data / "projects" / pid / "project.json"
     meta = json.loads(meta_path.read_text())
-    meta["paper_source"] = {"kind": "overleaf", "project_id": "65a1b2c3d4e5f60718293a4b"}
+    meta["paper_source"] = {"kind": "github", "repo": "alice/demo-paper", "branch": "main"}
     meta_path.write_text(json.dumps(meta, indent=1) + "\n")
 
     print(json.dumps({"url": "http://127.0.0.1:%d" % port, "token": token, "pid": pid, "sample": str(sample), "cp1": cp1,
-                      "overleaf_id": "65a1b2c3d4e5f60718293a4b", "data": str(data)}), flush=True)
+                      "paper_repo": "alice/demo-paper", "data": str(data)}), flush=True)
     try:
         sys.stdin.read()
     finally:

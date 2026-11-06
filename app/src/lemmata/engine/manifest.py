@@ -47,7 +47,7 @@ def resolve(root, man):
         if not abs_.is_dir():
             raise BadRequest("repo %r: folder %s does not exist" % (rid, abs_))
         repos.append({"id": rid, "role": r["role"], "path": r.get("path", "."), "abs_path": str(abs_),
-                      "main_tex": r.get("main_tex"), "exclude": r.get("exclude") or []})
+                      "git_subdir": bool(r.get("git_subdir")), "main_tex": r.get("main_tex"), "exclude": r.get("exclude") or []})
     if not repos:
         raise BadRequest("project.json lists no repos")
     if sum(1 for r in repos if r["role"] == "paper") > 1:

@@ -27,8 +27,10 @@
     try { r = await fetch(path, opt); } catch (e) { const x = new Error('Cannot reach the Lemmata server.'); x.network = true; throw x; }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status));
-      e.status = r.status; e.code = j.error && j.error.code; throw e;
+      // errors are {error:{code,message}}; a switched-off feature answers {error:"feature_disabled"}
+      const str = typeof j.error === 'string' ? j.error : null;
+      const e = new Error((j.error && j.error.message) || (str === 'feature_disabled' ? 'That option is switched off.' : 'HTTP ' + r.status));
+      e.status = r.status; e.code = str || (j.error && j.error.code); throw e;
     }
     return j;
   }
@@ -65,7 +67,7 @@
       h('button', { class: 'btn sm', onclick: signOut }, 'Sign out')].filter(Boolean));
   }
   function showFatal(e) {
-    clear(root).append(h('h1', null, 'Lemmata'), h('div', { class: 'alert', role: 'alert' }, h('b', null, '✕ Server unreachable. '), e.message),
+    clear(root).append(h('h1', null, 'Lemmata'), h('div', { class: 'alert', role: 'alert' }, h('b', null, '✕ Cannot reach the server. '), e.message),
       h('div', { class: 'acts' }, h('button', { class: 'btn', onclick: boot }, 'Retry')));
   }
   function errBox(msg) { return msg ? h('div', { class: 'alert', role: 'alert' }, h('b', null, '✕ '), msg) : null; }
@@ -117,7 +119,7 @@
     if (S.flow) return flowCard(box);
     box.append(h('div', { class: 'card' },
       h('h2', null, 'Sign in with GitHub'),
-      h('p', null, 'Signing in connects your GitHub repositories. Lemmata can then list them and clone the one you pick.'),
+      h('p', null, 'Signing in lets Lemmata see your GitHub repositories, so you can pick your code and your paper from a list.'),
       errBox(err),
       h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'gh-start', onclick: () => startFlow(box) }, 'Sign in with GitHub'))));
   }
@@ -182,26 +184,35 @@
     if (d < 90) return 'just now';
     if (d < 3600) return Math.round(d / 60) + ' min ago';
     if (d < 86400) return Math.round(d / 3600) + ' h ago';
-    return Math.round(d / 86400) + ' d ago';
+    return Math.round(d / 86400) + ' days ago';
+  }
+  /* The paper source, in words. */
+  function paperWords(p) {
+    const ps = p.paper_source || {}, v = p.paper_versions || 0;
+    if (ps.kind === 'github') {
+      const same = ps.repo === p.code_repo;
+      if (ps.subdir) return 'Paper: the folder ' + ps.subdir + '/ ' + (same ? 'in your code repo' : 'in ' + ps.repo) + ' (GitHub)';
+      return 'Paper: GitHub repo ' + ps.repo;
+    }
+    if (ps.kind === 'overleaf') return 'Paper: Overleaf project (no longer supported here)';
+    return v ? 'Paper: uploaded zip, version ' + v : 'No paper yet';
   }
   async function viewHome() {
     clear(root);
     const user = ghUser(S.status);
-    const head = h('div', { class: 'row wrap', style: 'margin-bottom:16px' }, h('h1', { class: 'grow', style: 'margin:0' }, 'Projects'),
+    const head = h('div', { class: 'pagehead' }, h('h1', { class: 'grow' }, 'Projects'),
       user ? h('button', { class: 'btn primary', id: 'new-project', onclick: () => { S.view = 'new'; route(); } }, 'New project') : null);
     const signin = h('div', { id: 'signin' });
     const list = h('div', { id: 'plist' }, h('p', { class: 'muted' }, 'Loading…'));
     root.append(head);
     if (!user) { root.append(signin); signInCard(signin); }
-    const ol = h('div', { id: 'overleaf' });
-    root.append(ol); overleafCard(ol);
     root.append(list);
     try {
       const r = await api('GET', '/api/hub/projects');
       clear(list);
       if (!r.projects.length) {
         list.append(h('div', { class: 'well' }, h('strong', null, 'No projects yet'), h('br'),
-          user ? 'Pick a GitHub repository to start.' : 'Sign in with GitHub, then pick a repository.'));
+          user ? 'A project is your code on GitHub plus your paper. Press New project to start.' : 'Sign in with GitHub first, then pick your code repository.'));
       }
       for (const p of r.projects) list.append(projRow(p));
     } catch (e) {
@@ -209,118 +220,90 @@
       clear(list).append(errBox(e.message));
     }
   }
-  /* ---------- Overleaf token ---------- */
-  function overleafCard(box, err, saved) {
-    clear(box);
-    const on = !!S.status.overleaf_configured;
-    const card = h('div', { class: 'card', id: 'ol-card' }, h('h2', null, 'Overleaf'));
-    if (on) {
-      card.append(...[h('p', null, h('span', { class: 'chip ok' }, '✓ Token saved'), ' ', saved ? 'Saved. ' : '', 'Lemmata can read your Overleaf projects with git. It never writes to Overleaf, and it never shows the token again.'),
-        err ? errBox(err) : null,
-        h('div', { class: 'acts' },
-          h('button', { class: 'btn', id: 'ol-replace', onclick: () => overleafForm(box, true) }, 'Replace token…'),
-          h('button', { class: 'btn', id: 'ol-remove', onclick: async ev => {
-            ev.target.disabled = true;
-            try { await api('DELETE', '/api/hub/overleaf/token'); S.status = await api('GET', '/api/hub/status'); overleafCard(box); }
-            catch (e) { overleafCard(box, e.message); }
-          } }, 'Remove'))].filter(Boolean));
-    } else {
-      return overleafForm(box, false, err);
-    }
-    box.append(card);
-  }
-  function overleafForm(box, replacing, err) {
-    clear(box);
-    const inp = h('input', { type: 'password', id: 'ol-token', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf Git authentication token', placeholder: 'olp_…' });
-    const save = h('button', { class: 'btn primary', id: 'ol-save', disabled: true }, 'Save token');
-    inp.addEventListener('input', () => { save.disabled = !inp.value.trim(); });
-    const go = async () => {
-      const t = inp.value.trim(); if (!t) return;
-      save.disabled = true; save.textContent = 'Saving…';
-      try {
-        await api('PUT', '/api/hub/overleaf/token', { token: t });
-        inp.value = '';
-        S.status = await api('GET', '/api/hub/status');
-        overleafCard(box, null, true);
-      } catch (e) { save.disabled = false; save.textContent = 'Save token'; clear(msg).append(errBox(e.message)); }
-    };
-    save.addEventListener('click', go);
-    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
-    const msg = h('div', null, errBox(err));
-    box.append(h('div', { class: 'card', id: 'ol-card' },
-      h('h2', null, 'Overleaf'),
-      h('p', null, 'Connect Overleaf so the paper comes straight from your Overleaf project (no more zip uploads). This needs Overleaf with Git integration (a paid plan).'),
-      h('ol', { class: 'howto' },
-        h('li', null, 'Open ', h('a', { href: 'https://www.overleaf.com/user/settings', target: '_blank', rel: 'noopener noreferrer' }, 'Overleaf account settings ↗'), '.'),
-        h('li', null, 'Find ', h('b', null, 'Git Integration'), ' (Account Settings → Git Integration) and choose ', h('b', null, 'Generate token'), '.'),
-        h('li', null, 'Copy the token now (Overleaf shows it once) and paste it here.')),
-      msg, inp,
-      h('div', { class: 'acts' }, save, replacing ? h('button', { class: 'btn', onclick: () => overleafCard(box) }, 'Cancel') : null),
-      h('p', { class: 'muted', style: 'margin:12px 0 0;font-size:12px' }, 'The token is stored on the Mac mini only, readable by you alone. This page will not show it again.')));
-  }
-  function paperChip(p) {
-    const v = p.paper_versions || 0, ps = p.paper_source || {};
-    if (ps.kind === 'overleaf') return h('span', { class: 'chip ok' }, '✓ Overleaf' + (v ? ' · v' + v : ''));
-    return v ? h('span', { class: 'chip plain' }, 'Paper v' + v + ' (zip)') : h('span', { class: 'chip none' }, '∅ No paper yet');
-  }
   function projRow(p) {
     const c = p.counts || { recheck: 0, findings: 0 };
-    const v = p.paper_versions || 0;
+    const none = !(p.paper_source && p.paper_source.kind === 'github') && !(p.paper_versions || 0);
     return h('div', { class: 'proj' },
       h('div', { class: 'grow' },
         h('div', { class: 'nm' }, p.name),
         h('div', { class: 'meta' },
-          h('span', { class: 'mono' }, p.code_repo + (p.branch ? '@' + p.branch : '')),
-          c.recheck ? h('span', { class: 'chip recheck' }, '↻ ' + c.recheck + ' Recheck') : h('span', { class: 'chip ok' }, '✓ 0 Recheck'),
-          h('span', { class: 'chip ' + (c.findings ? 'bad' : 'plain') }, (c.findings ? '≠ ' : '') + plural(c.findings, 'finding')),
-          paperChip(p),
-          h('span', null, 'Last sync ' + ago(p.last_sync))),
-        h('label', { class: 'meta', style: 'display:block;margin-top:6px' },
+          h('span', null, 'Code: ', h('span', { class: 'mono' }, p.code_repo + (p.branch ? ' (' + p.branch + ')' : ''))),
+          h('span', { class: none ? 'warn' : '' }, paperWords(p)),
+          h('span', null, 'Last synced ' + ago(p.last_sync))),
+        h('div', { class: 'meta' },
+          c.recheck ? h('span', { class: 'chip recheck' }, '↻ ' + plural(c.recheck, 'thing') + ' to look at') : h('span', { class: 'chip ok' }, '✓ Nothing to look at'),
+          c.findings ? h('span', { class: 'chip bad' }, plural(c.findings, 'check') + ' about your paper') : null),
+        h('label', { class: 'meta opt' },
           h('input', { type: 'checkbox', checked: !!p.online_refs, 'aria-label': 'Check references online',
             onchange: async ev => { const box = ev.target; box.disabled = true; try { await api('PATCH', '/api/hub/projects/' + encodeURIComponent(p.id), { online_refs: box.checked }); } catch (e) { box.checked = !box.checked; alert(e.message); } box.disabled = false; } }),
-          ' Check references online (sends bibliography titles/DOIs to OpenAlex and Crossref)')),
+          ' Look up my references online (sends their titles and DOIs to OpenAlex and Crossref)')),
       h('a', { class: 'btn', href: '/p/' + encodeURIComponent(p.id) + '/', 'aria-label': 'Open ' + p.name }, 'Open'));
   }
 
   /* ---------- new project ---------- */
+  function repoPicker(id, label, onPick) {
+    const list = h('ul', { class: 'repos', id, 'aria-label': label });
+    const search = h('input', { type: 'search', id: id + '-q', placeholder: 'Search your repositories', 'aria-label': 'Search: ' + label, autocomplete: 'off' });
+    const box = h('div', null, search, list, h('div', { class: 'errslot' }));
+    let timer = null, seq = 0, picked = null;
+    const errs = box.lastChild;
+    async function load(q) {
+      const my = ++seq;
+      clear(list).append(h('li', { class: 'muted pad' }, 'Loading repositories…'));
+      try {
+        const r = await api('GET', '/api/hub/github/repos?q=' + encodeURIComponent(q || ''));
+        if (my !== seq) return;
+        clear(list); clear(errs);
+        if (!r.repos.length) list.append(h('li', { class: 'muted pad' }, q ? 'No repository matches “' + q + '”.' : 'No repositories found.'));
+        for (const rp of r.repos) {
+          const b = h('button', { 'aria-pressed': String(!!picked && picked.full_name === rp.full_name), onclick: () => {
+            picked = rp; onPick(rp);
+            for (const x of list.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); } },
+            h('span', { class: 'grow' }, h('div', { class: 'mono' }, rp.full_name), rp.description ? h('div', { class: 'desc' }, rp.description) : null),
+            rp.private ? h('span', { class: 'chip plain' }, 'Private') : null,
+            h('span', { class: 'muted small' }, rp.pushed_at ? 'updated ' + ago(rp.pushed_at) : ''));
+          list.append(h('li', null, b));
+        }
+      } catch (e) {
+        if (my !== seq) return;
+        clear(list); clear(errs).append(errBox(e.status === 401 || e.status === 403 ? 'GitHub is not connected. Sign in from the Projects page.' : e.message));
+      }
+    }
+    search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => load(search.value.trim()), 250); });
+    return { box, load, search, get picked() { return picked; } };
+  }
   function viewNew() {
     clear(root);
-    let picked = null, zip = null, mode = S.status.overleaf_configured ? 'overleaf' : 'zip', busy = false, reposTimer = null, seq = 0;
+    let zip = null, mode = 'repo', busy = false;
     const errs = h('div');
-    const list = h('ul', { class: 'repos', id: 'repos', 'aria-label': 'Your GitHub repositories' });
-    const search = h('input', { type: 'search', id: 'repo-q', placeholder: 'Search your repositories', 'aria-label': 'Search repositories', autocomplete: 'off' });
     const createBtn = h('button', { class: 'btn primary', id: 'create', disabled: true }, 'Create project');
+    const code = repoPicker('repos', 'Your GitHub repositories', () => { createBtn.disabled = busy; });
+    const paper = repoPicker('paper-repos', 'GitHub repositories for the paper', () => { clear(errs); });
+    const sub = h('input', { type: 'text', id: 'paper-subdir', value: 'paper', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Folder of the paper inside the code repository' });
     const dropMsg = h('div'); const fileIn = h('input', { type: 'file', accept: '.zip,application/zip', class: 'hidden', id: 'zipfile' });
     const drop = h('div', { class: 'drop', id: 'drop' }, dropMsg);
     const progress = h('div', { class: 'hidden', id: 'progress' });
     const form = h('div');
-    const olIn = h('input', { type: 'text', id: 'ol-link', placeholder: 'https://www.overleaf.com/project/…  or the 24-character project id', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf project link' });
-    const olBox = h('div', { id: 'ol-box' }), zipBox = h('div', { id: 'zip-box' });
-    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Paper source' });
-    const olOk = () => /[0-9a-f]{24}/i.test(olIn.value);
+    const repoBox = h('div', { id: 'paper-repo-box' }), folderBox = h('div', { id: 'paper-folder-box' }), zipBox = h('div', { id: 'zip-box' });
+    const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Where your paper lives' });
+    const MODES = [['repo', 'A GitHub repo of its own'], ['folder', 'A folder in the code repo'], ['zip', 'Upload a zip instead']];
     function paintMode() {
-      clear(tabs).append(...[['overleaf', 'Overleaf project link'], ['zip', 'Drop a zip']].map(([k, label]) =>
-        h('button', { class: 'btn sm', 'aria-pressed': String(mode === k), onclick: () => { mode = k; paintMode(); } }, label)));
-      olBox.classList.toggle('hidden', mode !== 'overleaf'); zipBox.classList.toggle('hidden', mode !== 'zip');
-      clear(olNote);
-      if (!S.status.overleaf_configured) olNote.append(h('div', { class: 'notice' }, 'No Overleaf token is saved on the server yet. ',
-        h('a', { href: '/' }, 'Save it on the Projects page'), ' first, or add the paper later.'));
+      clear(tabs).append(...MODES.map(([k, label]) =>
+        h('button', { class: 'btn sm', 'aria-pressed': String(mode === k), onclick: () => { mode = k; clear(errs); paintMode(); } }, label)));
+      repoBox.classList.toggle('hidden', mode !== 'repo'); folderBox.classList.toggle('hidden', mode !== 'folder'); zipBox.classList.toggle('hidden', mode !== 'zip');
     }
-    const olNote = h('div');
-    olIn.addEventListener('input', () => { clear(errs); });
-
     function paintDrop() {
       clear(dropMsg);
       drop.classList.toggle('has', !!zip);
       if (zip) dropMsg.append(h('div', null, '✓ ', h('b', { class: 'mono' }, zip.name), ' ', h('span', { class: 'muted' }, '(' + (zip.size / 1048576).toFixed(1) + ' MB)')),
-        h('div', { style: 'margin-top:8px' }, h('button', { class: 'linkbtn', onclick: () => { zip = null; paintDrop(); } }, 'Remove')));
-      else dropMsg.append(h('div', null, 'Drop your Overleaf source zip here'), h('div', { class: 'muted', style: 'margin:4px 0 8px' }, 'or'),
-        h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Choose zip file…'));
+        h('div', { class: 'gap' }, h('button', { class: 'linkbtn', onclick: () => { zip = null; paintDrop(); } }, 'Remove')));
+      else dropMsg.append(h('div', null, 'Drop the zip of your paper folder here'), h('div', { class: 'muted gap' }, 'or'),
+        h('button', { class: 'btn sm', onclick: () => fileIn.click() }, 'Choose a zip file…'));
     }
     function setZip(f) {
       if (!f) return;
-      if (!/\.zip$/i.test(f.name) && f.type !== 'application/zip') { clear(errs).append(errBox('That is not a .zip file. In Overleaf choose Menu → Download → Source.')); return; }
-      if (f.size > 100 * 1048576) { clear(errs).append(errBox('That zip is larger than 100 MB. Remove large figures or data from the Overleaf project first.')); return; }
+      if (!/\.zip$/i.test(f.name) && f.type !== 'application/zip') { clear(errs).append(errBox('That is not a .zip file. Zip the folder that holds your main .tex file and upload that.')); return; }
+      if (f.size > 100 * 1048576) { clear(errs).append(errBox('That zip is larger than 100 MB. Leave large data or figures you do not need out of it.')); return; }
       clear(errs); zip = f; paintDrop();
     }
     fileIn.addEventListener('change', () => { setZip(fileIn.files[0]); fileIn.value = ''; });
@@ -331,69 +314,58 @@
     for (const ev of ['dragover', 'drop']) window.addEventListener(ev, e => e.preventDefault());
     paintDrop();
 
-    async function loadRepos(q) {
-      const my = ++seq;
-      clear(list).append(h('li', { class: 'muted', style: 'padding:12px' }, 'Loading repositories…'));
-      try {
-        const r = await api('GET', '/api/hub/github/repos?q=' + encodeURIComponent(q || ''));
-        if (my !== seq) return;
-        clear(list);
-        if (!r.repos.length) list.append(h('li', { class: 'muted', style: 'padding:12px' }, q ? 'No repository matches “' + q + '”.' : 'No repositories found.'));
-        for (const rp of r.repos) {
-          const b = h('button', { 'aria-pressed': String(!!picked && picked.full_name === rp.full_name), onclick: () => { picked = rp; createBtn.disabled = busy; for (const x of list.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); } },
-            h('span', { class: 'grow' }, h('div', { class: 'mono' }, rp.full_name), rp.description ? h('div', { class: 'desc' }, rp.description) : null),
-            rp.private ? h('span', { class: 'chip plain' }, 'Private') : null,
-            h('span', { class: 'muted', style: 'font-size:12px' }, rp.pushed_at ? 'pushed ' + ago(rp.pushed_at) : ''));
-          list.append(h('li', null, b));
-        }
-      } catch (e) {
-        if (my !== seq) return;
-        clear(list); clear(errs).append(errBox(e.status === 401 || e.status === 403 ? 'GitHub is not connected. Sign in from the Projects page.' : e.message));
-      }
-    }
-    search.addEventListener('input', () => { clearTimeout(reposTimer); reposTimer = setTimeout(() => loadRepos(search.value.trim()), 250); });
-
-    let paperKind = 'none';   // fixed when Create is pressed: none | overleaf | zip
-    const steps = () => [['clone', 'Cloning and scanning the repository'], ['paper', paperKind === 'overleaf' ? 'Fetching the paper from Overleaf and rescanning' : 'Uploading paper and rescanning']];
+    let paperKind = 'none';   // fixed when Create is pressed: none | github | zip
     function paintProgress(state, detail) {   // state: {clone, paper} each wait|active|done|fail|skip
-      clear(progress).append(h('h2', null, 'Creating ' + picked.full_name), h('ul', { class: 'steps', 'aria-live': 'polite' },
-        steps().filter(s => !(s[0] === 'paper' && paperKind === 'none')).map(([k, label]) => {
+      const rows = [['clone', 'Copying your code from GitHub and reading it'],
+        ['paper', paperKind === 'github' ? 'Copying your paper from GitHub' : 'Uploading your paper']].filter(s => !(s[0] === 'paper' && paperKind !== 'zip'));
+      clear(progress).append(h('h2', null, 'Creating ' + code.picked.full_name), h('ul', { class: 'steps', 'aria-live': 'polite' },
+        rows.map(([k, label]) => {
           const st = state[k];
           return h('li', { class: st }, h('span', { class: 'ic' }, st === 'done' ? '✓' : st === 'fail' ? '✕' : st === 'active' ? '…' : '·'), label,
-            k === 'paper' && st === 'active' && typeof detail === 'number' && paperKind === 'zip' ? h('span', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(detail) }, h('i', { style: 'width:' + detail + '%' })) : null);
+            k === 'paper' && st === 'active' && typeof detail === 'number' ? h('span', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(detail) }, h('i', { style: 'width:' + detail + '%' })) : null);
         })), detail && typeof detail === 'object' ? detail : []);
     }
-    function addPaper(proj, link, file, onPct) {
-      return link ? api('POST', '/api/hub/projects/' + encodeURIComponent(proj.id) + '/paper-source', { kind: 'overleaf', project: link }) : uploadZip(proj.id, file, onPct);
-    }
+    const PLAIN = {
+      paper_repo_not_found: 'GitHub has no repository with that name that you can read. Check the name, or sign in again.',
+      paper_branch_not_found: 'That repository has no branch with that name.',
+      paper_subdir_missing: 'The code repo has no folder with that name. Type the folder that holds your main .tex file, for example paper.',
+      paper_too_large: 'That paper repository is too large to copy.',
+      feature_disabled: 'That option is switched off.'
+    };
+    const plain = e => PLAIN[e.code] || e.message;
+    function back() { busy = false; progress.classList.add('hidden'); form.classList.remove('hidden'); createBtn.disabled = false; }
     async function create() {
-      if (!picked || busy) return;
-      const link = mode === 'overleaf' ? olIn.value.trim() : '';
-      if (link && !olOk()) { clear(errs).append(errBox('That does not look like an Overleaf project link. It ends with 24 letters and digits, like https://www.overleaf.com/project/5f3a…')); return; }
-      paperKind = link ? 'overleaf' : (mode === 'zip' && zip ? 'zip' : 'none');
-      const file = paperKind === 'zip' ? zip : null;
+      const cp = code.picked;
+      if (!cp || busy) return;
+      const body = { code_repo: cp.full_name, branch: cp.default_branch };
+      paperKind = 'none';
+      if (mode === 'repo' && paper.picked) {
+        paperKind = 'github'; body.paper_repo = paper.picked.full_name; body.paper_branch = paper.picked.default_branch;
+      } else if (mode === 'folder') {
+        const sd = sub.value.trim().replace(/^\/+|\/+$/g, '');
+        if (!sd) { clear(errs).append(errBox('Type the name of the folder that holds your paper, for example paper.')); return; }
+        paperKind = 'github'; body.paper_repo = cp.full_name; body.paper_subdir = sd;
+      } else if (mode === 'zip' && zip) paperKind = 'zip';
       busy = true; createBtn.disabled = true; clear(errs);
       form.classList.add('hidden'); progress.classList.remove('hidden');
       const st = { clone: 'active', paper: 'wait' };
       paintProgress(st);
       let proj;
-      try { const r = await api('POST', '/api/hub/projects', { code_repo: picked.full_name, branch: picked.default_branch }); proj = r.project || r; }
+      try { const r = await api('POST', '/api/hub/projects', body); proj = r.project || r; }
       catch (e) {
-        st.clone = 'fail'; paintProgress(st, h('div', null, errBox(e.message), h('div', { class: 'acts' },
-          h('button', { class: 'btn primary', onclick: () => { busy = false; progress.classList.add('hidden'); form.classList.remove('hidden'); createBtn.disabled = false; } }, 'Back'))));
+        st.clone = 'fail'; paintProgress(st, h('div', null, errBox(plain(e)), h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'back', onclick: back }, 'Back'))));
         return;
       }
       st.clone = 'done';
-      if (paperKind === 'none') { st.paper = 'skip'; paintProgress(st); return openProject(proj); }
+      if (paperKind !== 'zip') { st.paper = 'skip'; paintProgress(st); return openProject(proj); }
       const attempt = async () => {
         st.paper = 'active'; paintProgress(st, 0);
-        try { await addPaper(proj, link, file, pct => paintProgress(st, pct)); st.paper = 'done'; paintProgress(st); openProject(proj); }
+        try { await uploadZip(proj.id, zip, pct => paintProgress(st, pct)); st.paper = 'done'; paintProgress(st); openProject(proj); }
         catch (e) {
           st.paper = 'fail';
-          const hint = e.code === 'overleaf_token_missing' ? ' Save your Overleaf token on the Projects page, then connect Overleaf from the project page.' : '';
-          paintProgress(st, h('div', null, errBox('The project was created, but the paper could not be added. ' + e.message + hint),
-            h('div', { class: 'acts' }, h('a', { class: 'btn primary', href: '/p/' + encodeURIComponent(proj.id) + '/' }, 'Open project anyway'),
-              h('button', { class: 'btn', id: 'retry-paper', onclick: attempt }, 'Retry'))));
+          paintProgress(st, h('div', null, errBox('Your project was created, but the paper could not be added. ' + e.message),
+            h('div', { class: 'acts' }, h('a', { class: 'btn primary', href: '/p/' + encodeURIComponent(proj.id) + '/' }, 'Open the project anyway'),
+              h('button', { class: 'btn', id: 'retry-paper', onclick: attempt }, 'Try again'))));
         }
       };
       attempt();
@@ -404,17 +376,24 @@
     form.append(
       h('div', { class: 'crumb' }, h('button', { class: 'linkbtn', onclick: () => { S.view = 'home'; route(); } }, '← Projects')),
       h('h1', null, 'New project'),
-      h('h3', null, '1. Code: choose a GitHub repository'), search, list,
-      h('h3', null, '2. Paper (optional now): Overleaf project, or a zip'),
-      tabs, olNote,
-      olBox, zipBox, errs,
+      h('h3', null, 'Step 1 · Your code'),
+      h('p', { class: 'muted' }, 'Pick the GitHub repository with your experiments: scripts, settings and results.'),
+      code.box,
+      h('h3', null, 'Step 2 · Your paper (you can add it later)'),
+      h('p', { class: 'muted' }, 'Where is the LaTeX source of your paper?'),
+      tabs, repoBox, folderBox, zipBox, errs,
       h('div', { class: 'acts' }, createBtn));
-    olBox.append(h('p', { class: 'muted' }, 'Paste the project link from your browser (', h('span', { class: 'mono' }, 'overleaf.com/project/…'), '). Lemmata reads it with git and never writes to Overleaf.'), olIn);
-    zipBox.append(h('p', { class: 'muted' }, 'In Overleaf: Menu → Download → Source. You can also add the paper later from the project page.'), drop, fileIn);
+    repoBox.append(
+      h('p', { class: 'muted' }, 'Your LaTeX paper in its own GitHub repo, written and compiled in VS Code. Pick it below. See the setup guide (docs/SETUP-two-macs.md) for how to set that up.'),
+      paper.box);
+    folderBox.append(
+      h('p', { class: 'muted' }, 'Your paper sits in a folder inside the code repo you picked in step 1. Type that folder’s name.'),
+      h('label', { class: 'field' }, h('span', null, 'Folder name'), sub));
+    zipBox.append(h('p', { class: 'muted' }, 'A one-time copy of your paper folder. Lemmata will not see later edits until you upload a new zip, so a GitHub repo is better when you can.'), drop, fileIn);
     paintMode();
     root.append(form, progress);
-    loadRepos('');
-    search.focus();
+    code.load(''); paper.load('');
+    code.search.focus();
   }
   function uploadZip(pid, file, onPct) {
     return new Promise((resolve, reject) => {

@@ -1,8 +1,9 @@
-/* Lemmata UI. Plain JS, no build step. Talks to the JSON API of data-model.md section 12,
-   or reads an embedded snapshot (exported report) and becomes read-only. */
+/* Lemmata project UI (S06, Obsidian-style). Plain JS, no build step, no inline scripts, no innerHTML.
+   Talks to the JSON API of wiki/architecture/data-model.md section 12, or reads an embedded snapshot
+   (exported report) and becomes read-only. Everything the user sees is derived in the browser from that API.
+   Sections: 1 core, 2 hub controls, 3 model (Items), 4 sentences, 5 graph, 6 pages, 7 shell, 8 boot. */
 'use strict';
 const PRODUCT = 'Lemmata';
-const HUB = '.lemmata';
 const SNAP = (function () {
   const el = document.getElementById('lemmata-snapshot');
   if (!el) return null;
@@ -14,7 +15,10 @@ const PID = (function () { const m = location.pathname.match(/^\/p\/([^/]+)\//);
 const API_BASE = PID ? '/p/' + encodeURIComponent(PID) + '/api/' : '/api/';
 const apiUrl = path => path.startsWith('/api/') ? API_BASE + path.slice(5) : path;
 let HUB_ON = false;   // true when /api/hub/status answers and the page is under /p/<pid>/
+const UIKEY = 'lemmata.ui.' + (PID || 'local:' + location.port);
 
+/* append() that ignores null/false and flattens arrays, so render code can pass optional pieces */
+(function () { const ap = Element.prototype.append; Element.prototype.append = function (...k) { ap.apply(this, k.flat(Infinity).filter(x => x != null && x !== false)); }; })();
 /* ---------- tiny DOM helper ---------- */
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -27,26 +31,30 @@ function h(tag, attrs, ...kids) {
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of kids.flat()) {
+  for (const c of kids.flat(Infinity)) {
     if (c == null || c === false) continue;
     el.append(c.nodeType ? c : document.createTextNode(String(c)));
   }
   return el;
 }
 const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
 const basename = p => (p || '').split('/').pop();
 const dirname = p => { const i = (p || '').lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
-const fmtTime = t => t ? t.replace('T', ' ').slice(0, 16) : '';
-const fmtDate = t => t ? t.slice(0, 10) : '';
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+const mono = t => h('span', { class: 'mono' }, t);
+const trunc = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 
 /* ---------- API ---------- */
 async function apiGet(path) {
   if (SNAP) return snapGet(path);
   const r = await fetch(apiUrl(path), { cache: 'no-store' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  if (!r.ok) { const e = new Error((j.error && j.error.message) || ('HTTP ' + r.status)); e.status = r.status; throw e; }
   return j;
 }
 async function apiPost(path, body) {
@@ -61,7 +69,7 @@ function snapGet(path) {
   const p = u.pathname.replace('/api/', ''), q = u.searchParams;
   if (p === 'analyze') {
     const a = SNAP.analyses[q.get('group') + '|' + q.get('node')];
-    return a ? a : Promise.reject(new Error('No stored analysis in this snapshot'));
+    return a ? a : Promise.reject(new Error('This snapshot did not keep the reason for that one.'));
   }
   if (p === 'file') {
     const segs = SNAP.files[q.get('repo') + '|' + q.get('path')];
@@ -81,147 +89,90 @@ function snapGet(path) {
   return Promise.reject(new Error('Not available in a snapshot'));
 }
 
-/* ---------- constants ---------- */
-const STATUS = {
-  confirmed: { icon: '✓', word: 'Confirmed' },
-  recheck: { icon: '↻', word: 'Recheck' },
-  reviewed: { icon: '✓✓', word: 'Reviewed' },
-  needs_fixing: { icon: '✕', word: 'Needs fixing' },
-  ignored: { icon: '–', word: 'Ignored' },
-  lowconf: { icon: '?', word: 'Low confidence' },
-  proposed: { icon: '+', word: 'Proposed' },
-  unmatched: { icon: '?', word: 'Could not be matched' },
-  mismatch: { icon: '≠', word: 'Mismatch' },
-  nottraced: { icon: '∅', word: 'Not traced' },
+/* ---------- strings (one place, so a Korean version can follow) ---------- */
+const T = {
+  checkNames: {
+    main_appendix_mismatch: 'Numbers that differ between text and appendix',
+    reference_unmatched: 'References that could not be matched',
+    undefined_cite: 'Cited things that do not exist',
+    uncited_reference: 'References nobody cites',
+    unreferenced_float: 'Figures and tables never mentioned',
+    undefined_ref: 'Links to things that do not exist',
+    untraced_number: 'Numbers not found in any result file',
+    figure_without_provenance: 'Figures with no known source',
+  },
+  checkOrder: ['main_appendix_mismatch', 'reference_unmatched', 'undefined_cite', 'uncited_reference', 'unreferenced_float', 'undefined_ref', 'untraced_number', 'figure_without_provenance'],
+  checkChip: { main_appendix_mismatch: ['≠', 'Differs'], reference_unmatched: ['?', 'Could not be matched'], untraced_number: ['∅', 'Not traced'] },
+  notRun: { 'no paper repo': 'no paper connected', 'no paper': 'no paper connected', 'no \\appendix found': 'no appendix found' },
+  intro: [
+    ['Lemmata keeps track of your paper and your code.', 'It reads your paper and the code and results behind it, and remembers how they fit together.'],
+    ['When something changes, it tells you what it affects.', 'Change a setting or a script and Lemmata lists the tables, figures and sections that may no longer match. You don\'t have to watch it. Open it when you need it.'],
+    ['You decide what is fine.', 'For each change, choose Looks fine, Needs fixing or Ignore. When you are happy, press "Mark everything as looked at" and Lemmata counts from there.'],
+  ],
 };
-function chip(kind, extra) {
-  const s = STATUS[kind];
-  return h('span', { class: 'chip ' + kind }, s.icon + ' ' + s.word, extra ? ' ' + extra : null);
-}
-const BANDS = [
-  { layer: 0, name: 'Thesis', glyph: 'T', col: 'thesis' },
-  { layer: 1, name: 'Questions', glyph: 'Q', col: 'question' },
-  { layer: 2, name: 'Sections', glyph: '§', col: 'section' },
-  { layer: 3, name: 'Paper items', glyph: 'F', col: 'paper' },
-  { layer: 4, name: 'Repo results', glyph: '▤', col: 'result' },
-  { layer: 5, name: 'Runs', glyph: '▶', col: 'run' },   /* contract: runs 5, code 6 (ADR-002 open question 2) */
-  { layer: 6, name: 'Code', glyph: '{ }', col: 'code' },
-];
-const BAND_BY_LAYER = Object.fromEntries(BANDS.map(b => [b.layer, b]));
-const REF_BAND = { layer: null, name: 'References', glyph: 'R', col: 'reference' };
-const KIND_GLYPH = { thesis: 'T', rq: 'Q', section: '§', figure: 'F', table: 'T', equation: 'E', item: 'F', asset: '▤', result: '▤', run: '▶', code: '{ }', config: '{ }', data: '▤', doc: '¶', reference: 'R' };
-const KIND_LABEL = { thesis: 'Thesis', rq: 'Question', section: 'Section', figure: 'Figure', table: 'Table', equation: 'Equation', item: 'Paper item', asset: 'Asset', result: 'Result file', run: 'Run', code: 'Code file', config: 'Config file', data: 'Data file', doc: 'Document', reference: 'Reference' };
-function colorOf(layer) { const b = layer == null ? REF_BAND : BAND_BY_LAYER[layer]; return b ? b.col : 'section'; }
-const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const LINEAGE_KINDS = new Set(['includes', 'generated_by', 'traces_to', 'produced_by', 'executes', 'reads', 'imports', 'contains', 'answers']);
-const EDGE_PHRASE = { reads: 'reads', produced_by: 'is produced by', traces_to: 'traces to', includes: 'includes', generated_by: 'is generated by', executes: 'runs', imports: 'imports', value_match: 'shares a value with', contains: 'contains', answers: 'is answered in', refs: 'refers to', cites: 'cites' };
 
-/* ---------- state ---------- */
-const S = {
-  project: null, graph: null, events: null, findings: null, alarms: null, checkpoints: null, triage: null,
-  tab: 'graph', sel: null, dir: 'both', showRefs: false, showAll: false, filter: 'all', query: '',
-  collapsed: new Set(), groupInit: false, onlyRecheck: false, blast: null, selEvent: null,
-  alarmFilter: 'all', openGroups: new Set(), alarmSel: null, analysis: null, findSel: null, fFilter: { kind: '', state: '', q: '' },
-  linkFilter: 'all', linkSel: null, linkChecked: new Set(), zoomRange: false, outlineSel: null, showPicker: false,
-  rightCollapsed: false, leftCollapsed: false, error: null, loading: true, fullPreview: false, rendered: false,
+/* ---------- time words ---------- */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayOf = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function dayDiff(t) { const d = new Date(t); if (isNaN(d)) return null; return Math.round((dayOf(new Date()) - dayOf(d)) / 86400000); }
+function dmon(t) { return (+t.slice(8, 10)) + ' ' + MON[(+t.slice(5, 7)) - 1]; }
+function relTime(t) {
+  if (!t) return '';
+  const d = new Date(t); if (isNaN(d)) return '';
+  const diff = (Date.now() - d) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.round(diff / 60) + ' min ago';
+  const n = dayDiff(t);
+  if (n <= 0) return 'today ' + t.slice(11, 16);
+  if (n === 1) return 'yesterday';
+  if (n <= 14) return n + ' days ago';
+  return dmon(t) + (new Date().getFullYear() !== +t.slice(0, 4) ? ' ' + t.slice(0, 4) : '');
+}
+function absTime(t) { return t ? dmon(t) + (new Date().getFullYear() !== +t.slice(0, 4) ? ' ' + t.slice(0, 4) : '') + ', ' + t.slice(11, 16) : ''; }
+function dayHeader(t) { const n = dayDiff(t); return n <= 0 ? 'Today' : n === 1 ? 'Yesterday' : dmon(t); }
+function lastChecked(t) { if (!t) return ''; const n = dayDiff(t); return n <= 0 ? 'today ' + t.slice(11, 16) : absTime(t); }
+function agoText(t) {
+  if (!t) return 'never';
+  const d = (Date.now() - Date.parse(t)) / 1000;
+  if (isNaN(d)) return String(t);
+  if (d < 90) return 'just now';
+  if (d < 3600) return Math.round(d / 60) + ' min ago';
+  if (d < 86400) return Math.round(d / 3600) + ' h ago';
+  return Math.round(d / 86400) + ' days ago';
+}
+
+/* ---------- status vocabulary (words + glyphs from the S06 spec, section 1.4) ---------- */
+const ST = {
+  ok: { glyph: '✓', word: 'Up to date', cls: 'ok', rank: 0, say: 'up to date' },
+  look: { glyph: '↻', word: 'Needs a second look', cls: 'look', rank: 3, say: 'needs a second look' },
+  fine: { glyph: '✓✓', word: 'Looks fine', cls: 'fine', rank: 1, say: 'looks fine' },
+  fix: { glyph: '✕', word: 'Needs fixing', cls: 'fix', rank: 4, say: 'needs fixing' },
+  ign: { glyph: '–', word: 'Ignored', cls: 'ign', rank: 2, say: 'ignored' },
 };
-const IX = {};   // derived indexes
+function chip(st, extra) { const s = ST[st]; return h('span', { class: 'chip ' + s.cls }, s.glyph + ' ' + s.word, extra ? ' ' + extra : null); }
+function plainChip(glyph, word, cls) { return h('span', { class: 'chip ' + (cls || 'plain') }, glyph + ' ' + word); }
+const STATE_TO_ST = { reviewed: 'fine', needs_fixing: 'fix', ignored: 'ign', unreviewed: 'look' };
 
-function rebuildIndex() {
-  const g = S.graph || { nodes: [], edges: [] };
-  IX.node = new Map(g.nodes.map(n => [n.id, n]));
-  IX.edge = new Map(g.edges.map(e => [e.id, e]));
-  IX.out = new Map(); IX.in = new Map(); IX.all = new Map();
-  const add = (m, k, e) => { let a = m.get(k); if (!a) m.set(k, a = []); a.push(e); };
-  for (const e of g.edges) {
-    add(IX.out, e.from, e); add(IX.in, e.to, e); add(IX.all, e.from, e); if (e.to !== e.from) add(IX.all, e.to, e);
-  }
-  // alarms by node
-  IX.alarm = new Map();
-  if (S.alarms) for (const grp of S.alarms.groups) {
-    for (const c of grp.changed) add(IX.alarm, c.node_id, { group: grp, role: 'changed', entry: c });
-    for (const d of grp.downstream) add(IX.alarm, d.node_id, { group: grp, role: 'downstream', entry: d });
-  }
-  IX.removed = new Set();
-  if (S.alarms) for (const grp of S.alarms.groups) for (const r of grp.removed || []) IX.removed.add(r.node_id);
-  IX.findingsByNode = new Map();
-  if (S.findings) for (const f of S.findings.findings) for (const n of f.nodes || []) add(IX.findingsByNode, n, f);
-  IX.hasCp = !!(S.alarms && S.alarms.checkpoint);
-}
-function lineageEdgeOk(e) {
-  if (e.status === 'rejected' || e.status === 'proposed') return false;
-  if (e.kind === 'value_match') return e.status === 'approved';
-  if (e.kind === 'cites') return S.showRefs;
-  return LINEAGE_KINDS.has(e.kind);
-}
-function triageEntry(type, id) {
-  const e = S.triage && S.triage.entries && S.triage.entries[type + ':' + id];
-  if (!e) return null;
-  // effective_state is computed by the server on read; keep it consistent after local updates
-  return e;
-}
-function effState(type, id) {
-  const e = triageEntry(type, id);
-  if (!e) return { state: 'unreviewed', outdated: false, entry: null };
-  return { state: e.effective_state || e.state, outdated: !!e.outdated, entry: e };
-}
-function nodeStatus(id) {
-  const t = effState('node', id).state;
-  if (t === 'needs_fixing' || t === 'reviewed' || t === 'ignored') return t;
-  if (IX.alarm.has(id)) return 'recheck';
-  return IX.hasCp ? 'confirmed' : 'none';
-}
-const STATUS_RANK = { needs_fixing: 5, recheck: 4, reviewed: 2, ignored: 1, confirmed: 0, none: 0 };
-function nodeLabel(id) { const n = IX.node.get(id); return n ? n.name : id; }
-function locStr(n) {
-  const l = n.loc || {};
-  if (!l.path) return n.repo;
-  return l.path + (l.line ? ':' + l.line : '');
-}
-function layerName(n) { const b = n.layer == null ? REF_BAND : BAND_BY_LAYER[n.layer]; return b ? b.name : '?'; }
-function lowConf(grp) { return (grp.flags || []).some(f => f.code === 'message_claims_no_change'); }
-
-/* lineage over underlying nodes: up = what it rests on (follow from->to), down = what it supports */
-function lineage(id) {
-  const up = new Map(), down = new Map(), upE = new Set(), downE = new Set();
-  const walk = (start, next, seen, eset) => {
-    const q = [start];
-    seen.set(start, 0);
-    while (q.length) {
-      const cur = q.shift();
-      for (const e of (next === 'out' ? IX.out : IX.in).get(cur) || []) {
-        if (!lineageEdgeOk(e)) continue;
-        const nx = next === 'out' ? e.to : e.from;
-        eset.add(e.id);
-        if (!seen.has(nx)) { seen.set(nx, seen.get(cur) + 1); q.push(nx); }
-      }
-    }
-    seen.delete(start);
-  };
-  walk(id, 'out', up, upE);
-  walk(id, 'in', down, downE);
-  return { up, down, upE, downE };
-}
-
-/* ---------- toast / modal ---------- */
+/* ---------- toast / modal / tooltip ---------- */
 let toastTimer = null;
-function toast(msg, undo) {
+function toast(msg, action) {
   const old = $('#toast'); if (old) old.remove();
-  const t = h('div', { id: 'toast', role: 'status' }, msg, undo ? h('button', { class: 'linkbtn', onclick: () => { t.remove(); undo(); } }, 'Undo') : null);
+  const t = h('div', { id: 'toast', role: 'status' }, msg, action ? h('button', { class: 'linkbtn', onclick: () => { t.remove(); action.fn(); } }, action.label) : null);
   document.body.append(t);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 4000);
+  toastTimer = setTimeout(() => t.remove(), 4500);
 }
-function modal(title, body, buttons) {
+function modal(title, body, buttons, opts) {
+  opts = opts || {};
   const prevFocus = document.activeElement;
   const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey, true); if (prevFocus && prevFocus.focus) prevFocus.focus(); };
-  const acts = h('div', { class: 'acts' }, buttons.map(b => h('button', { class: 'btn' + (b.primary ? ' primary' : ''), onclick: () => { close(); if (b.fn) b.fn(); } }, b.label)));
+  const acts = h('div', { class: 'acts' }, buttons.map(b => h('button', { class: 'btn' + (b.primary ? ' primary' : ''), onclick: () => { if (b.keep !== true) close(); if (b.fn) b.fn(close); } }, b.label)));
   const scrim = h('div', { class: 'scrim', onclick: ev => { if (ev.target === scrim) close(); } },
-    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, h('h3', null, title), body, acts));
+    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: opts.width ? { width: opts.width + 'px' } : null }, h('h3', null, title), body, acts));
   function onKey(ev) {
     if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
     if (ev.key === 'Tab') {
-      const f = [...scrim.querySelectorAll('button')]; if (!f.length) return;
+      const f = $$('button, input, textarea', scrim).filter(x => !x.disabled); if (!f.length) return;
       const i = f.indexOf(document.activeElement);
       if (ev.shiftKey && i <= 0) { ev.preventDefault(); f[f.length - 1].focus(); }
       else if (!ev.shiftKey && i === f.length - 1) { ev.preventDefault(); f[0].focus(); }
@@ -229,18 +180,19 @@ function modal(title, body, buttons) {
   }
   document.addEventListener('keydown', onKey, true);
   document.body.append(scrim);
-  const safe = acts.querySelector('button:not(.primary)') || acts.querySelector('button');
-  if (safe) safe.focus();
+  const first = scrim.querySelector('input, textarea') || acts.querySelector('button:not(.primary)') || acts.querySelector('button');
+  if (first) first.focus();
+  return close;
 }
 function tip(el, textFn) {
   let t = null;
-  const show = ev => { hide(); t = h('div', { class: 'tip' }, typeof textFn === 'function' ? textFn() : textFn); document.body.append(t); move(ev); };
-  const move = ev => { if (t) { t.style.left = Math.min(ev.clientX + 12, innerWidth - 380) + 'px'; t.style.top = (ev.clientY + 14) + 'px'; } };
   const hide = () => { if (t) { t.remove(); t = null; } };
+  const move = ev => { if (t) { t.style.left = Math.min(ev.clientX + 12, innerWidth - 380) + 'px'; t.style.top = (ev.clientY + 14) + 'px'; } };
+  const show = ev => { hide(); t = h('div', { class: 'tip' }, typeof textFn === 'function' ? textFn() : textFn); document.body.append(t); move(ev); };
   el.addEventListener('mouseenter', show); el.addEventListener('mousemove', move); el.addEventListener('mouseleave', hide);
 }
 
-/* ---------- file access ---------- */
+/* ---------- file access (read-only /api/file) ---------- */
 const fileCache = new Map();
 async function getLines(repo, path, start, end) {
   const key = [repo, path, start, end].join('|');
@@ -257,1588 +209,1999 @@ function codeBlock(lines, start, hl, opts) {
   return h('div', { class: 'code', tabindex: '0', role: 'region', 'aria-label': opts.label || 'Source lines' },
     lines.map((t, i) => {
       const n = start + i;
-      return h('div', { class: 'ln' + (hlset.has(n) ? ' hl' : '') },
-        h('span', { class: 'n' }, String(n)), h('span', { class: 'w' }, hlset.has(n) ? (opts.word || '') : ''), t || ' ');
+      return h('div', { class: 'ln' + (hlset.has(n) ? ' hl' : '') }, h('span', { class: 'n' }, String(n)), t || ' ');
     }));
 }
 function diffBlock(unified) {
   const rows = String(unified || '').split('\n');
   if (rows.length && rows[rows.length - 1] === '') rows.pop();
-  return h('div', { class: 'code', tabindex: '0', role: 'region', 'aria-label': 'Diff' }, rows.map(t => {
+  return h('div', { class: 'code', tabindex: '0', role: 'region', 'aria-label': 'What changed in this file' }, rows.map(t => {
     let c = 'ln', sign = ' ', body = t;
     if (t.startsWith('@@') || t.startsWith('---') || t.startsWith('+++')) c += ' hunk';
     else if (t.startsWith('+')) { c += ' add'; sign = '+'; body = t.slice(1); }
     else if (t.startsWith('-')) { c += ' del'; sign = '−'; body = t.slice(1); }
     else body = t.slice(1);
     const isHdr = c.includes('hunk');
-    return h('div', { class: c }, h('span', { class: 'n' }, isHdr ? '' : sign), h('span', { class: 'w' }), isHdr ? t : body || ' ');
+    return h('div', { class: c }, h('span', { class: 'n' }, isHdr ? '' : sign), isHdr ? t : body || ' ');
   }));
 }
 
-/* ======================================================================
-   GRAPH (Cytoscape, preset layout computed here)
-   ====================================================================== */
-const G = { userMoved: false, cy: null, items: new Map(), bands: [], groups: new Map(), groupOf: new Map(), measure: null, barCache: new Map(), tipEl: null, W: 1000 };
-const NODE_H = 26, ROW_H = 36;
-
-function textWidth(s) {
-  if (!G.measure) { G.measure = document.createElement('canvas').getContext('2d'); }
-  G.measure.font = '12px ' + css('--font-sans');
-  return G.measure.measureText(s).width;
-}
-function computeGroups() {
-  G.groups = new Map(); G.groupOf = new Map();
-  const nodes = (S.graph && S.graph.nodes) || [];
-  const perLayer = new Map();
-  for (const n of nodes) perLayer.set(n.layer, (perLayer.get(n.layer) || 0) + 1);
-  const buckets = new Map();
-  for (const n of nodes) {
-    if (n.layer == null || !['asset', 'result', 'code', 'config', 'data', 'doc'].includes(n.kind)) continue;
-    const p = (n.loc && n.loc.path) || '';
-    const big = perLayer.get(n.layer) > 40;
-    const d = big ? (p.includes('/') ? p.split('/')[0] : '') : dirname(p);   // big layers group by top-level folder
-    if (!d) continue;
-    const k = 'grp:' + n.layer + ':' + n.repo + ':' + d;
-    if (!buckets.has(k)) buckets.set(k, { id: k, layer: n.layer, repo: n.repo, dir: d, members: [] });
-    buckets.get(k).members.push(n.id);
-  }
-  for (const [k, g] of buckets) if (g.members.length >= (perLayer.get(g.layer) > 40 ? 3 : 5)) {
-    G.groups.set(k, g);
-    for (const m of g.members) G.groupOf.set(m, k);
-  }
-  if (!S.groupInit) {
-    S.groupInit = true;
-    for (const [k, g] of G.groups) if (perLayer.get(g.layer) > 40) S.collapsed.add(k);
-  }
-}
-function groupStatus(g) {
-  let best = 'none';
-  for (const m of g.members) { const s = nodeStatus(m); if (STATUS_RANK[s] > STATUS_RANK[best]) best = s; }
-  return best;
-}
-function groupCounts(g) {
-  const c = {};
-  for (const m of g.members) { const s = nodeStatus(m); c[s] = (c[s] || 0) + 1; }
-  return c;
-}
-function repOf(id) {
-  const gid = G.groupOf.get(id);
-  return gid && S.collapsed.has(gid) ? gid : id;
-}
-function barUri(w, status) {
-  const col = { recheck: '#E3B25E', needs_fixing: '#B3261E', reviewed: '#2A7354' }[status];
-  const key = w + status;
-  if (G.barCache.has(key)) return G.barCache.get(key);
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + NODE_H + '">' +
-    (col ? '<rect x="0" y="' + (NODE_H - 4) + '" width="' + w + '" height="4" fill="' + col + '"/>' : '') + '</svg>';
-  const u = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-  G.barCache.set(key, u);
-  return u;
-}
-function stripeUri(w, status, colName) {
-  const key = 's' + w + status + colName;
-  if (G.barCache.has(key)) return G.barCache.get(key);
-  const col = { recheck: '#E3B25E', needs_fixing: '#B3261E', reviewed: '#2A7354' }[status];
-  const stripe = css('--layer-' + colName) || '#5B6478';
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + NODE_H + '">' +
-    '<rect x="0" y="0" width="4" height="' + NODE_H + '" fill="' + stripe + '"/>' +
-    (col ? '<rect x="0" y="' + (NODE_H - 4) + '" width="' + w + '" height="4" fill="' + col + '"/>' : '') + '</svg>';
-  const u = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-  G.barCache.set(key, u);
-  return u;
-}
-function statusGlyph(s) { return s === 'recheck' ? '↻ ' : s === 'needs_fixing' ? '✕ ' : s === 'reviewed' ? '✓✓ ' : s === 'ignored' ? '– ' : ''; }
-
-function buildItems() {
-  computeGroups();
-  const nodes = (S.graph && S.graph.nodes) || [];
-  const items = new Map();   // id -> item
-  const layers = new Map();  // layer -> [blocks]
-  const byLayer = new Map();
-  for (const n of nodes) {
-    if (n.layer == null && !S.showRefs) continue;
-    const L = n.layer == null ? 'ref' : n.layer;
-    if (!byLayer.has(L)) byLayer.set(L, []);
-    byLayer.get(L).push(n);
-  }
-  for (const [L, ns] of byLayer) {
-    const blocks = [];
-    const seenG = new Set();
-    ns.sort((a, b) => ((a.repo + (a.loc && a.loc.path)) < (b.repo + (b.loc && b.loc.path)) ? -1 : 1) || (a.id < b.id ? -1 : 1));
-    for (const n of ns) {
-      const gid = G.groupOf.get(n.id);
-      if (gid) {
-        if (seenG.has(gid)) continue;
-        seenG.add(gid);
-        const g = G.groups.get(gid);
-        const coll = S.collapsed.has(gid);
-        const blk = { key: gid, items: [] };
-        items.set(gid, { id: gid, group: g, layer: L, label: '', collapsed: coll });
-        blk.items.push(gid);
-        if (!coll) for (const m of g.members) { items.set(m, { id: m, node: IX.node.get(m), layer: L }); blk.items.push(m); }
-        blocks.push(blk);
-      } else {
-        items.set(n.id, { id: n.id, node: n, layer: L });
-        blocks.push({ key: n.id, items: [n.id] });
-      }
-    }
-    layers.set(L, blocks);
-  }
-  return { items, layers };
-}
-function itemLabel(it) {
-  if (it.group) {
-    const g = it.group, c = groupCounts(g);
-    const worst = groupStatus(g);
-    const w = worst === 'recheck' || worst === 'needs_fixing' ? '  ' + statusGlyph(worst).trim() + ' ' + (c[worst] || 0) : '';
-    return (it.collapsed ? '▸ ' : '▾ ') + g.dir + '/ (' + g.members.length + ')' + w;
-  }
-  const n = it.node;
-  return (n.kind === 'section' ? '' : KIND_GLYPH[n.kind] + ' ') + statusGlyph(nodeStatus(n.id)) + n.name;
-}
-function layoutGraph(model) {
-  const { items, layers } = model;
-  for (const it of items.values()) {
-    it.label = itemLabel(it);
-    it.w = Math.round(Math.min(176, Math.max(60, textWidth(it.label) + 26)));
-  }
-  // neighbours between visible items
-  const nb = new Map();
-  for (const e of (S.graph && S.graph.edges) || []) {
-    if (e.status === 'rejected' || e.kind === 'refs') continue;
-    const a = repOf(e.from), b = repOf(e.to);
-    if (a === b || !items.has(a) || !items.has(b)) continue;
-    if (!nb.has(a)) nb.set(a, []); if (!nb.has(b)) nb.set(b, []);
-    nb.get(a).push(b); nb.get(b).push(a);
-  }
-  const order = [...layers.keys()].filter(k => k !== 'ref').sort((a, b) => a - b);
-  const rank = new Map();
-  const setRanks = () => {
-    for (const L of order) {
-      let i = 0; const tot = layers.get(L).reduce((s, b) => s + b.items.length, 0) || 1;
-      for (const b of layers.get(L)) for (const id of b.items) rank.set(id, (i++ + 0.5) / tot);
-    }
-  };
-  setRanks();
-  for (let sweep = 0; sweep < 4; sweep++) {
-    const seq = sweep % 2 ? order.slice().reverse() : order;
-    for (const L of seq) {
-      const blocks = layers.get(L);
-      const keyed = blocks.map((b, idx) => {
-        let s = 0, c = 0;
-        for (const id of b.items) for (const o of nb.get(id) || []) { if (items.get(o).layer !== L && rank.has(o)) { s += rank.get(o); c++; } }
-        return { b, idx, bc: c ? s / c : null };
-      });
-      // blocks without neighbours keep their slot relative to the others
-      const mean = i => keyed[i].bc == null ? (blocks.length ? (keyed[i].idx + 0.5) / blocks.length : 0.5) : keyed[i].bc;
-      const order2 = keyed.map((k, i) => ({ k, v: mean(i) })).sort((x, y) => x.v - y.v || x.k.idx - y.k.idx);
-      layers.set(L, order2.map(o => o.k.b));
-    }
-    setRanks();
-  }
-  // pick the row width W that gives the largest fit-to-view zoom
-  const cw = ($('#cy') && $('#cy').clientWidth) || 800, chh = ($('#cy') && $('#cy').clientHeight) || 560;
-  const natural = order.map(L => layers.get(L).reduce((s, b) => s + b.items.reduce((s2, id) => s2 + items.get(id).w + 12, 0), 0));
-  const widest = Math.max(0, ...natural);
-  const minW = Math.max(400, ...[...items.values()].map(i => i.w + 12));
-  let best = null;
-  for (let W = minW; W <= Math.max(minW, Math.min(1800, widest)) + 59; W += 60) {
-    const r = packLayers(model, order, W);
-    const z = Math.min((cw - 40) / r.totalW, (chh - 56) / r.H, 1.05);
-    if (!best || z > best.z + 0.01) best = { z, W, r };
-  }
-  const r = best ? best.r : packLayers(model, order, minW);
-  G.W = r.W; G.bands = r.bands; G.pos = r.pos; G.totalH = r.H; G.refHead = r.refHead;
-}
-function packLayers(model, order, W) {
-  const { items, layers } = model;
-  const bands = []; let y = 0; const pos = new Map();
-  for (const L of order) {
-    const flat = layers.get(L).flatMap(b => b.items);
-    const rows = [[]]; let rw = 0;
-    for (const id of flat) {
-      const w = items.get(id).w + 12;
-      if (rw + w > W && rows[rows.length - 1].length) { rows.push([]); rw = 0; }
-      rows[rows.length - 1].push(id); rw += w;
-    }
-    const bh = Math.max(88, rows.length * ROW_H + 28);
-    const top = y;
-    rows.forEach((row, r) => {
-      const tw = row.reduce((s, id) => s + items.get(id).w + 12, 0);
-      let x = (W - tw) / 2;
-      const cy = top + (bh - rows.length * ROW_H) / 2 + r * ROW_H + ROW_H / 2;
-      for (const id of row) { const w = items.get(id).w; pos.set(id, { x: x + w / 2, y: cy }); x += w + 12; }
-    });
-    const cnt = ((S.graph && S.graph.nodes) || []).filter(n => n.layer === L).length;
-    bands.push({ layer: L, top, h: bh, count: cnt, meta: BAND_BY_LAYER[L] || { name: 'Layer ' + L, glyph: '?', col: 'section' } });
-    y += bh;
-  }
-  let totalW = W, refHead = null;
-  if (layers.has('ref')) {
-    const flat = layers.get('ref').flatMap(b => b.items);
-    const perCol = Math.max(1, Math.floor((Math.max(y, 400) - 40) / ROW_H));
-    const cols = Math.ceil(flat.length / perCol);
-    const x0 = W + 90;
-    flat.forEach((id, i) => { const c = Math.floor(i / perCol), r = i % perCol; pos.set(id, { x: x0 + c * 190 + items.get(id).w / 2, y: 44 + r * ROW_H }); });
-    refHead = { x: x0 + (cols * 190 - 20) / 2, y: 12, w: 120 };
-    totalW = x0 + cols * 190;
-  }
-  return { bands, pos, H: y, W, totalW, refHead };
-}
-function buildElements(model) {
-  const els = [];
-  const { items } = model;
-  for (const it of items.values()) {
-    const p = G.pos.get(it.id); if (!p) continue;
-    const col = it.group ? colorOf(it.layer) : colorOf(it.node.layer);
-    els.push({ group: 'nodes', data: { id: it.id, label: it.label, w: it.w, col, isGroup: !!it.group, status: 'none', bar: '' }, position: { x: p.x, y: p.y } });
-  }
-  if (G.refHead) els.push({ group: 'nodes', classes: 'colhead', data: { id: '__refhead', label: 'References', w: 120 }, position: { x: G.refHead.x, y: G.refHead.y }, selectable: false, grabbable: false });
-  const seen = new Map();
-  for (const e of (S.graph && S.graph.edges) || []) {
-    if (e.status === 'rejected') continue;
-    const a = repOf(e.from), b = repOf(e.to);
-    if (a === b || !items.has(a) || !items.has(b)) continue;
-    const k = a + '→' + b;
-    let d = seen.get(k);
-    if (!d) {
-      d = { id: 'v:' + k, source: a, target: b, ids: [], proposed: true };
-      seen.set(k, d); els.push({ group: 'edges', data: d });
-    }
-    d.ids.push(e.id);
-    if (e.status !== 'proposed') d.proposed = false;
-  }
-  return els;
-}
-function cyStyle() {
-  const ink = css('--ink'), border = css('--border-strong');
-  const tint = {}; for (const c of ['thesis', 'question', 'section', 'reference', 'paper', 'result', 'code', 'run']) tint[c] = [css('--layer-' + c), css('--layer-' + c + '-t')];
-  const st = [
-    { selector: 'node', style: { shape: 'round-rectangle', width: 'data(w)', height: NODE_H, label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center', 'font-size': 12, 'font-family': css('--font-sans'), color: ink, 'text-max-width': 150, 'text-wrap': 'ellipsis', 'border-width': 1, 'border-color': border, 'background-color': '#fff', 'text-margin-x': 2 } },
-    { selector: 'node[?isGroup]', style: { 'border-style': 'dashed', 'border-width': 1.5, 'background-color': '#fff' } },
-    { selector: 'node.colhead', style: { 'border-width': 0, 'background-opacity': 0, 'font-weight': 600, events: 'no' } },
-    { selector: 'node[bar]', style: { 'background-image': 'data(bar)', 'background-fit': 'none', 'background-width': '100%', 'background-height': '100%', 'background-clip': 'node', 'background-position-x': '0%', 'background-position-y': '0%', 'background-repeat': 'no-repeat' } },
-    { selector: 'node.up', style: { 'border-color': css('--up'), 'border-width': 2.5 } },
-    { selector: 'node.down', style: { 'border-color': css('--down'), 'border-width': 2.5 } },
-    { selector: 'node.sel', style: { 'border-color': ink, 'border-width': 3.5 } },
-    { selector: 'node.blast', style: { 'border-color': css('--amber'), 'border-width': 3 } },
-    { selector: 'node.dim', style: { opacity: 0.22 } },
-    { selector: 'node.match', style: { 'border-color': ink, 'border-width': 2 } },
-    { selector: 'edge', style: { display: 'none', width: 1, 'line-color': border, 'curve-style': 'bezier', 'control-point-step-size': 30, 'target-arrow-shape': 'none', 'target-arrow-color': border, 'arrow-scale': 0.8 } },
-    { selector: 'edge.all', style: { display: 'element', opacity: 0.5 } },
-    { selector: 'edge.eup', style: { display: 'element', opacity: 1, width: 2, 'line-color': css('--up'), 'target-arrow-color': css('--up'), 'target-arrow-shape': 'triangle', 'z-index': 9 } },
-    { selector: 'edge.edown', style: { display: 'element', opacity: 1, width: 2, 'line-color': css('--down-stroke'), 'target-arrow-color': css('--down-stroke'), 'line-style': 'dashed', 'line-dash-pattern': [6, 4], 'target-arrow-shape': 'triangle', 'z-index': 9 } },
-    { selector: 'edge.prop', style: { display: 'element', opacity: 1, width: 1.5, 'line-color': '#8C93A3', 'line-style': 'dotted', 'target-arrow-shape': 'none', label: 'Proposed', 'font-size': 10, color: css('--muted'), 'text-background-color': '#fff', 'text-background-opacity': 0.9, 'text-background-padding': 2, 'z-index': 8 } },
-  ];
-  return st;
-}
-function initCy() {
-  const cy = cytoscape({ container: $('#cy'), elements: [], style: cyStyle(), layout: { name: 'preset' }, minZoom: 0.08, maxZoom: 3, boxSelectionEnabled: false, autoungrabify: true, selectionType: 'single' });
-  G.cy = cy;
-  cy.on('tap', 'node', ev => {
-    const n = ev.target;
-    if (n.hasClass('colhead')) return;
-    if (n.data('isGroup')) { toggleGroup(n.id()); return; }
-    selectNode(n.id(), { noCenter: true });
-  });
-  cy.on('tap', ev => { if (ev.target === cy && S.sel) clearSelection(); });
-  cy.on('mouseover', 'node', ev => {
-    const n = ev.target; if (n.hasClass('colhead')) return;
-    const oe = ev.originalEvent; if (!oe) return;
-    hideGraphTip();
-    let text;
-    if (n.data('isGroup')) { const g = G.groups.get(n.id()); text = g.dir + '/\n' + g.members.length + ' files · click to ' + (S.collapsed.has(n.id()) ? 'expand' : 'collapse'); }
-    else { const x = IX.node.get(n.id()); const st = nodeStatus(x.id); text = x.name + '\n' + layerName(x) + ' · ' + locStr(x) + '\n' + (STATUS[st] ? STATUS[st].word : 'No checkpoint'); }
-    G.tipEl = h('div', { class: 'tip' }, text); document.body.append(G.tipEl);
-    G.tipEl.style.left = Math.min(oe.clientX + 12, innerWidth - 380) + 'px'; G.tipEl.style.top = (oe.clientY + 14) + 'px';
-    $('#cy').style.cursor = 'pointer';
-  });
-  cy.on('mouseout', 'node', () => { hideGraphTip(); $('#cy').style.cursor = ''; });
-  cy.on('viewport', syncBands);
-  cy.on('dragpan', () => { G.userMoved = true; });
-  $('#cy').addEventListener('wheel', () => { G.userMoved = true; }, { passive: true });
-  cy.on('pan zoom', hideGraphTip);
-}
-function clearTips() { document.querySelectorAll('.tip').forEach(t => t.remove()); G.tipEl = null; }
-function hideGraphTip() { if (G.tipEl) { G.tipEl.remove(); G.tipEl = null; } }
-
-function rebuildGraph(opts) {
-  opts = opts || {};
-  if (!G.cy) return;
-  const model = buildItems();
-  G.model = model;
-  layoutGraph(model);
-  const els = buildElements(model);
-  const cy = G.cy;
-  cy.startBatch();
-  cy.elements().remove();
-  cy.add(els);
-  cy.endBatch();
-  buildBandDom();
-  applyGraphState();
-  if (opts.fit !== false) fitGraph(); else syncBands();
-  const empty = !(S.graph && S.graph.nodes && S.graph.nodes.length);
-  setGraphMsg(S.loading ? { t: 'Building graph…' } : S.error ? { t: 'The graph could not be drawn. ' + S.error, btn: ['Rescan', rescan] } :
-    empty ? { t: 'The graph is empty. ' + PRODUCT + ' did not find a thesis, sections or results to connect.', btn: ['Back to scan', () => openPicker()] } : null);
-}
-function setGraphMsg(m) {
-  let el = $('#gmsg');
-  if (!m) { if (el) el.remove(); return; }
-  if (!el) { el = h('div', { id: 'gmsg' }); $('#gview').append(el); }
-  clear(el).append(h('div', null, m.t));
-  if (m.btn) el.append(h('button', { class: 'btn', style: { marginTop: '8px' }, onclick: m.btn[1] }, m.btn[0]));
-}
-function fitGraph() {
-  const cy = G.cy; if (!cy || !cy.nodes().length) return;
-  G.userMoved = false;
-  const bb = cy.nodes().not('.colhead').boundingBox();
-  const cw = cy.width(), ch = cy.height();
-  const topPad = 8, botPad = 44;
-  const bw = Math.max(bb.w, 1), bh = Math.max(G.totalH || bb.h, 1);
-  const z = Math.max(0.08, Math.min((cw - 40) / bw, (ch - topPad - botPad) / bh, 1.05));
-  cy.zoom(z);
-  cy.pan({ x: cw / 2 - z * (bb.x1 + bb.w / 2), y: topPad + (ch - topPad - botPad) / 2 - z * (bh / 2) });
-  syncBands();
-}
-function buildBandDom() {
-  const bg = clear($('#bandbg')), lb = clear($('#bandlabels'));
-  G.bands.forEach((b, i) => {
-    b.bgEl = h('div', { class: 'bgrow' + (i % 2 ? ' alt' : '') });
-    b.lbEl = h('div', { class: 'blabel', style: { borderLeftColor: 'var(--layer-' + b.meta.col + ')' }, title: 'Shift+click to collapse or expand this band' },
-      h('b', null, h('span', { class: 'glyph' }, b.meta.glyph), b.meta.name), h('span', null, String(b.count)));
-    b.lbEl.addEventListener('click', ev => { if (ev.shiftKey) toggleBand(b.layer); });
-    bg.append(b.bgEl); lb.append(b.lbEl);
-  });
-  syncBands();
-}
-function syncBands() {
-  const cy = G.cy; if (!cy) return;
-  const z = cy.zoom(), py = cy.pan().y;
-  for (const b of G.bands) {
-    if (!b.bgEl) continue;
-    const top = py + b.top * z, hh = b.h * z;
-    b.bgEl.style.top = top + 'px'; b.bgEl.style.height = hh + 'px';
-    b.lbEl.style.top = top + 'px'; b.lbEl.style.height = Math.max(hh, 0) + 'px';
-    b.lbEl.style.display = hh < 20 ? 'none' : '';
-  }
-}
-function toggleGroup(gid) {
-  if (S.collapsed.has(gid)) S.collapsed.delete(gid); else S.collapsed.add(gid);
-  rebuildGraph({ fit: false });
-}
-function toggleBand(layer) {
-  const ids = [...G.groups.values()].filter(g => g.layer === layer).map(g => g.id);
-  if (!ids.length) return;
-  const anyOpen = ids.some(i => !S.collapsed.has(i));
-  for (const i of ids) anyOpen ? S.collapsed.add(i) : S.collapsed.delete(i);
-  rebuildGraph({ fit: false });
-}
-function expandAll(on) {
-  for (const g of G.groups.values()) on ? S.collapsed.delete(g.id) : S.collapsed.add(g.id);
-  rebuildGraph();
-}
-
-function matchNode(n, q) {
-  q = q.toLowerCase();
-  return (n.name || '').toLowerCase().includes(q) || ((n.loc && n.loc.path) || '').toLowerCase().includes(q) || (n.detail || '').toLowerCase().includes(q) || n.id.toLowerCase().includes(q);
-}
-function filterMatch(id) {
-  const st = nodeStatus(id);
-  if (S.filter === 'recheck') return st === 'recheck';
-  if (S.filter === 'needs_fixing') return st === 'needs_fixing';
-  if (S.filter === 'proposed') return (IX.all.get(id) || []).some(e => e.status === 'proposed');
-  return true;
-}
-function applyGraphState() {
-  const cy = G.cy; if (!cy || !G.model) return;
-  const L = S.sel && IX.node.has(S.sel) ? lineage(S.sel) : null;
-  S.lin = L;
-  const selRep = S.sel ? repOf(S.sel) : null;
-  const q = S.query.trim();
-  let matches = 0;
-  const blast = S.blast ? new Set(S.blast.nodes) : null;
-  cy.batch(() => {
-    cy.nodes().forEach(nd => {
-      if (nd.hasClass('colhead')) return;
-      const it = G.model.items.get(nd.id()); if (!it) return;
-      const members = it.group ? it.group.members : [it.id];
-      const st = it.group ? groupStatus(it.group) : nodeStatus(it.id);
-      nd.data('bar', STATUS_RANK[st] >= 1 && st !== 'confirmed' && st !== 'none' ? stripeUri(it.w, st, colorOf(it.group ? it.layer : it.node.layer)) : stripeUri(it.w, 'none', colorOf(it.group ? it.layer : it.node.layer)));
-      nd.data('label', itemLabel(it));
-      let cls = { sel: false, up: false, down: false, dim: false, match: false, blast: false };
-      if (L) {
-        const isSel = members.includes(S.sel);
-        const inUp = S.dir !== 'down' && members.some(m => L.up.has(m));
-        const inDown = S.dir !== 'up' && members.some(m => L.down.has(m));
-        cls.sel = isSel; cls.up = !isSel && inUp; cls.down = !isSel && inDown && !inUp;
-        cls.dim = !(isSel || inUp || inDown);
-      } else if (q) {
-        const m = members.some(id => matchNode(IX.node.get(id), q));
-        cls.match = m; cls.dim = !m; if (m) matches++;
-      } else if (blast) {
-        const m = members.some(id => blast.has(id));
-        cls.blast = m; cls.dim = !m;
-      } else if (S.filter !== 'all') {
-        cls.dim = !members.some(filterMatch);
-      }
-      if (L && blast && members.some(id => blast.has(id))) cls.blast = true;
-      for (const k in cls) nd.toggleClass(k, cls[k]);
-    });
-    cy.edges().forEach(ed => {
-      const ids = ed.data('ids');
-      let c = '';
-      if (L) {
-        const up = S.dir !== 'down' && ids.some(i => L.upE.has(i));
-        const dn = S.dir !== 'up' && ids.some(i => L.downE.has(i));
-        const pr = ids.some(i => { const e = IX.edge.get(i); return e.status === 'proposed' && (e.from === S.sel || e.to === S.sel); });
-        c = up ? 'eup' : dn ? 'edown' : pr ? 'prop' : '';
-      } else if (ed.data('proposed') && (S.filter === 'all' || S.filter === 'proposed')) c = 'prop';
-      else if (S.filter === 'proposed') c = '';
-      else if (S.showAll) c = 'all';
-      ed.toggleClass('eup', c === 'eup'); ed.toggleClass('edown', c === 'edown'); ed.toggleClass('prop', c === 'prop'); ed.toggleClass('all', c === 'all');
-    });
-  });
-  // counter chip
-  const cnt = $('#gcount');
-  if (cnt) {
-    clear(cnt);
-    if (L) cnt.append(h('span', { class: 'chip plain' }, 'Rests on ' + L.up.size + ' · Supports ' + L.down.size));
-    if (q) cnt.append(h('span', { class: 'chip plain' }, plural(matches, 'match', 'matches')));
-  }
-  const cb = $('#cpbanner'); if (cb) cb.classList.toggle('hidden', IX.hasCp || READONLY);
-  const noMatch = q && matches === 0;
-  const msg = $('#gmsg');
-  if (noMatch && !msg) setGraphMsg({ t: 'No nodes match “' + q + '”.', btn: ['Clear filter', () => { $('#search').value = ''; setQuery(''); }] });
-  else if (!noMatch && msg && msg.firstChild && msg.firstChild.textContent.startsWith('No nodes match')) setGraphMsg(null);
-}
-function setQuery(q) { S.query = q; applyGraphState(); }
-
-function ensureVisible(id) {
-  const gid = G.groupOf.get(id);
-  if (gid && S.collapsed.has(gid)) { S.collapsed.delete(gid); return true; }
-  const n = IX.node.get(id);
-  if (n && n.layer == null && !S.showRefs) { S.showRefs = true; syncRefsButton(); return true; }
-  return false;
-}
-function selectNode(id, opts) {
-  opts = opts || {};
-  if (!IX.node.has(id)) return;
-  S.sel = id; S.blast = opts.keepBlast ? S.blast : null;
-  if (!opts.keepBlast) { S.selEvent = null; renderTimeline(); }
-  if (ensureVisible(id)) rebuildGraph({ fit: false }); else applyGraphState();
-  if (!opts.noCenter && G.cy) {
-    const nd = G.cy.getElementById(id);
-    if (nd.nonempty()) G.cy.animate({ center: { eles: nd }, zoom: Math.max(G.cy.zoom(), 0.8) }, { duration: 150 });
-  }
-  S.rightCollapsed = false; layoutMain();
-  renderDetail(); renderOutline(); syncBands();
-}
-function clearSelection() {
-  S.sel = null; S.blast = null; S.selEvent = null;
-  applyGraphState(); renderDetail(); renderOutline(); renderTimeline();
-}
-function showInGraph(id) { setTab('graph'); selectNode(id); }
-function moveSel(dx, dy) {
-  const cy = G.cy; if (!cy) return;
-  const cur = S.sel && cy.getElementById(repOf(S.sel));
-  if (!cur || cur.empty()) { const f = cy.nodes().not('.colhead').first(); if (f.nonempty() && !f.data('isGroup')) selectNode(f.id()); return; }
-  const p = cur.position(); let best = null, bd = 1e12;
-  cy.nodes().not('.colhead').forEach(n => {
-    if (n.id() === cur.id() || n.data('isGroup')) return;
-    const q = n.position(), ddx = q.x - p.x, ddy = q.y - p.y;
-    if (dx && (Math.sign(ddx) !== dx || Math.abs(ddy) > ROW_H / 2)) return;
-    if (dy && (Math.sign(ddy) !== dy || Math.abs(ddy) < ROW_H / 2)) return;
-    const d = dx ? Math.abs(ddx) + Math.abs(ddy) * 5 : Math.abs(ddy) * 3 + Math.abs(ddx);
-    if (d < bd) { bd = d; best = n; }
-  });
-  if (best) selectNode(best.id());
-}
+/* ---------- state ---------- */
+const S = {
+  project: null, graph: null, events: null, findings: null, alarms: null, checkpoints: null, triage: null,
+  loading: true, error: null,
+  tabs: [], active: -1, nav: [], navPos: -1,
+  leftOpen: true, rightOpen: true, leftW: 260, rightW: 300,
+  chFilter: 'all', histFilter: 'all', onlyLook: false, treeOpen: {}, query: '',
+  sel: null,            // Item id selected in the graph / focused for the right sidebar
+  gf: { sections: true, floats: true, shared: true, refs: false, files: false, code: true, runs: true, results: true, settings: true, unused: false, onlyChanged: false, mode: 'whole', depth: 2, expanded: [] },
+  openWhy: {}, noteOpen: {}, doneCards: {}, listView: false, localDepth: 1, checkSec: {},
+  an: {},               // analyses cache  gid|node -> analyze response
+};
+const M = {};   // derived model (section 3)
+const IX = {};  // node-level indexes
 
 /* ======================================================================
-   SHELL, TOPBAR, TRIAGE
+   2. HUB MODE. Everything that only exists under /p/<pid>/ is in this block.
+   To change what the hub shows (paper source, upload, sync), edit hubControls()
+   and the functions below it; nothing else in this file knows about hub mode.
    ====================================================================== */
-const TABS = [['graph', 'Graph', 'G'], ['alarms', 'Alarms', 'A'], ['checks', 'Checks', 'C'], ['links', 'Links', 'L']];
-function buildShell() {
-  const app = clear($('#app'));
-  app.append(
-    h('header', { id: 'topbar', role: 'banner' }),
-    h('div', { id: 'banner', class: 'hidden', role: 'alert' }),
-    h('div', { id: 'main' },
-      h('aside', { id: 'left', 'aria-label': 'Outline' }),
-      h('main', { id: 'centre' },
-        h('section', { id: 'v-graph', class: 'view', 'aria-label': 'Graph' },
-          h('div', { id: 'gtools', class: 'toolbar' }),
-          h('div', { id: 'cpbanner', class: 'hidden' }, 'Set a Last known good checkpoint on the timeline to see what to recheck.'),
-          h('div', { id: 'gview' },
-            h('div', { id: 'bandbg' }), h('div', { id: 'cy', role: 'application', 'aria-label': 'Dependency graph. Use the outline or search to pick a node; arrow keys move the selection.' }),
-            h('div', { id: 'bandlabels' }),
-            h('div', { id: 'gcount', 'aria-live': 'polite' }),
-                  h('div', { id: 'legend' },
-              h('span', { class: 'u' }, '▲ Rests on (blue, solid)'), h('span', { class: 'd' }, '▼ Supports (orange, dashed)'),
-              h('span', null, '↻ Recheck'), h('span', null, '✕ Needs fixing'), h('span', null, '✓✓ Reviewed')))),
-        h('section', { id: 'v-alarms', class: 'view', 'aria-label': 'Alarms' }),
-        h('section', { id: 'v-checks', class: 'view', 'aria-label': 'Checks' }),
-        h('section', { id: 'v-links', class: 'view', 'aria-label': 'Links' }),
-        h('div', { id: 'tlstrip', class: 'hidden' }),
-        h('section', { id: 'timeline', 'aria-label': 'Timeline' })),
-      h('aside', { id: 'right', 'aria-label': 'Details' },
-        h('div', { id: 'r-detail' }), h('div', { id: 'r-alarm', class: 'hidden' }), h('div', { id: 'r-check', class: 'hidden' }), h('div', { id: 'r-link', class: 'hidden' }))),
-    h('div', { id: 'picker', class: 'hidden' }));
-  buildGraphTools();
-  initCy();
+let HUBINFO = null;   // {kind:'zip'|'github'|'other', repo, subdir, last_sync}
+const HUB_PLAIN = { paper_repo_not_found: 'That repository was not found, or your GitHub sign-in cannot see it.', paper_subdir_missing: 'That folder does not exist in the repository.', not_signed_in: 'Sign in to GitHub on the Projects page first.', paper_is_github: 'This project\'s paper comes from GitHub, so a zip cannot replace it.', paper_branch_not_found: 'That branch was not found.', paper_too_large: 'That paper is too large.' };
+function paperStatusText() {
+  if (!HUBINFO) return '';
+  const k = HUBINFO.kind, t = HUBINFO.last_sync ? ' ✓ synced ' + agoText(HUBINFO.last_sync) : '';
+  if (k === 'github') return HUBINFO.subdir ? 'Paper: folder ' + HUBINFO.subdir + '/ in your code repo' + t : 'Paper: GitHub repo' + t;
+  if (k === 'zip') return 'Paper: zip — upload new version';
+  return 'Paper: old setting — connect a paper repo';
 }
-function buildGraphTools() {
-  const t = clear($('#gtools'));
-  const dirBtn = (v, label, tipText) => h('button', { class: 'btn sm', 'data-dir': v, 'aria-pressed': String(S.dir === v), title: tipText, onclick: () => setDir(v) }, label);
-  t.append(
-    h('input', { id: 'search', type: 'search', placeholder: 'Search nodes  /', 'aria-label': 'Search nodes', oninput: ev => setQuery(ev.target.value), onkeydown: ev => {
-      if (ev.key === 'Enter') { const m = (S.graph.nodes || []).find(n => matchNode(n, S.query)); if (m) { selectNode(m.id); } }
-      if (ev.key === 'Escape') { ev.target.value = ''; setQuery(''); ev.target.blur(); ev.stopPropagation(); } } }),
-    h('label', { class: 'muted' }, 'Show: ', h('select', { id: 'filter', 'aria-label': 'Show', onchange: ev => { S.filter = ev.target.value; applyGraphState(); } },
-      [['all', 'All'], ['recheck', 'Recheck only'], ['needs_fixing', 'Needs fixing'], ['proposed', 'Proposed links']].map(o => h('option', { value: o[0] }, o[1])))),
-    h('span', { class: 'seg', role: 'group', 'aria-label': 'Lineage direction' },
-      dirBtn('both', 'Both', 'Show what it rests on and what it supports (B)'), dirBtn('up', '▲ Rests on', 'Only what it rests on (U)'), dirBtn('down', '▼ Supports', 'Only what it supports (D)')),
-    h('button', { class: 'btn sm', id: 'btn-refs', 'aria-pressed': 'false', onclick: () => { S.showRefs = !S.showRefs; syncRefsButton(); rebuildGraph(); } }, 'References'),
-    h('button', { class: 'btn sm', id: 'btn-alledges', 'aria-pressed': 'false', onclick: () => { S.showAll = !S.showAll; $('#btn-alledges').setAttribute('aria-pressed', String(S.showAll)); applyGraphState(); } }, 'Show all edges'),
-    h('button', { class: 'btn sm', onclick: () => expandAll(true) }, 'Expand all'),
-    h('button', { class: 'btn sm', onclick: () => expandAll(false) }, 'Collapse all'),
-    h('button', { class: 'btn sm', title: 'Fit  F', onclick: fitGraph }, 'Fit  F'),
-    h('button', { class: 'btn sm', 'aria-label': 'Zoom out', onclick: () => zoomBy(1 / 1.3) }, '−'),
-    h('button', { class: 'btn sm', 'aria-label': 'Zoom in', onclick: () => zoomBy(1.3) }, '+'));
+/* hubControls() -> { menu: [ {label, hint, fn} ], status: string, sync: fn|null }. Hub mode only; empty otherwise. */
+function hubControls() {
+  if (!HUB_ON || READONLY) return { menu: [], status: '', sync: null };
+  const kind = HUBINFO && HUBINFO.kind;
+  const menu = [{ label: '← Projects', hint: 'Back to your list of projects', fn: () => { location.href = '/'; } }];
+  menu.push({ label: paperStatusText() || 'Paper', hint: kind === 'zip' ? 'Click to upload' : '', fn: kind === 'zip' ? () => { const i = $('#zip-in'); if (i) i.click(); } : null });
+  if (kind === 'zip') menu.push({ label: 'Upload paper as zip', hint: 'Replaces the paper with a new zip', fn: () => { const i = $('#zip-in'); if (i) i.click(); } });
+  menu.push({ label: 'Connect paper repo…', hint: 'Read the paper from GitHub', fn: connectPaperRepo });
+  return { menu, status: paperStatusText(), sync: hubSync, zipInput: kind !== 'github' };
 }
-function zoomBy(f) { G.userMoved = true; const cy = G.cy; cy.zoom({ level: cy.zoom() * f, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } }); }
-function syncRefsButton() { const b = $('#btn-refs'); if (b) b.setAttribute('aria-pressed', String(S.showRefs)); }
-function setDir(v) {
-  S.dir = v;
-  document.querySelectorAll('[data-dir]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.dir === v)));
-  applyGraphState(); renderDetail();
-}
-
-function setTab(tab) {
-  clearTips();
-  S.tab = tab; S.showPicker = false;
-  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'v-' + tab));
-  $('#picker').classList.add('hidden');
-  $('#timeline').classList.toggle('hidden', !(tab === 'graph' || tab === 'alarms'));
-  if (!(tab === 'graph' || tab === 'alarms')) $('#tlstrip').classList.add('hidden');
-  for (const id of ['detail', 'alarm', 'check', 'link']) $('#r-' + id).classList.toggle('hidden', !(id === { graph: 'detail', alarms: 'alarm', checks: 'check', links: 'link' }[tab]));
-  layoutMain();
-  renderTopbar();
-  if (tab === 'graph' && G.cy) { G.cy.resize(); syncBands(); }
-  if (tab === 'alarms') renderAlarms();
-  if (tab === 'checks') renderChecks();
-  if (tab === 'links') renderLinks();
-  renderTimeline();
-}
-function layoutMain() {
-  const m = $('#main'); if (!m) return;
-  m.className = '';
-  const t = S.tab;
-  if (t === 'checks' || t === 'links') { m.classList.add('noleft'); m.classList.add((t === 'checks' ? S.findSel : S.linkSel) ? 'wideright' : 'nodetail'); }
-  else { if (S.leftCollapsed) m.classList.add('noleft'); if (S.rightCollapsed) m.classList.add('noright'); }
-  if (G.cy) setTimeout(() => { G.cy.resize(); if (!G.userMoved && S.tab === 'graph') fitGraph(); else syncBands(); renderTimeline(); }, 0);
-}
-
-function counts() {
-  const alarmed = new Set();
-  if (S.alarms) for (const g of S.alarms.groups) { for (const c of g.changed) alarmed.add(c.node_id); for (const d of g.downstream) alarmed.add(d.node_id); }
-  let recheck = 0; for (const id of alarmed) if (nodeStatus(id) === 'recheck') recheck++;
-  const openF = S.findings ? S.findings.findings.filter(f => effState('finding', f.id).state === 'unreviewed').length : 0;
-  const prop = S.graph ? S.graph.edges.filter(e => e.status === 'proposed').length : 0;
-  return { recheck, openF, prop, alarmed: alarmed.size };
-}
-function renderTopbar() {
-  const tb = clear($('#topbar')); if (!S.project) return;
-  const c = counts();
-  const badge = (n, word) => h('span', { class: 'badge' + (n ? '' : ' zero'), 'aria-label': n + ' ' + word }, String(n));
-  const cp = S.alarms && S.alarms.checkpoint;
-  tb.append(...[
-    HUB_ON ? h('a', { class: 'btn', id: 'btn-projects', href: '/', title: 'All projects' }, '← Projects') : null,
-    h('span', { class: 'brand' }, PRODUCT), 
-    h('button', { class: 'proj', title: 'Project and scan', onclick: () => openPicker() }, 'project: ', h('b', null, S.project.name)),
-    h('div', { class: 'tabs', role: 'tablist' }, TABS.map(([id, label, key]) => h('button', { class: 'tab', role: 'tab', 'aria-selected': String(S.tab === id), title: label + '  ' + key, onclick: () => setTab(id) }, label,
-      id === 'alarms' ? badge(c.recheck, 'to recheck') : id === 'checks' ? badge(c.openF, 'open findings') : id === 'links' ? badge(c.prop, 'proposed links') : null))),
-    h('span', { class: 'grow' }),
-    READONLY ? h('span', { class: 'chip outdated', title: 'Opened from an exported file' }, 'Read-only snapshot · exported ' + fmtTime(SNAP.exported_at)) :
-      h('span', { class: 'scanst' }, 'scanned ' + fmtTime(S.project.scanned_at)),
-    h('button', { class: 'btn', id: 'btn-cp', 'aria-haspopup': 'dialog', onclick: toggleCheckpointPanel, title: 'Your Last known good checkpoint' },
-      'Checkpoint: ' + (cp ? cp.id.toUpperCase() : 'none'), ' ▾'),
-    READONLY ? null : h('button', { class: 'btn', id: 'btn-rescan', onclick: rescan }, 'Rescan'),
-    HUB_ON && !READONLY ? h('button', { class: 'btn', id: 'btn-sync', title: 'Pull the latest commits from GitHub (and Overleaf) and rescan', onclick: hubSync }, 'Sync now') : null,
-    HUB_ON && !READONLY ? paperSourceChip() : null,
-    HUB_ON && !READONLY && !(HUBINFO && HUBINFO.kind === 'overleaf') ? h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }) : null,
-    READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export HTML report'),
-    h('button', { class: 'btn', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts  ?', onclick: showShortcuts }, '?')].filter(Boolean));
-}
-/* Paper source (hub mode): Overleaf or zip. HUBINFO = {kind, project_id, last_sync, overleaf_configured}. */
-let HUBINFO = null;
-function agoText(t) {
-  if (!t) return 'never';
-  const d = (Date.now() - Date.parse(t)) / 1000;
-  if (isNaN(d)) return String(t);
-  if (d < 90) return 'just now';
-  if (d < 3600) return Math.round(d / 60) + ' min ago';
-  if (d < 86400) return Math.round(d / 3600) + ' h ago';
-  return Math.round(d / 86400) + ' d ago';
+function connectPaperRepo() {
+  const repo = h('input', { type: 'text', placeholder: 'owner/name or https://github.com/owner/name', 'aria-label': 'Paper repository', autocomplete: 'off', spellcheck: 'false' });
+  const sub = h('input', { type: 'text', placeholder: 'Folder inside the repo (optional), e.g. paper', 'aria-label': 'Folder (optional)', autocomplete: 'off' });
+  const err = h('div', { class: 'warn-note hidden', role: 'alert' });
+  modal('Connect paper repo', h('div', null,
+    h('p', null, 'Lemmata reads your LaTeX paper from GitHub, the same way it reads your code. The paper can be its own repo, or a folder inside your code repo.'), repo, h('div', { style: { height: '8px' } }), sub, err),
+    [{ label: 'Cancel' }, { label: 'Connect', primary: true, keep: true, fn: async close => {
+      let r = repo.value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+      if (!/^[\w.-]+\/[\w.-]+$/.test(r)) { err.textContent = 'Type the repository as owner/name.'; err.classList.remove('hidden'); return; }
+      const body = { kind: 'github', repo: r }; if (sub.value.trim()) body.subdir = sub.value.trim().replace(/^\/+|\/+$/g, '');
+      err.classList.add('hidden');
+      try { await hubJson('POST', '/api/hub/projects/' + encodeURIComponent(PID) + '/paper-source', body); close(); await loadAll(); await loadHubInfo(); toast('Paper now comes from GitHub. Lemmata checked it.'); }
+      catch (e) { err.textContent = HUB_PLAIN[e.code] || e.message; err.classList.remove('hidden'); }
+    } }], { width: 480 });
 }
 async function loadHubInfo() {
   if (!HUB_ON || !PID) return;
   try {
-    const [pl, st] = await Promise.all([fetch('/api/hub/projects', { cache: 'no-store' }).then(r => r.json()), fetch('/api/hub/status', { cache: 'no-store' }).then(r => r.json())]);
+    const pl = await fetch('/api/hub/projects', { cache: 'no-store' }).then(r => r.json());
     const p = (pl.projects || []).find(x => x.id === PID);
     const ps = (p && p.paper_source) || { kind: 'zip' };
-    HUBINFO = { kind: ps.kind === 'overleaf' ? 'overleaf' : 'zip', project_id: ps.project_id || null, last_sync: p ? p.last_sync : null, overleaf_configured: !!st.overleaf_configured };
-  } catch (e) { /* keep the previous info; the bar just shows less */ }
-  renderTopbar();
+    HUBINFO = { kind: ps.kind === 'github' ? 'github' : ps.kind === 'zip' ? 'zip' : 'other', repo: ps.repo || null, subdir: ps.subdir || null, last_sync: p ? p.last_sync : null };
+  } catch (e) { /* keep the previous info */ }
+  if (S.project) { renderStatus(); renderShellExtras(); }
 }
-function paperSourceChip() {
-  if (!HUBINFO) return null;
-  if (HUBINFO.kind === 'overleaf')
-    return h('span', { class: 'chip confirmed', id: 'paper-src', title: 'Overleaf project ' + (HUBINFO.project_id || '') }, 'Paper: Overleaf ✓', h('span', { class: 'sub' }, '(synced ' + agoText(HUBINFO.last_sync) + ')'));
-  // zip project: one button that offers the two ways to supply the paper
-  return h('button', { class: 'btn', id: 'paper-src', 'aria-haspopup': 'dialog', title: 'Where the paper comes from',
-    onclick: () => modal('Paper: uploaded zip', h('p', null, 'This project\'s paper was uploaded as a source zip. You can connect the Overleaf project instead, so Lemmata reads it directly and a sync picks up your edits.'),
-      [{ label: 'Cancel' }, { label: 'Upload paper zip', fn: () => $('#zip-in').click() }, { label: 'Connect Overleaf…', primary: true, fn: connectOverleaf }]) }, 'Paper: zip ▾');
+async function hubSync() {
+  setBusy('Checking your files…');
+  try {
+    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/sync', null, 'application/json');
+    await loadAll();
+    const c = r.code ? r.code.changed : r.changed, pp = r.paper && r.paper.changed;
+    if (r.paper && r.paper.error) toast('Your paper could not be pulled: ' + String(r.paper.error).slice(0, 160));
+    else toast(c || pp ? 'Synced. New changes were found.' : 'Already up to date.');
+    await loadHubInfo();
+  } catch (e) { toast('Sync failed. ' + e.message); }
+  setBusy(null);
 }
-function connectOverleaf() {
-  const inp = h('input', { type: 'text', id: 'ol-link', placeholder: 'https://www.overleaf.com/project/…', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Overleaf project link' });
-  const configured = HUBINFO && HUBINFO.overleaf_configured;
-  const body = h('div', null,
-    h('p', null, 'Paste the link of your Overleaf project. Lemmata reads it with git (read only) and never writes to Overleaf.'),
-    configured ? inp : h('div', { class: 'warn-note' }, 'The server has no Overleaf token yet. Open the ', h('a', { href: '/' }, 'Projects page'), ' and save your Overleaf Git token first (Overleaf → Account Settings → Git Integration).'),
-    configured ? h('p', { class: 'muted' }, 'This replaces the current paper. The old copy is kept on the server.') : null);
-  modal('Connect Overleaf', body, configured ? [{ label: 'Cancel' }, { label: 'Connect', primary: true, fn: async () => {
-    const v = inp.value.trim(); if (!v) return;
-    toast('Connecting Overleaf…');
-    try {
-      await hubJson('POST', '/api/hub/projects/' + encodeURIComponent(PID) + '/paper-source', { kind: 'overleaf', project: v });
-      await loadAll({ keepView: true }); await loadHubInfo();
-      toast('Paper now comes from Overleaf · rescanned');
-    } catch (e) { toast('Overleaf: ' + e.message); }
-  } }] : [{ label: 'Close' }]);
-  if (configured) inp.focus();
+async function hubUpload(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  setBusy('Uploading your paper…');
+  try {
+    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/paper', f, 'application/zip');
+    await loadAll();
+    toast('Paper uploaded (version ' + r.version + '). Lemmata checked it again.');
+    await loadHubInfo();
+  } catch (e) { toast('Upload failed. ' + (HUB_PLAIN[e.code] || e.message)); }
+  setBusy(null);
 }
 async function hubJson(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  if (!r.ok) { const er = j.error; const e = new Error((er && er.message) || (typeof er === 'string' ? er : '') || ('HTTP ' + r.status)); e.code = er && (er.code || (typeof er === 'string' ? er : '')); throw e; }
   return j;
-}
-async function hubSync() {
-  const b = $('#btn-sync'); if (b) { b.disabled = true; b.textContent = 'Syncing…'; }
-  try {
-    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/sync', null, 'application/json');
-    await loadAll({ keepView: true });
-    const c = r.code ? r.code.changed : r.changed, pp = r.paper && r.paper.changed;
-    const perr = r.paper && r.paper.error;
-    if (perr) toast('Overleaf: ' + String(perr).slice(0, 200) + (c ? ' (code was synced)' : ''));
-    else toast(c || pp ? 'Synced ' + [c ? 'code from GitHub' : '', pp ? 'paper from Overleaf' : ''].filter(Boolean).join(' and ') + ' · rescanned' : 'Already up to date');
-    await loadHubInfo();
-  } catch (e) { toast('Sync failed: ' + e.message); }
-  renderTopbar();
-}
-async function hubUpload(ev) {
-  const f = ev.target.files[0]; if (!f) return;
-  const b = $('#btn-upload'); if (b) { b.disabled = true; b.textContent = 'Uploading…'; }
-  try {
-    const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/paper', f, 'application/zip');
-    await loadAll({ keepView: true });
-    toast('Paper version ' + r.version + ' uploaded · rescanned');
-    await loadHubInfo();
-  } catch (e) { toast('Upload failed: ' + e.message); }
-  renderTopbar();
 }
 async function hubPost(path, body, type) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': type }, body: body == null ? '{}' : body });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  if (!r.ok) { const er = j.error; const e = new Error((er && er.message) || (typeof er === 'string' ? er : '') || ('HTTP ' + r.status)); e.code = er && (er.code || (typeof er === 'string' ? er : '')); throw e; }
   return j;
 }
-function showShortcuts() {
-  const rows = [['/', 'Search'], ['F', 'Fit'], ['Esc', 'Clear'], ['G A C L', 'Switch tab'], ['[ ]', 'Toggle panels'], ['R X I', 'Triage'], ['U D B', 'Lineage direction'], ['K', 'Checkpoint at selected commit'], ['+ − 0', 'Zoom'], ['Arrows', 'Move selection'], ['?', 'This sheet']];
-  modal('Keyboard shortcuts', h('div', { class: 'keys' }, rows.flatMap(r => [h('kbd', null, r[0]), h('span', null, r[1])])), [{ label: 'Close', primary: true }]);
-}
-async function rescan() {
-  if (READONLY) return;
-  const b = $('#btn-rescan'); if (b) { b.disabled = true; b.textContent = 'Scanning…'; }
-  try { await apiPost('/api/scan', {}); await loadAll(); toast('Scan finished.'); }
-  catch (e) { showBanner('Scan data could not be read. ' + e.message + '.', true); }
-  renderTopbar();
-}
-function showBanner(msg, withActions) {
-  const b = $('#banner'); clear(b);
-  if (!msg) { b.classList.add('hidden'); return; }
-  b.classList.remove('hidden');
-  b.append(msg, ' ');
-  if (withActions) b.append(h('button', { class: 'linkbtn', onclick: rescan }, 'Rescan'), ' ', h('button', { class: 'linkbtn', onclick: () => openPicker() }, 'Choose another folder'));
-}
-
-/* checkpoint popover */
-function toggleCheckpointPanel() {
-  const old = $('#cppop'); if (old) { old.remove(); return; }
-  const cps = (S.checkpoints && S.checkpoints.checkpoints) || [];
-  const note = h('input', { type: 'text', id: 'cpnote', maxlength: '500', placeholder: 'Note, e.g. draft v2 validated', 'aria-label': 'Checkpoint note', style: { width: '100%' } });
-  const pop = h('div', { class: 'pop', id: 'cppop', role: 'dialog', 'aria-label': 'Checkpoint', style: { right: '60px' } },
-    h('h4', null, 'Your Last known good'),
-    h('div', { class: 'hint' }, 'A checkpoint stores the content of every node in both repositories. Alarms list what changed after it. Older checkpoints stay listed.'),
-    h('div', { class: 'cplist' }, cps.length ? cps.map(c => h('div', { class: 'cp' }, h('b', { class: 'mono' }, c.id.toUpperCase()), c.active ? ' (active) ' : ' ', h('span', { class: 'muted' }, fmtTime(c.created_at)), h('div', null, c.note || h('span', { class: 'muted' }, 'no note')))) : h('div', { class: 'muted' }, 'No checkpoint yet.')),
-    READONLY ? h('div', { class: 'hint' }, 'Read-only snapshot') : [note, h('div', { style: { display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end' } },
-      h('button', { class: 'btn', onclick: () => pop.remove() }, 'Close'),
-      h('button', { class: 'btn primary', onclick: async () => { await createCheckpoint(note.value, null); pop.remove(); } }, 'Set checkpoint'))]);
-  document.body.append(pop);
-  if (!READONLY) note.focus();
-}
-async function createCheckpoint(note, at) {
-  try {
-    const r = await apiPost('/api/checkpoints', { note: note || '', at: at || null });
-    S.alarms = r.alarms;
-    const [cps, ev, pr, tri] = await Promise.all([apiGet('/api/checkpoints'), apiGet('/api/events'), apiGet('/api/project'), apiGet('/api/triage')]);
-    S.checkpoints = cps; S.events = ev; S.project = pr; S.triage = tri;
-    S.alarmSel = null; S.analysis = null;
-    afterDataChange(true);
-    toast('Checkpoint ' + r.checkpoint.id.toUpperCase() + ' set. ' + plural(S.alarms.groups.length, 'alarm group') + ' now.');
-  } catch (e) { toast('Checkpoint not saved: ' + e.message); }
-}
-
-/* triage */
-async function setTriage(type, id, state, note) {
-  if (READONLY) return;
-  try {
-    const r = await apiPost('/api/triage', { target_type: type, target_id: id, state, note: note == null ? '' : note });
-    const en = r.entry; if (!en.effective_state) { en.effective_state = en.state; en.outdated = false; }
-    S.triage.entries[type + ':' + id] = en;
-    afterDataChange(false);
-    toast('Saved');
-  } catch (e) { toast('Not saved: ' + e.message); }
-}
-function triageControl(type, id, opts) {
-  opts = opts || {};
-  const { state, outdated, entry } = effState(type, id);
-  const cur = entry ? entry.state : 'unreviewed';
-  const note = h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Why? e.g. rerun planned for Friday', 'aria-label': 'Triage note', disabled: READONLY }, entry ? entry.note : '');
-  note.value = entry ? entry.note || '' : '';
-  const btn = (s, label) => h('button', { class: 'btn s-' + s, 'aria-pressed': String(cur === s && !outdated), disabled: READONLY, 'data-triage': s, title: READONLY ? 'Read-only snapshot' : null,
-    onclick: () => setTriage(type, id, cur === s ? 'unreviewed' : s, note.value) }, label);
-  const hist = entry && entry.history && entry.history.length > 1 ? h('details', { class: 'hint' }, h('summary', null, 'History (' + entry.history.length + ')'),
-    entry.history.slice().reverse().map(x => h('div', null, fmtTime(x.at) + ' · ' + (STATUS[x.state] ? STATUS[x.state].word : 'Unreviewed') + (x.note ? ' · ' + x.note : '')))) : null;
-  return h('div', { class: 'tri' },
-    opts.noHeading ? null : h('h4', null, 'Triage'),
-    h('div', { class: 'seg', role: 'group', 'aria-label': 'Triage state' }, btn('reviewed', '✓✓ Reviewed'), btn('needs_fixing', '✕ Needs fixing'), btn('ignored', '– Ignore')),
-    outdated ? h('div', { class: 'hint' }, h('span', { class: 'chip outdated' }, '↻ Changed since you reviewed it'), ' It returned to Recheck; your earlier note is kept in the history.') : null,
-    h('div', { class: 'nt' }, h('label', null, 'Note (kept in ' + HUB + '/triage.json)'), note,
-      h('div', null, h('button', { class: 'btn', disabled: READONLY, onclick: () => setTriage(type, id, entry ? entry.state : 'unreviewed', note.value) }, 'Save note'))),
-    h('div', { class: 'hint' }, type === 'node' ? 'If this node changes again, it returns to Recheck.' : 'If this finding changes, it returns to open.'), hist);
-}
-function afterDataChange(rebuild) {
-  rebuildIndex();
-  renderTopbar();
-  if (rebuild) rebuildGraph({ fit: false }); else applyGraphState();
-  renderOutline(); renderDetail(); renderTimeline();
-  if (S.tab === 'alarms') renderAlarms(); else renderAlarmsLazy();
-  renderChecks(); renderLinks();
-}
-function renderAlarmsLazy() { /* alarms view is rendered on demand */ }
-
-/* ======================================================================
-   OUTLINE
-   ====================================================================== */
-function sectionTree() {
-  const secs = ((S.graph && S.graph.nodes) || []).filter(n => n.kind === 'section');
-  const key = n => [(n.attrs && n.attrs.in_appendix) ? 1 : 0, (n.loc && n.loc.path === 'main.tex') ? 0 : 1, (n.loc && n.loc.path) || '', (n.loc && n.loc.line) || 0];
-  secs.sort((a, b) => { const x = key(a), y = key(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; });
-  return secs;
-}
-function descendants(id) {
-  const seen = new Set([id]), q = [id];
-  while (q.length) { const c = q.shift(); for (const e of IX.out.get(c) || []) if (e.kind === 'contains' && e.status !== 'rejected' && !seen.has(e.to)) { seen.add(e.to); q.push(e.to); } }
-  return seen;
-}
-function renderOutline() {
-  const box = clear($('#left'));
-  const c = counts();
-  const secs = sectionTree();
-  box.append(h('div', { class: 'ol-head' }, h('div', { class: 'h' }, 'Paper outline'),
-    h('div', { class: 'muted mono', style: { fontSize: '12px' } }, c.recheck + ' items to recheck'),
-    h('label', null, h('input', { type: 'checkbox', checked: S.onlyRecheck, onchange: ev => { S.onlyRecheck = ev.target.checked; renderOutline(); } }), 'Only sections to recheck')));
-  if (!secs.length) { box.append(h('div', { class: 'empty' }, S.loading ? 'Reading outline…' : 'No sections found. Check that your main .tex file uses \\section.')); return; }
-  let appHead = false;
-  for (const s of secs) {
-    const desc = descendants(s.id);
-    let re = 0, nf = 0;
-    for (const d of desc) { const st = nodeStatus(d); if (st === 'recheck') re++; if (st === 'needs_fixing') nf++; }
-    if (S.onlyRecheck && !re && !nf) continue;
-    if (s.attrs && s.attrs.in_appendix && !appHead) { appHead = true; box.append(h('div', { class: 'ol-grp' }, 'Appendix')); }
-    const indent = ((s.attrs && s.attrs.level) || 1) - 1;
-    box.append(h('div', { class: 'ol-row', role: 'button', tabindex: '0', 'aria-selected': String(S.sel === s.id), 'aria-label': s.name + (re ? ', ' + re + ' to recheck' : ''), style: { paddingLeft: (12 + indent * 12) + 'px' },
-      onclick: () => { setTab('graph'); selectNode(s.id); }, ondblclick: () => { S.rightCollapsed = false; setTab('graph'); selectNode(s.id); const pv = $('#pv-toggle'); if (pv) pv.click(); },
-      onkeydown: ev => { if (ev.key === 'Enter') { setTab('graph'); selectNode(s.id); } else if (ev.key === 'ArrowDown' && ev.target.nextElementSibling) ev.target.nextElementSibling.focus(); else if (ev.key === 'ArrowUp' && ev.target.previousElementSibling) ev.target.previousElementSibling.focus(); } },
-      h('span', { class: 'num' }, (s.attrs && s.attrs.number) || ''), h('span', { class: 'ttl' }, (s.attrs && s.attrs.title) || s.name),
-      nf ? h('span', { class: 'cnt needs_fixing', 'aria-label': nf + ' need fixing' }, '✕ ' + nf) : null,
-      re ? h('span', { class: 'cnt recheck', 'aria-label': re + ' to recheck' }, '↻ ' + re) : null));
-  }
-}
-
-/* ======================================================================
-   DETAIL PANEL
-   ====================================================================== */
-let detailToken = 0;
-function evidenceFor(n) {
-  const out = [], seen = new Set();
-  const push = (ev, why) => { const k = ev.repo + ev.path + ev.line + why; if (!seen.has(k)) { seen.add(k); out.push({ ev, why }); } };
-  for (const e of IX.all.get(n.id) || []) {
-    if (e.kind === 'contains' || e.status === 'rejected') continue;
-    const other = IX.node.get(e.from === n.id ? e.to : e.from);
-    const a = e.from === n.id ? n.name : other.name, b = e.from === n.id ? other.name : n.name;
-    const tag = e.status === 'proposed' ? ' (proposed)' : '';
-    for (const ev of e.evidence || []) push(ev, a + ' ' + (EDGE_PHRASE[e.kind] || e.kind) + ' ' + b + tag);
-  }
-  for (const f of IX.findingsByNode.get(n.id) || []) for (const ev of f.evidence) push(ev, f.title);
-  return out;
-}
-function nodeHeader(n) {
-  const st = nodeStatus(n.id);
-  const col = colorOf(n.layer);
-  const mono = !['thesis', 'rq', 'section'].includes(n.kind);
-  return h('div', null,
-    h('div', { class: 'hd' },
-      h('span', { class: 'gl', style: { borderColor: 'var(--layer-' + col + ')', background: 'var(--layer-' + col + '-t)' }, 'aria-hidden': 'true' }, KIND_GLYPH[n.kind] || '?'),
-      h('div', { style: { flex: 1, minWidth: 0 } }, h('div', { class: 'nm' + (mono ? ' m' : '') }, n.name),
-        h('div', { class: 'meta' }, KIND_LABEL[n.kind] || n.kind, ' · ' + layerName(n) + ' · ', h('span', { class: 'chip plain mono' }, n.repo), ' ',
-          STATUS[st] && st !== 'none' ? chip(st) : null))),
-    n.detail ? h('div', { class: 'muted', style: { margin: '2px 0' } }, n.detail) : null,
-    h('div', { class: 'meta' }, h('button', { class: 'pathlink', title: 'Copy path', onclick: () => { try { navigator.clipboard.writeText(locStr(n)); toast('Copied ' + locStr(n)); } catch (e) { toast(locStr(n)); } } }, locStr(n)),
-      READONLY ? null : h('a', { class: 'btn sm', title: 'Opens in your default editor if it supports file links', href: editorHref(n) }, 'Open in editor')));
-}
-function editorHref(n) {
-  const r = (S.project.repos || []).find(x => x.id === n.repo);
-  const p = r && n.loc && n.loc.path ? r.abs_path + '/' + n.loc.path : '';
-  return p ? 'vscode://file' + encodeURI(p) + (n.loc.line ? ':' + n.loc.line : '') : '#';
-}
-function lineageSummary(n) {
-  const L = lineage(n.id);
-  const sortIds = m => [...m.entries()].sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1));
-  const list = (m, cls, label) => h('details', { class: 'lin ' + cls, open: m.size <= 8 && m.size > 0 },
-    h('summary', null, label + ' ' + m.size),
-    h('ul', null, sortIds(m).map(([id]) => { const x = IX.node.get(id); const st = nodeStatus(id); return h('li', null,
-      h('button', { class: 'it', onclick: () => selectNode(id) }, (KIND_GLYPH[x.kind] || '') + ' ' + x.name), h('span', { class: 'muted', style: { fontSize: '11px' } }, layerName(x)), STATUS[st] && st !== 'none' && st !== 'confirmed' ? chip(st) : null); })));
-  return h('section', null, h('h4', null, 'Lineage'),
-    h('div', { class: 'seg', style: { marginBottom: '6px' } },
-      h('button', { class: 'btn sm', onclick: () => setDir('up'), title: 'Highlight only what this rests on, down to the code and runs' }, 'Trace down'),
-      h('button', { class: 'btn sm', onclick: () => setDir('down'), title: 'Highlight only what this supports, up to the thesis' }, 'Trace up'),
-      h('button', { class: 'btn sm', onclick: () => setDir('both') }, 'Both')),
-    list(L.up, 'up', '▲ Rests on'), list(L.down, 'down', '▼ Supports'));
-}
-function texRendered(lines) {
-  return lines.map(l => l.replace(/%.*$/, '').replace(/\\(?:cite[a-z]*|ref|eqref|cref|autoref)\{([^}]*)\}/g, '[$1]').replace(/\\label\{[^}]*\}/g, '').replace(/\\(?:emph|textbf|textit|section|subsection|caption)\*?\{([^}]*)\}/g, '$1').replace(/\\(begin|end)\{[^}]*\}/g, '').replace(/~/g, ' ').replace(/\$([^$]*)\$/g, '$1')).filter(l => l.trim()).join('\n');
-}
-async function fillPreview(box, n, token) {
-  const set = el => { if (token === detailToken) { clear(box).append(...el); } };
-  const loc = n.loc || {};
-  const ev = evidenceFor(n).filter(e => e.ev.path === loc.path && e.ev.repo === n.repo).map(e => e.ev.line);
-  try {
-    if (n.kind === 'reference') {
-      const r = await getLines(n.repo, loc.path, loc.line || 1, (loc.line || 1) + 7);
-      return set([h('div', { class: 'cap' }, n.repo + ':' + loc.path + ':' + r.start + '–' + (r.start + r.lines.length - 1)), codeBlock(r.lines, r.start, [loc.line], { word: 'Here' })]);
-    }
-    if (n.kind === 'asset' && /\.(png|jpe?g|svg)$/i.test(loc.path || '') && !READONLY) {
-      const img = h('img', { src: apiUrl('/api/raw') + '?repo=' + encodeURIComponent(n.repo) + '&path=' + encodeURIComponent(loc.path), alt: n.name, style: { maxWidth: '100%', border: '1px solid var(--border)' } });
-      img.onerror = () => { if (token === detailToken) clear(box).append(h('div', { class: 'hint' }, 'No image available. ' + loc.path + ' is not a bitmap or was not found.')); };
-      return set([h('div', { class: 'cap' }, n.repo + ':' + loc.path), img]);
-    }
-    if (n.kind === 'asset') return set([h('div', { class: 'hint' }, 'No image available. ' + (loc.path || n.name) + ' is not a bitmap or was not found.')]);
-    if (!loc.path) throw new Error('no file recorded');
-    const paper = n.layer != null && n.layer <= 3 && loc.line;
-    let a = 1, b = 30;
-    if (paper) { a = loc.line; b = loc.end_line ? Math.min(loc.end_line, a + 59) : a + (n.kind === 'rq' ? 2 : 12); }
-    const r = await getLines(n.repo, loc.path, a, b);
-    if (r.binary) return set([h('div', { class: 'hint' }, 'Binary file; no text preview.')]);
-    const rawTxt = r.lines;
-    const cap = h('div', { class: 'cap' }, n.repo + ':' + loc.path + ':' + r.start + '–' + (r.start + r.lines.length - 1) + (paper ? '' : ' (file head)'));
-    const code = codeBlock(r.lines, r.start, ev, { word: 'Here' });
-    const wrap = h('div', null, cap, code);
-    const els = [wrap];
-    if (paper) {
-      let rend = false;
-      const tg = h('button', { class: 'btn sm', id: 'pv-toggle', style: { margin: '6px 0' }, onclick: () => { rend = !rend; clear(wrap).append(cap, rend ? h('div', { class: 'rendered' }, texRendered(rawTxt)) : code); tg.textContent = rend ? 'Show LaTeX' : 'Show rendered text'; } }, 'Show rendered text');
-      els.push(tg);
-    } else if (r.total && r.total > r.lines.length && !READONLY) {
-      els.push(h('button', { class: 'btn sm', style: { marginTop: '6px' }, onclick: async ev => { ev.target.disabled = true; const all = await getLines(n.repo, loc.path, 1, 400); clear(wrap).append(h('div', { class: 'cap' }, n.repo + ':' + loc.path + ':1–' + all.lines.length), codeBlock(all.lines, 1, ev && [], {})); ev.target.remove(); } }, 'Show all ' + r.total + ' lines'));
-    }
-    set(els);
-  } catch (e) {
-    if (token === detailToken) clear(box).append(h('div', { class: 'hint err' }, 'Preview unavailable: ' + e.message + '. Evidence locations are still listed.'));
-  }
-}
-async function fillDiff(box, n, token) {
-  const entries = IX.alarm.get(n.id) || [];
-  const mine = entries.find(a => a.role === 'changed');
-  if (!mine) return;
-  const btn = h('button', { class: 'btn sm', onclick: async () => {
-    btn.disabled = true;
-    try {
-      const a = await apiGet('/api/analyze?group=' + encodeURIComponent(mine.group.id) + '&node=' + encodeURIComponent(n.id));
-      const d = (a.diffs || []).find(x => x.node_id === n.id) || a.diffs[0];
-      if (token !== detailToken) return;
-      clear(box).append(h('div', { class: 'cap' }, d ? d.from_label + ' → ' + d.to_label : ''), d && !d.binary ? diffBlock(d.unified) : h('div', { class: 'hint' }, 'No text diff available for this file.'));
-    } catch (e) { clear(box).append(h('div', { class: 'hint err' }, 'Diff unavailable: ' + e.message)); }
-  } }, 'Show diff since checkpoint');
-  box.append(btn);
-}
-function renderDetail() {
-  const box = clear($('#r-detail'));
-  const token = ++detailToken;
-  if (!S.sel || !IX.node.has(S.sel)) {
-    box.append(h('div', { class: 'empty' }, 'Select a node in the graph to see what it rests on, what it supports, and where the evidence is.'));
-    return;
-  }
-  const n = IX.node.get(S.sel);
-  const pv = h('div', null, h('div', { class: 'skel' }), h('div', { class: 'skel', style: { width: '70%' } }), h('div', { class: 'hint' }, 'Loading preview…'));
-  const df = h('div', { style: { marginTop: '6px' } });
-  const evs = evidenceFor(n);
-  const alarmInfo = IX.alarm.get(n.id);
-  box.append(h('div', { class: 'dt' }, nodeHeader(n),
-    alarmInfo ? h('div', { class: 'hint' }, alarmInfo.map(a => (a.role === 'changed' ? 'Changed in ' : 'Downstream of ') + a.group.display + ' · ' + a.group.cause.short).join(' ; ')) : null,
-    lineageSummary(n),
-    h('section', null, h('h4', null, 'Preview'), pv, df),
-    h('section', null, h('h4', null, 'Evidence'), evs.length ? evs.map(x => h('div', { class: 'ev' },
-      h('button', { class: 'pathlink', onclick: () => { try { navigator.clipboard.writeText(x.ev.path + ':' + x.ev.line); } catch (e) { } toast('Copied ' + x.ev.path + ':' + x.ev.line); } }, x.ev.repo + ':' + x.ev.path + ':' + x.ev.line),
-      h('div', { class: 'why' }, x.why), h('div', { class: 'q' }, x.ev.text))) : h('div', { class: 'hint' }, 'No evidence locations recorded for this node.')),
-    triageControl('node', n.id)));
-  fillPreview(pv, n, token);
-  fillDiff(df, n, token);
-}
-
-/* ======================================================================
-   TIMELINE
-   ====================================================================== */
-function repoRole(id) { const r = ((S.project && S.project.repos) || []).find(x => x.id === id); return r ? r.role : 'code'; }
-function eventLane(ev) { return ev.kind === 'run' ? 2 : repoRole(ev.repo) === 'paper' ? 1 : 0; }
-function cpTime() {
-  const cp = S.checkpoints && S.checkpoints.checkpoints.find(c => c.active);
-  if (!cp) return null;
-  let best = null;
-  for (const ev of (S.events && S.events.events) || []) {
-    const r = cp.repos && cp.repos[ev.repo];
-    if (r && ev.rev && r.rev === ev.rev && (!best || ev.time > best)) best = ev.time;
-  }
-  return best || cp.created_at;
-}
-function blastFor(ev) {
-  const seeds = new Set();
-  if (ev.changed_nodes && ev.changed_nodes.length) ev.changed_nodes.forEach(i => seeds.add(i));
-  else for (const f of ev.files || []) { const id = 'file:' + ev.repo + '/' + f.path; if (IX.node.has(id)) seeds.add(id); }
-  const all = new Set(seeds), q = [...seeds];
-  while (q.length) { const c = q.shift(); for (const e of IX.in.get(c) || []) if (e.propagates && e.status !== 'rejected' && !all.has(e.from)) { all.add(e.from); q.push(e.from); } }
-  return { seeds: seeds.size, nodes: [...all] };
-}
-function selectEvent(ev) {
-  S.selEvent = ev.id; S.sel = null;
-  const b = blastFor(ev);
-  S.blast = { ev: ev.id, nodes: b.nodes, files: (ev.files || []).length, seeds: b.seeds };
-  applyGraphState(); renderDetail(); renderOutline(); renderTimeline();
-}
-function renderTimeline() {
-  clearTips();
-  const box = clear($('#timeline'));
-  const strip = clear($('#tlstrip'));
-  strip.classList.add('hidden');
-  if (!S.events || !S.project || box.classList.contains('hidden')) return;
-  const evs = S.events.events || [];
-  const W = box.clientWidth || 800;
-  const head = h('div', { class: 'tl-head' }, h('b', { class: 'serif' }, 'Timeline'),
-    h('span', { class: 'muted' }, '● commit  ◆ paper version  ▲ run'), h('span', { style: { flex: 1 } }));
-  box.append(head);
-  if (!evs.length) { box.append(h('div', { class: 'empty' }, 'No history found. Without git history, the timeline shows only paper versions and runs.')); return; }
-  const cpT = cpTime();
-  const times = evs.map(e => Date.parse(e.time)).concat(cpT ? [Date.parse(cpT)] : []);
-  let t0 = Math.min(...times), t1 = Math.max(...times);
-  const lkgT = cpT ? Date.parse(cpT) : null;
-  if (S.zoomRange && lkgT) t0 = lkgT - (t1 - lkgT) * 0.08;
-  const span = Math.max(t1 - t0, 3600e3), pad = span * 0.04;
-  t0 -= pad; t1 = t0 + span + pad * 2;
-  const L0 = 100, R0 = 120, top = 22;
-  const x = t => L0 + (Date.parse(t) - t0) / (t1 - t0) * (W - L0 - R0);
-  const laneY = l => top + 12 + l * 24;
-  const NS = 'http://www.w3.org/2000/svg';
-  const el = (tag, a, txt) => { const e = document.createElementNS(NS, tag); for (const k in a || {}) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
-  const svg = el('svg', { id: 'tlsvg', width: W, height: 130, role: 'group', 'aria-label': 'Commits, paper versions and runs over time' });
-  // range shading and handles
-  const last = evs.filter(e => e.kind !== 'worktree').reduce((m, e) => (!m || e.time > m.time ? e : m), null) || evs[evs.length - 1];
-  const xNow = x(last.time);
-  if (lkgT != null) {
-    const xl = x(cpT);
-    const after = evs.filter(e => e.after_checkpoint && e.kind === 'commit').length;
-    svg.append(el('rect', { x: xl, y: top - 4, width: Math.max(0, xNow - xl), height: 84, fill: css('--amber-bg'), opacity: 0.9 }));
-    svg.append(el('text', { x: (xl + xNow) / 2, y: top + 76, 'text-anchor': 'middle' }, after + ' commits · ' + counts().recheck + ' items to recheck'));
-    svg.append(el('line', { x1: xl, x2: xl, y1: 4, y2: top + 82, stroke: css('--ink'), 'stroke-width': 2 }));
-    const fw = 178, fx = Math.max(4, xl - fw);
-    const flag = el('g'); flag.append(el('rect', { x: fx, y: 4, width: fw, height: 16, fill: css('--ink') }));
-    const ft = el('text', { x: fx + 5, y: 16 }, 'Last known good · ' + (shortOfCp() || fmtDate(cpT))); ft.style.fill = css('--paper'); flag.append(ft); svg.append(flag);
-  }
-  svg.append(el('line', { x1: xNow, x2: xNow, y1: 4, y2: top + 82, stroke: css('--ink'), 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
-  const nowW = 104, nx = xNow;
-  const ng = el('g'); ng.append(el('rect', { x: nx, y: 4, width: nowW, height: 16, fill: css('--surface'), stroke: css('--ink') }));
-  const nt = el('text', { x: nx + 5, y: 16 }, 'Now · ' + (last.short || '')); nt.style.fill = css('--ink'); ng.append(nt); svg.append(ng);
-  // lanes
-  ['Commits', 'Paper versions', 'Runs'].forEach((nm, i) => {
-    svg.append(el('line', { x1: L0, x2: W - R0, y1: laneY(i), y2: laneY(i), stroke: css('--border') }));
-    const tx = el('text', { x: 8, y: laneY(i) + 4, class: 'lane' }, nm); svg.append(tx);
-  });
-  // axis ticks
-  for (let i = 0; i <= 5; i++) {
-    const t = t0 + (t1 - t0) * i / 5, xx = L0 + (W - L0 - R0) * i / 5;
-    svg.append(el('line', { x1: xx, x2: xx, y1: top + 82, y2: top + 86, stroke: css('--border-strong') }));
-    svg.append(el('text', { x: xx, y: top + 102, 'text-anchor': i === 0 ? 'start' : i === 5 ? 'end' : 'middle' }, new Date(t).toISOString().slice(0, 10)));
-  }
-  // marks
-  const rowsUsed = [[-99, -99, -99], [-99, -99, -99], [-99, -99, -99]];
-  const OFFS = [0, 8, -8];
-  for (const ev of evs.slice().sort((p, q) => (p.time < q.time ? -1 : 1))) {
-    const lane = eventLane(ev), cx = x(ev.time);
-    let row = rowsUsed[lane].findIndex(lx => cx - lx >= 12);
-    if (row < 0) row = rowsUsed[lane].indexOf(Math.min(...rowsUsed[lane]));
-    rowsUsed[lane][row] = cx;
-    const cy2 = laneY(lane) + OFFS[row];
-    const after = ev.after_checkpoint || ev.kind === 'worktree';
-    const sel = S.selEvent === ev.id;
-    const attrs = { class: 'mark', tabindex: '0', role: 'button', 'aria-label': (ev.short || ev.kind) + ' ' + ev.subject + ', ' + (after ? 'after the checkpoint' : 'before the checkpoint'),
-      fill: after ? css('--ink') : css('--surface'), stroke: sel ? css('--down') : css('--ink'), 'stroke-width': sel ? 3 : 1.5, 'stroke-dasharray': ev.kind === 'worktree' ? '2 2' : '' };
-    let m;
-    if (ev.kind === 'run') m = el('polygon', Object.assign({ points: [cx, cy2 - 6, cx + 6, cy2 + 5, cx - 6, cy2 + 5].join(' ') }, attrs));
-    else if (lane === 1) m = el('polygon', Object.assign({ points: [cx, cy2 - 6, cx + 6, cy2, cx, cy2 + 6, cx - 6, cy2].join(' ') }, attrs));
-    else m = el('circle', Object.assign({ cx, cy: cy2, r: 5 }, attrs));
-    m.addEventListener('click', () => selectEvent(ev));
-    m.addEventListener('keydown', k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); selectEvent(ev); } });
-    tip(m, () => (ev.short ? ev.short + ' ' : '') + ev.subject + '\n' + ev.repo + ' · ' + fmtTime(ev.time) + '\n' + plural((ev.files || []).length, 'file') + ' changed' + (ev.flags && ev.flags.length ? '\n? Low confidence' : ''));
-    svg.append(m);
-  }
-  const tools = head;
-  tools.append(
-    h('button', { class: 'btn sm', onclick: () => { S.zoomRange = true; renderTimeline(); } }, 'Zoom to range'),
-    h('button', { class: 'btn sm', onclick: () => { S.zoomRange = false; renderTimeline(); } }, 'Reset'));
-  const se = S.selEvent && evs.find(e => e.id === S.selEvent);
-  if (se) {
-    tools.append(
-      h('button', { class: 'btn sm', disabled: READONLY || se.kind !== 'commit', title: READONLY ? 'Read-only snapshot' : se.kind !== 'commit' ? 'Only commits can become a checkpoint' : 'Make this commit your Last known good (K)', onclick: () => setCheckpointAtEvent(se) }, 'Set as Last known good'),
-      h('button', { class: 'btn sm', disabled: true, title: 'Viewing the graph at a past commit is not in this demo' }, 'Set as Now'));
-  }
-  if (S.blast && se) {
-    strip.append(h('div', { class: 'tl-strip' }, h('span', null, 'Commit ' + (se.short || se.kind) + ': ' + plural(S.blast.files, 'file') + ' changed → ' + plural(S.blast.nodes.length, 'node') + ' affected.'),
-      h('button', { class: 'linkbtn', onclick: () => { S.openGroups.add(se.id); S.alarmSel = null; setTab('alarms'); } }, 'Show in Alarms'),
-      h('button', { class: 'linkbtn', onclick: clearSelection }, 'Clear')));
-    strip.classList.remove('hidden');
-  }
-  box.append(svg);
-}
-function shortOfCp() {
-  const cp = S.checkpoints && S.checkpoints.checkpoints.find(c => c.active); if (!cp) return null;
-  const ids = Object.keys(cp.repos || {});
-  const hits = [];
-  for (const r of ids) { const ev = ((S.events && S.events.events) || []).find(e => e.repo === r && e.rev === cp.repos[r].rev); if (ev) hits.push(ev); }
-  hits.sort((a, b) => (a.time < b.time ? 1 : -1));
-  return hits[0] ? hits[0].short : cp.id.toUpperCase();
-}
-function setCheckpointAtEvent(ev) {
-  if (READONLY || ev.kind !== 'commit') return;
-  modal('Set Last known good', h('div', null, 'Make ' + ev.short + ' of repository “' + ev.repo + '” your Last known good? Other repositories use their current files. Alarms recompute against it; older checkpoints stay listed.'),
-    [{ label: 'Cancel' }, { label: 'Set checkpoint', primary: true, fn: () => createCheckpoint('At ' + ev.short + ' ' + ev.subject, { [ev.repo]: ev.rev }) }]);
-}
-
-/* ======================================================================
-   ALARMS
-   ====================================================================== */
-function alarmNodes(g) { return g.changed.map(c => ({ id: c.node_id, role: 'changed', entry: c })).concat(g.downstream.map(d => ({ id: d.node_id, role: 'downstream', entry: d }))); }
-function reasonFor(g, a) {
-  if (a.role === 'changed') return (a.entry.change === 'added' ? 'New since the checkpoint' : 'Its own content changed') + ' in ' + g.cause.short + '.';
-  const e = IX.edge.get(a.entry.via);
-  let s = '';
-  if (e) { const f = nodeLabel(e.from), t = nodeLabel(e.to); s = f + ' ' + (EDGE_PHRASE[e.kind] || e.kind) + ' ' + t + (e.status === 'approved' ? ' (link approved by you)' : '') + ', which ' + (a.entry.depth > 1 ? 'is itself downstream of' : 'changed in') + ' ' + (a.entry.depth > 1 ? 'the change in ' : '') + g.cause.short + '.'; }
-  if (a.entry.output_identical === true) s += ' Producer changed; output bytes unchanged (not regenerated, or regenerated identically).';
-  return s;
-}
-function chainFor(g, nodeId) {
-  const steps = [];
-  const chg = new Set(g.changed.map(c => c.node_id));
-  const down = new Map(g.downstream.map(d => [d.node_id, d]));
-  let cur = nodeId, guard = 0;
-  while (cur && guard++ < 60) {
-    if (chg.has(cur)) { steps.push({ id: cur, edge: null }); break; }
-    const d = down.get(cur); if (!d) break;
-    const e = IX.edge.get(d.via);
-    steps.push({ id: cur, edge: e });
-    cur = e ? e.to : null;
-  }
-  return steps.reverse();
-}
-function stateCounts(items) {
-  const c = { unreviewed: 0, reviewed: 0, needs_fixing: 0, ignored: 0 };
-  for (const id of items) { const s = effState('node', id).state; c[s] = (c[s] || 0) + 1; }
-  return c;
-}
-function renderAlarms() {
-  const v = clear($('#v-alarms'));
-  if (!S.alarms) { v.append(h('div', { class: 'empty' }, 'Tracing changes…')); return; }
-  const A = S.alarms;
-  if (!A.checkpoint) { v.append(h('div', { class: 'pad' }, h('h2', { class: 't' }, 'Alarms'), h('div', { class: 'muted' }, 'Set a Last known good checkpoint on the timeline to list what changed after it.'))); renderAlarmPanel(); return; }
-  const allIds = new Set(); A.groups.forEach(g => alarmNodes(g).forEach(a => allIds.add(a.id)));
-  const sc = stateCounts(allIds);
-  const f = S.alarmFilter;
-  const fb = (key, label, n) => h('button', { class: 'btn sm', 'aria-pressed': String(f === key), onclick: () => { S.alarmFilter = key; renderAlarms(); } }, label + (n != null ? ' ' + n : ''));
-  v.append(
-    h('div', { class: 'pad', style: { paddingBottom: '0' } }, h('h2', { class: 't' }, 'To recheck since ' + (A.checkpoint.note || A.checkpoint.id.toUpperCase())),
-      h('div', { class: 'muted' }, plural(allIds.size, 'item') + ' in ' + plural(A.groups.length, 'group') + '. Based on content, so a change that leaves a file identical to the checkpoint raises nothing.')),
-    h('div', { class: 'toolbar', role: 'group', 'aria-label': 'Filter by triage state' }, fb('all', 'All', allIds.size), fb('unreviewed', '↻ Recheck', sc.unreviewed), fb('needs_fixing', '✕ Needs fixing', sc.needs_fixing), fb('reviewed', '✓✓ Reviewed', sc.reviewed), fb('ignored', '– Ignored', sc.ignored),
-      A.groups.some(lowConf) ? fb('lowconf', '? Low confidence only') : null));
-  const body = h('div', { class: 'pad', style: { flex: 1 } });
-  let shown = 0;
-  if (!A.groups.length) body.append(h('div', { class: 'empty' }, 'Nothing to recheck since ' + A.checkpoint.id.toUpperCase() + '. Everything downstream of your changes was reviewed or unaffected.'));
-  A.groups.forEach((g, gi) => {
-    if (!S.alarmsInit && gi < 3) S.openGroups.add(g.id);
-    if (f === 'lowconf' && !lowConf(g)) return;
-    const rows = alarmNodes(g).filter(a => f === 'all' || f === 'lowconf' || effState('node', a.id).state === f);
-    if (!rows.length && f !== 'all' && f !== 'lowconf') return;
-    shown++;
-    const open = S.openGroups.has(g.id);
-    const head = h('div', { class: 'gh', role: 'button', tabindex: '0', 'aria-expanded': String(open), onclick: ev => { if (ev.target.closest('button')) return; open ? S.openGroups.delete(g.id) : S.openGroups.add(g.id); renderAlarms(); },
-      onkeydown: ev => { if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); open ? S.openGroups.delete(g.id) : S.openGroups.add(g.id); renderAlarms(); } } },
-      h('span', null, open ? '▾' : '▸'), h('span', { class: 'disp' }, g.display),
-      h('span', { class: 'sub' }, h('b', { class: 'mono' }, g.cause.short), ' · ', g.cause.subject, h('span', { class: 'muted' }, ' · ' + g.cause.kind + ' in ' + g.cause.repo + ' · ' + fmtDate(g.cause.time) + ' · ' + (g.cause.files || []).join(', '))),
-      lowConf(g) ? chip('lowconf') : null,
-      h('span', { class: 'cnt recheck', 'aria-label': alarmNodes(g).length + ' to recheck' }, '↻ ' + alarmNodes(g).length),
-      h('button', { class: 'btn sm', onclick: () => analyzeGroup(g) }, 'Analyze'),
-      h('button', { class: 'btn sm', onclick: () => { S.sel = null; S.blast = { ev: g.id, nodes: alarmNodes(g).map(a => a.id), files: (g.cause.files || []).length, seeds: g.changed.length }; setTab('graph'); applyGraphState(); renderDetail(); } }, 'Show in graph'));
-    const grp = h('div', { class: 'group' }, head);
-    if (open) {
-      if (lowConf(g)) for (const fl of g.flags) grp.append(h('div', { class: 'row', style: { cursor: 'default' } }, chip('lowconf'), h('div', { class: 'main' }, fl.text + ' ' + PRODUCT + ' is not sure this affects the nodes below.')));
-      for (const r of rows) {
-        const st = nodeStatus(r.id), n = IX.node.get(r.id) || { name: r.id, layer: null, loc: {}, kind: '' };
-        const sel = S.alarmSel && S.alarmSel.gid === g.id && S.alarmSel.nid === r.id;
-        grp.append(h('div', { class: 'row', role: 'button', tabindex: '0', 'aria-selected': String(!!sel), 'data-node': r.id,
-          onclick: () => { S.alarmSel = { gid: g.id, nid: r.id }; S.analysis = null; renderAlarms(); },
-          onkeydown: ev => { if (ev.key === 'Enter') { S.alarmSel = { gid: g.id, nid: r.id }; S.analysis = null; renderAlarms(); } } },
-          chip(STATUS[st] && st !== 'confirmed' && st !== 'none' ? st : 'recheck'),
-          h('div', { class: 'main' }, h('div', null, h('span', { class: 'lbl' }, n.name), h('span', { class: 'muted' }, ' · ' + layerName(n) + (r.role === 'changed' ? ' · changed' : ' · downstream (depth ' + r.entry.depth + ')')), ' ', h('span', { class: 'mono muted' }, locStr(n))), h('div', { class: 'why' }, reasonFor(g, r))),
-          h('button', { class: 'btn sm', onclick: ev => { ev.stopPropagation(); showInGraph(r.id); } }, 'Show in graph')));
-      }
-      for (const rm of g.removed || []) grp.append(h('div', { class: 'row', style: { cursor: 'default' } }, chip('recheck'), h('div', { class: 'main' }, h('span', { class: 'lbl' }, rm.name || rm.node_id), h('div', { class: 'why' }, 'Removed since the checkpoint (' + (rm.path || '') + ').'))));
-    }
-    body.append(grp);
-  });
-  S.alarmsInit = true;
-  if (A.groups.length && !shown) body.append(h('div', { class: 'empty' }, 'No items match this filter.'));
-  v.append(body);
-  renderAlarmPanel();
-}
-function analyzeGroup(g) {
-  const nodes = alarmNodes(g);
-  const pick = g.downstream.length ? g.downstream[g.downstream.length - 1].node_id : g.changed.length ? g.changed[0].node_id : null;
-  if (!pick) return;
-  S.alarmSel = { gid: g.id, nid: pick }; S.analysis = null;
-  renderAlarms();
-  runAnalyze();
-}
-async function runAnalyze() {
-  if (!S.alarmSel) return;
-  const key = S.alarmSel.gid + '|' + S.alarmSel.nid;
-  S.analysis = { key, loading: true };
-  renderAlarmPanel();
-  try {
-    const a = await apiGet('/api/analyze?group=' + encodeURIComponent(S.alarmSel.gid) + '&node=' + encodeURIComponent(S.alarmSel.nid));
-    if (S.analysis && S.analysis.key === key) S.analysis = { key, data: a };
-  } catch (e) { if (S.analysis && S.analysis.key === key) S.analysis = { key, error: e.message }; }
-  renderAlarmPanel();
-}
-function renderAlarmPanel() {
-  const box = clear($('#r-alarm'));
-  const sel = S.alarmSel;
-  const g = sel && S.alarms && S.alarms.groups.find(x => x.id === sel.gid);
-  if (!g) { box.append(h('div', { class: 'empty' }, 'Select an item in the list to see why it needs a recheck.')); return; }
-  const n = IX.node.get(sel.nid);
-  const steps = chainFor(g, sel.nid);
-  const dt = h('div', { class: 'dt' }, h('h2', { class: 't' }, 'Why this needs a recheck'),
-    h('div', { class: 'muted', style: { marginBottom: '8px' } }, n ? n.name : sel.nid),
-    h('ol', { class: 'chain', 'aria-label': 'Chain from the change to this item' },
-      h('li', null, h('div', { class: 'origin' }, g.cause.kind), h('div', null, h('b', { class: 'mono' }, g.cause.short), ' ' + g.cause.subject), h('div', { class: 'muted mono' }, g.cause.repo + ' · ' + (g.cause.files || []).join(', '))),
-      steps.map((s, i) => { const x = IX.node.get(s.id) || { name: s.id, loc: {} }; const ev0 = s.edge && s.edge.evidence && s.edge.evidence[0];
-        return h('li', null, h('div', { class: 'origin' }, s.edge ? (s.edge.status === 'approved' ? 'Approved' : 'Direct') + ' · ' + (EDGE_PHRASE[s.edge.kind] || s.edge.kind) : 'changed'),
-          h('div', null, h('button', { class: 'linkbtn', onclick: () => showInGraph(s.id) }, x.name), h('span', { class: 'muted' }, ' · ' + layerName(x))),
-          h('div', { class: 'muted mono' }, ev0 ? ev0.path + ':' + ev0.line : locStr(x))); })));
-  box.append(dt);
-  dt.append(h('div', { style: { margin: '12px 0' } }, h('button', { class: 'btn', onclick: runAnalyze, disabled: !!(S.analysis && S.analysis.loading) }, S.analysis && S.analysis.data ? 'Analyze again' : 'Analyze')));
-  const an = S.analysis && S.analysis.key === sel.gid + '|' + sel.nid ? S.analysis : null;
-  if (an) {
-    const sec = h('section', { 'aria-label': 'Analyzer' }, h('h3', { class: 't' }, 'Analyzer'));
-    if (an.loading) sec.append(h('div', { class: 'hint' }, 'Tracing…'));
-    else if (an.error) sec.append(h('div', { class: 'hint err' }, 'Analysis unavailable: ' + an.error));
-    else {
-      const a = an.data;
-      sec.append(h('div', { class: 'hint' }, 'Chain: ' + a.chain.nodes.map(nodeLabel).join(' → ')));
-      if (!a.diffs.length) sec.append(h('div', { class: 'hint' }, 'No text diff is available for the changed node.'));
-      for (const d of a.diffs) sec.append(h('div', { style: { marginBottom: '8px' } }, h('div', { class: 'cap' }, d.repo + ':' + d.path + ' · ' + d.from_label + ' → ' + d.to_label + (d.truncated ? ' (cut)' : '')), d.binary ? h('div', { class: 'hint' }, 'Binary file; no text diff.') : diffBlock(d.unified)));
-      sec.append(h('p', null, a.explanation));
-      sec.append(h('button', { class: 'btn', 'aria-disabled': 'true', style: { color: 'var(--muted)' }, title: 'The deterministic analyzer above is all this demo uses.', onclick: async () => {
-        try { await apiPost('/api/ask', { group_id: a.group_id, node_id: a.node_id }); } catch (e) { toast(READONLY ? 'Not available in this demo' : e.message); } } }, a.ai && a.ai.label ? a.ai.label : 'Ask Claude why — not available in this demo'));
-    }
-    dt.append(sec);
-  }
-  dt.append(triageControl('node', sel.nid));
-}
-
-/* ======================================================================
-   CHECKS
-   ====================================================================== */
-const CHIP_FOR = { reference_unmatched: 'unmatched', main_appendix_mismatch: 'mismatch', untraced_number: 'nottraced', figure_without_provenance: 'nottraced' };
-const ROLE_HEAD = { main: 'In the main text', appendix: 'In the appendix', bib_entry: 'In the reference record', config: 'In the code', result: 'In the result file', run_record: 'In the run record' };
-function findingStatusChip(f) {
-  const t = effState('finding', f.id);
-  if (t.state === 'reviewed' || t.state === 'needs_fixing' || t.state === 'ignored') return chip(t.state);
-  return CHIP_FOR[f.check] ? chip(CHIP_FOR[f.check]) : h('span', { class: 'chip plain' }, f.severity === 'warning' ? '! Warning' : 'i Info');
-}
-function filteredFindings() {
-  if (!S.findings) return [];
-  const F = S.fFilter, q = (F.q || '').toLowerCase();
-  return S.findings.findings.filter(f => {
-    if (F.kind && f.check !== F.kind) return false;
-    const st = effState('finding', f.id).state;
-    if (F.state === 'open' && st !== 'unreviewed') return false;
-    if (F.state && F.state !== 'open' && st !== F.state) return false;
-    if (q && !(f.message + ' ' + f.title + ' ' + f.id).toLowerCase().includes(q)) return false;
-    return true;
-  });
-}
-function renderChecks() {
-  const v = clear($('#v-checks'));
-  if (!S.findings) { v.append(h('div', { class: 'empty' }, 'Running checks…')); return; }
-  const all = S.findings.findings, shown = filteredFindings();
-  const F = S.fFilter;
-  const na = S.findings.checks.filter(c => c.status === 'not_applicable');
-  v.append(
-    h('div', { class: 'pad', style: { paddingBottom: '0' } }, h('h2', { class: 't' }, 'Checks'), h('div', { class: 'muted' }, plural(all.length, 'finding') + '. Each one links to the text that caused it.')),
-    h('div', { class: 'toolbar' },
-      h('select', { 'aria-label': 'Kind', onchange: ev => { F.kind = ev.target.value; renderChecks(); } }, h('option', { value: '' }, 'All kinds'), S.findings.checks.map(c => h('option', { value: c.check, selected: F.kind === c.check }, c.title))),
-      h('select', { 'aria-label': 'Status', onchange: ev => { F.state = ev.target.value; renderChecks(); } }, [['', 'All'], ['open', 'Open'], ['reviewed', 'Reviewed'], ['needs_fixing', 'Needs fixing'], ['ignored', 'Ignored']].map(o => h('option', { value: o[0], selected: F.state === o[0] }, o[1]))),
-      h('input', { type: 'search', placeholder: 'Search findings', 'aria-label': 'Search findings', value: F.q || '', oninput: ev => { F.q = ev.target.value; renderChecks(); const i = $('#v-checks input[type=search]'); i.focus(); i.setSelectionRange(F.q.length, F.q.length); } }),
-      h('span', { style: { flex: 1 } }),
-      READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/export'), download: '', title: 'Saves a local HTML file you can share. It includes the evidence shown here.' }, 'Export report (HTML)')));
-  const body = h('div', { class: 'pad', style: { flex: 1 } });
-  const det = h('details', { style: { marginBottom: '12px' } }, h('summary', { class: 'muted' }, 'Status of all ' + S.findings.checks.length + ' checks'),
-    h('table', { class: 'tbl' }, S.findings.checks.map(c => h('tr', null, h('td', null, c.title), h('td', { class: 'mono' }, c.status === 'ran' ? 'Ran · ' + plural(c.count, 'finding') : c.status === 'not_checked' ? 'Not checked' : 'Not applicable' + (c.note ? ' (' + c.note + ')' : '')), h('td', { class: 'muted' }, c.status === 'ran' || c.status === 'not_checked' ? c.note : '')))));
-  body.append(det);
-  for (const c of S.findings.checks.filter(c => c.status === 'not_checked')) body.append(h('div', { class: 'muted', style: { marginBottom: '8px' } }, 'References not checked online. ' + (c.note || '')));
-  if (!all.length) body.append(h('div', { class: 'empty' }, na.length ? 'No findings from the checks that ran. ' + plural(na.length, 'check') + ' not applicable to this project.' : 'No findings. All checks passed on this scan. This does not guarantee the paper is correct.'));
-  else if (!shown.length) body.append(h('div', { class: 'empty' }, 'No findings match this filter.'));
-  for (const f of shown) {
-    body.append(h('div', { class: 'card', role: 'button', tabindex: '0', 'aria-selected': String(S.findSel === f.id), 'data-finding': f.id, onclick: () => openFinding(f.id), onkeydown: ev => { if (ev.key === 'Enter') openFinding(f.id); } },
-      h('div', { class: 'kind' }, f.title), h('div', null, f.message),
-      h('div', { class: 'locs' }, f.evidence.map(e => e.path + ':' + e.line).join('  ·  ')),
-      h('div', { class: 'acts' }, findingStatusChip(f), h('button', { class: 'btn sm', onclick: ev => { ev.stopPropagation(); openFinding(f.id); } }, 'Open evidence'))));
-  }
-  v.append(body);
-  renderCheckPanel();
-}
-function openFinding(id) { S.findSel = id; layoutMain(); renderChecks(); }
-async function evidenceColumn(box, evs, head) {
-  box.append(h('div', { class: 'ph' }, head));
-  for (const e of evs) {
-    const holder = h('div', null, h('div', { class: 'cap' }, e.repo + ':' + e.path + ':' + e.line));
-    box.append(holder);
-    try {
-      const r = await getLines(e.repo, e.path, Math.max(1, e.line - 3), e.line + 3);
-      holder.append(codeBlock(r.lines, r.start, [e.line], { word: 'Here', label: e.path }));
-    } catch (err) { holder.append(codeBlock([e.text], e.line, [e.line], { word: 'Here', label: e.path })); }
-  }
-}
-function renderCheckPanel() {
-  const box = clear($('#r-check'));
-  const f = S.findings && S.findings.findings.find(x => x.id === S.findSel);
-  if (!f) return;
-  const evs = f.evidence;
-  const left = h('div'), right = h('div');
-  const two = evs.length === 2 && evs[0].role !== evs[1].role;
-  const leftHead = (ROLE_HEAD[evs[0].role]) || 'In the paper';
-  evidenceColumn(left, two ? [evs[0]] : evs, leftHead);
-  if (two) evidenceColumn(right, [evs[1]], ROLE_HEAD[evs[1].role] || 'In the source');
-  else {
-    const d = f.details || {};
-    right.append(h('div', { class: 'ph' }, f.check === 'reference_unmatched' ? 'In the offline lookup record' : 'What was found'));
-    const rows = f.check === 'reference_unmatched' && d.lookup ? Object.entries(d.lookup).map(([k, v]) => [k, v == null ? 'none' : typeof v === 'object' ? JSON.stringify(v) : String(v)]) : Object.entries(d).map(([k, v]) => [k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
-    right.append(rows.length ? h('table', { class: 'tbl' }, rows.map(r => h('tr', null, h('td', { class: 'mono muted' }, r[0]), h('td', { class: 'mono' }, r[1])))) : h('div', { class: 'hint' }, 'No further record for this finding.'));
-  }
-  box.append(h('div', { class: 'dt' },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '8px' } }, h('h2', { class: 't' }, f.title), h('button', { class: 'btn sm', onclick: () => { S.findSel = null; layoutMain(); renderChecks(); } }, 'Close  Esc')),
-    h('p', null, f.message), findingStatusChip(f),
-    h('div', { class: 'sbs', style: { marginTop: '12px' } }, left, right),
-    h('div', { class: 'hint', style: { marginTop: '10px' } }, h('b', null, 'What was compared: '), f.message),
-    f.check === 'reference_unmatched' ? h('div', { class: 'hint' }, 'A match depends on the sources searched. A reference that is real but missing from them will also appear here.') : null,
-    (f.nodes || []).length ? h('div', { style: { marginTop: '8px' } }, 'Graph nodes: ', f.nodes.map(id => h('button', { class: 'btn sm', style: { marginRight: '4px' }, onclick: () => showInGraph(id) }, nodeLabel(id) + ' → graph'))) : null,
-    triageControl('finding', f.id)));
-}
-
-/* ======================================================================
-   LINKS
-   ====================================================================== */
-function linkEdges() { return ((S.graph && S.graph.edges) || []).filter(e => e.kind === 'value_match' || e.status === 'proposed'); }
-function alarmNodeSet() { const s = new Set(); if (S.alarms) for (const g of S.alarms.groups) alarmNodes(g).forEach(a => s.add(g.id + '|' + a.id)); return s; }
-async function decideLink(edgeId, decision, silent) {
-  if (READONLY) return;
-  const before = alarmNodeSet();
-  try {
-    const r = await apiPost('/api/links/decide', { edge_id: edgeId, decision });
-    S.alarms = r.alarms;
-    const i = S.graph.edges.findIndex(e => e.id === edgeId); if (i >= 0) S.graph.edges[i] = r.edge;
-    S.triage = await apiGet('/api/triage');
-    S.project = await apiGet('/api/project');
-    afterDataChange(true);
-    const after = alarmNodeSet(); let d = 0; for (const x of after) if (!before.has(x)) d++; for (const x of before) if (!after.has(x)) d++;
-    if (!silent) toast('Link ' + (decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : 'restored') + '. ' + plural(d, 'alarm') + ' updated.', decision === 'proposed' ? null : () => decideLink(edgeId, 'proposed'));
-  } catch (e) { toast('Not saved: ' + e.message); }
-}
-function renderLinks() {
-  const v = clear($('#v-links'));
-  if (!S.graph) return;
-  const f = S.linkFilter;
-  const all = linkEdges();
-  const rows = all.filter(e => f === 'all' ? true : e.status === f);
-  const nPending = all.filter(e => e.status === 'proposed').length;
-  const fb = (key, label, n) => h('button', { class: 'btn sm', 'aria-pressed': String(f === key), onclick: () => { S.linkFilter = key; S.linkChecked.clear(); renderLinks(); } }, label + ' ' + n);
-  const checked = [...S.linkChecked].filter(id => rows.some(e => e.id === id));
-  v.append(
-    h('div', { class: 'pad', style: { paddingBottom: '0' } }, h('h2', { class: 't' }, 'Proposed links'),
-      h('div', { class: 'muted' }, PRODUCT + ' suggests these connections from names, text and code references. They affect nothing until you approve them.')),
-    h('div', { class: 'toolbar' }, fb('proposed', 'Proposed', nPending), fb('approved', 'Approved', all.filter(e => e.status === 'approved').length), fb('rejected', 'Rejected', all.filter(e => e.status === 'rejected').length), fb('all', 'All', all.length),
-      h('span', { style: { flex: 1 } }),
-      checked.length && !READONLY ? [h('button', { class: 'btn sm', onclick: async () => { for (const id of checked) await decideLink(id, 'approved', true); S.linkChecked.clear(); toast('Approved ' + checked.length + '.'); } }, 'Approve ' + checked.length),
-        h('button', { class: 'btn sm', onclick: async () => { for (const id of checked) await decideLink(id, 'rejected', true); S.linkChecked.clear(); toast('Rejected ' + checked.length + '.'); } }, 'Reject ' + checked.length)] : null));
-  const body = h('div', { class: 'pad', style: { flex: 1 } });
-  if (!rows.length) body.append(h('div', { class: 'empty' }, f === 'proposed' ? 'No proposed links. Every link in the graph was found directly in your files.' : 'No links in this list.'));
-  else body.append(h('table', { class: 'tbl' }, h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'From'), h('th', null, ''), h('th', null, 'To'), h('th', null, 'How it was found'), h('th', null, 'Why'), h('th', null, 'Evidence'), h('th', null, 'Status / actions'))),
-    h('tbody', null, rows.map(e => {
-      const a = IX.node.get(e.from), b = IX.node.get(e.to);
-      const ev0 = (e.evidence || [])[0];
-      const nodeCell = n => h('td', null, h('div', { class: 'lbl' }, n ? n.name : '?'), h('div', { class: 'muted' }, n ? layerName(n) : ''), h('div', { class: 'mono muted' }, n ? locStr(n) : ''));
-      return h('tr', { class: S.linkSel === e.id ? 'sel' : '', 'data-edge': e.id, tabindex: '0', onkeydown: k => { if (k.key === 'Enter') { S.linkSel = e.id; layoutMain(); renderLinks(); } } },
-        h('td', null, h('input', { type: 'checkbox', 'aria-label': 'Select link', disabled: READONLY, checked: S.linkChecked.has(e.id), onchange: ev => { ev.target.checked ? S.linkChecked.add(e.id) : S.linkChecked.delete(e.id); renderLinks(); } })),
-        nodeCell(a), h('td', null, '→'), nodeCell(b),
-        h('td', null, e.kind === 'value_match' ? 'Heuristic: matching name' : 'Heuristic'),
-        h('td', { style: { maxWidth: '220px' } }, e.reason || ''),
-        h('td', null, ev0 ? h('button', { class: 'pathlink', onclick: () => { S.linkSel = e.id; layoutMain(); renderLinks(); } }, ev0.path + ':' + ev0.line) : ''),
-        h('td', null, e.status === 'proposed' ? chip('proposed') : e.status === 'approved' ? h('span', { class: 'chip reviewed' }, '\u2713 Approved') : chip('ignored'), ' ',
-          e.status === 'proposed' ? [h('button', { class: 'btn sm', disabled: READONLY, onclick: () => decideLink(e.id, 'approved') }, 'Approve'), ' ', h('button', { class: 'btn sm', disabled: READONLY, onclick: () => decideLink(e.id, 'rejected') }, 'Reject')]
-            : [h('span', { class: 'muted' }, e.status === 'approved' ? 'Approved' : 'Rejected'), ' ', h('button', { class: 'btn sm', disabled: READONLY, onclick: () => decideLink(e.id, 'proposed') }, e.status === 'rejected' ? 'Restore' : 'Undo')]));
-    }))));
-  v.append(body);
-  renderLinkPanel();
-}
-function renderLinkPanel() {
-  const box = clear($('#r-link'));
-  const e = S.linkSel && IX.edge.get(S.linkSel);
-  if (!e) return;
-  const end = async (id, label) => {
-    const n = IX.node.get(id); const col = h('div');
-    col.append(h('div', { class: 'ph' }, label + ': ' + (n ? n.name : id)));
-    const evs = (e.evidence || []).filter(x => n && x.repo === n.repo && x.path === (n.loc && n.loc.path));
-    for (const x of evs) {
-      col.append(h('div', { class: 'cap' }, x.repo + ':' + x.path + ':' + x.line));
-      try { const r = await getLines(x.repo, x.path, Math.max(1, x.line - 2), x.line + 2); col.append(codeBlock(r.lines, r.start, [x.line], { word: 'Here' })); } catch (er) { col.append(codeBlock([x.text], x.line, [x.line], { word: 'Here' })); }
-    }
-    if (!evs.length) col.append(h('div', { class: 'hint' }, 'No evidence line recorded at this end.'));
-    return col;
-  };
-  const a = h('div'), b = h('div');
-  end(e.from, 'From').then(c => a.append(c)); end(e.to, 'To').then(c => b.append(c));
-  box.append(h('div', { class: 'dt' }, h('div', { style: { display: 'flex', justifyContent: 'space-between' } }, h('h2', { class: 't' }, 'Link evidence'), h('button', { class: 'btn sm', onclick: () => { S.linkSel = null; layoutMain(); renderLinks(); } }, 'Close  Esc')),
-    h('p', null, e.reason || ''), h('div', { class: 'sbs' }, a, b),
-    h('div', { style: { marginTop: '12px', display: 'flex', gap: '8px' } }, h('button', { class: 'btn', onclick: () => showInGraph(e.from) }, 'Preview in graph'),
-      e.status === 'proposed' ? [h('button', { class: 'btn primary', disabled: READONLY, onclick: () => decideLink(e.id, 'approved') }, 'Approve'), h('button', { class: 'btn', disabled: READONLY, onclick: () => decideLink(e.id, 'rejected') }, 'Reject')] : null)));
-}
-
-/* ======================================================================
-   PICKER / SCAN
-   ====================================================================== */
-function recentProjects() { try { return JSON.parse(localStorage.getItem('lemmata.recent') || '[]'); } catch (e) { return []; } }
-function rememberProject() {
-  if (!S.project || READONLY) return;
-  const rec = recentProjects().filter(r => r.root !== S.project.root);
-  rec.unshift({ name: S.project.name, root: S.project.root, at: new Date().toISOString() });
-  try { localStorage.setItem('lemmata.recent', JSON.stringify(rec.slice(0, 5))); } catch (e) { }
-}
-function openPicker(state) {
-  S.showPicker = true;
-  const pk = $('#picker'); pk.classList.remove('hidden');
-  const st = state || {};
-  const root = S.project ? S.project.root : '';
-  const rec = recentProjects();
-  const c = counts();
-  const col = h('div', { class: 'col' },
-    h('h1', null, 'Open a project'),
-    h('div', { class: 'sub' }, PRODUCT + ' reads your paper, code and run logs on this computer. Nothing is uploaded.'),
-    h('div', { class: 'cardp' }, h('h3', null, 'Project folder'),
-      h('input', { type: 'text', id: 'pk-path', value: root, readonly: true, 'aria-label': 'Project folder', placeholder: '/path/to/your/paper-repo' }),
-      h('div', { class: 'hint' }, 'This session is serving the folder above. A browser cannot browse folders, so to open another one run ', h('code', { class: 'mono' }, 'lemmata open /path/to/folder'), ' in a terminal. Paste the folder path that contains your .tex files and code.')),
-    h('div', { class: 'cardp' }, h('h3', null, 'Bundled sample'), h('div', { class: 'muted' }, 'A small ML paper with planted inconsistencies, for trying ' + PRODUCT + '.'),
-      h('div', { class: 'hint' }, 'Start it with ', h('code', { class: 'mono' }, 'lemmata demo'), '.')),
-    h('div', { class: 'cardp' }, h('h3', null, 'Recent projects'), rec.length ? rec.map(r => h('div', null, h('b', null, r.name), ' ', h('span', { class: 'mono muted' }, r.root), h('div', { class: 'hint' }, 'last scanned ' + fmtTime(r.at)))) : h('div', { class: 'muted' }, 'No recent projects.')),
-    st.running ? h('div', { class: 'cardp' }, h('div', { 'aria-live': 'polite' }, 'Scanning… all seven steps run together in one pass.'), h('div', { class: 'bar', style: { marginTop: '8px' } }, h('i')),
-      h('ol', { class: 'steps' }, ['Reading LaTeX sources', 'Reading references', 'Reading code and result files', 'Reading git history', 'Reading run logs', 'Building the graph', 'Running checks'].map(s => h('li', null, h('span', { class: 'mono' }, '◐ Running'), s)))) : null,
-    st.done ? h('div', { class: 'cardp' }, h('ol', { class: 'steps' }, ['Reading LaTeX sources', 'Reading references', 'Reading code and result files', 'Reading git history', 'Reading run logs', 'Building the graph', 'Running checks'].map(s => h('li', null, h('span', { class: 'mono' }, '✓ Done'), s))),
-      h('div', { class: 'mono muted' }, plural(S.project.counts.nodes, 'node') + ' · ' + plural(S.project.counts.edges, 'edge') + ' · ' + plural(S.project.counts.events, 'event')),
-      h('p', null, 'Scan finished in ' + st.secs + ' s. ' + plural(c.recheck, 'item') + ' to recheck, ' + plural(c.openF, 'finding') + ', ' + plural(c.prop, 'proposed link') + ' to review.')) : null,
-    st.error ? h('div', { class: 'err', role: 'alert' }, '✕ Error: ' + st.error) : null,
-    h('div', { style: { display: 'flex', gap: '8px' } },
-      h('button', { class: 'btn primary', id: 'pk-run', disabled: READONLY || !root || st.running, title: !root ? 'Choose a folder or the sample first' : null, onclick: runScanFromPicker }, st.done ? 'Scan again' : 'Run scan'),
-      h('button', { class: st.done ? 'btn primary' : 'btn', onclick: () => { pk.classList.add('hidden'); S.showPicker = false; history.replaceState(null, '', location.pathname); setTab(S.tab); } }, st.done ? 'Open graph' : 'Back to graph')));
-  clear(pk).append(col);
-}
-async function runScanFromPicker() {
-  const t0 = performance.now();
-  openPicker({ running: true });
-  try {
-    await apiPost('/api/scan', {});
-    await loadAll();
-    rememberProject();
-    openPicker({ done: true, secs: ((performance.now() - t0) / 1000).toFixed(1) });
-  } catch (e) { openPicker({ error: e.status === 409 ? 'a scan is already running.' : e.message }); }
-}
-
-/* ======================================================================
-   KEYS
-   ====================================================================== */
-function typing(t) { return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
-function triageFocus(state) {
-  if (READONLY) return;
-  let type = null, id = null;
-  if (S.tab === 'graph' && S.sel) { type = 'node'; id = S.sel; }
-  else if (S.tab === 'alarms' && S.alarmSel) { type = 'node'; id = S.alarmSel.nid; }
-  else if (S.tab === 'checks' && S.findSel) { type = 'finding'; id = S.findSel; }
-  if (!id) return;
-  const cur = effState(type, id);
-  const note = cur.entry ? cur.entry.note : '';
-  setTriage(type, id, cur.entry && cur.entry.state === state && !cur.outdated ? 'unreviewed' : state, note);
-}
-document.addEventListener('keydown', ev => {
-  if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  const t = ev.target;
-  if (ev.key === 'Escape') {
-    if ($('#cppop')) { $('#cppop').remove(); return; }
-    if (S.showPicker) { $('#picker').classList.add('hidden'); S.showPicker = false; return; }
-    if (S.tab === 'checks' && S.findSel) { S.findSel = null; layoutMain(); renderChecks(); return; }
-    if (S.tab === 'links' && S.linkSel) { S.linkSel = null; layoutMain(); renderLinks(); return; }
-    if (S.tab === 'alarms' && S.alarmSel) { S.alarmSel = null; S.analysis = null; renderAlarms(); return; }
-    if (typing(t)) { t.blur(); return; }
-    if (S.tab === 'graph') clearSelection();
-    return;
-  }
-  if (typing(t)) return;
-  const k = ev.key;
-  if (k === '/') { ev.preventDefault(); setTab('graph'); const s = $('#search'); if (s) s.focus(); }
-  else if (k === '?') showShortcuts();
-  else if (k === 'f' || k === 'F') { if (S.tab === 'graph') fitGraph(); }
-  else if (k === 'g' || k === 'G') setTab('graph');
-  else if (k === 'a' || k === 'A') setTab('alarms');
-  else if (k === 'c' || k === 'C') setTab('checks');
-  else if (k === 'l' || k === 'L') setTab('links');
-  else if (k === '[') { S.leftCollapsed = !S.leftCollapsed; layoutMain(); }
-  else if (k === ']') { S.rightCollapsed = !S.rightCollapsed; layoutMain(); }
-  else if (k === 'r' || k === 'R') triageFocus('reviewed');
-  else if (k === 'x' || k === 'X') triageFocus('needs_fixing');
-  else if (k === 'i' || k === 'I') triageFocus('ignored');
-  else if (k === 'u' || k === 'U') { if (S.tab === 'graph') setDir('up'); }
-  else if (k === 'd' || k === 'D') { if (S.tab === 'graph') setDir('down'); }
-  else if (k === 'b' || k === 'B') { if (S.tab === 'graph') setDir('both'); }
-  else if (k === 'k' || k === 'K') { const se = S.selEvent && S.events.events.find(e => e.id === S.selEvent); if (se) setCheckpointAtEvent(se); }
-  else if (S.tab === 'graph' && (k === '+' || k === '=')) zoomBy(1.3);
-  else if (S.tab === 'graph' && (k === '-' || k === '_')) zoomBy(1 / 1.3);
-  else if (S.tab === 'graph' && k === '0') { G.cy.zoom(1); G.cy.center(); }
-  else if (S.tab === 'graph' && k.startsWith('Arrow') && !(t && t.closest && t.closest('#left'))) { ev.preventDefault(); moveSel(k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0, k === 'ArrowDown' ? 1 : k === 'ArrowUp' ? -1 : 0); }
-  else if (S.tab === 'checks' && (k === 'ArrowDown' || k === 'ArrowUp')) {
-    const list = filteredFindings(); if (!list.length) return; ev.preventDefault();
-    const i = list.findIndex(f => f.id === S.findSel); const j = Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
-    openFinding(list[j].id);
-  }
-  else if (S.tab === 'links' && S.linkSel && (k === 'a' || k === 'd')) { /* handled above for tabs; link keys use buttons */ }
-});
-
-/* ======================================================================
-   BOOT
-   ====================================================================== */
-async function loadAll(opts) {
-  opts = opts || {};
-  try {
-    const [project, graph, events, findings, alarms, checkpoints, triage] = await Promise.all(
-      ['project', 'graph', 'events', 'findings', 'alarms', 'checkpoints', 'triage'].map(p => apiGet('/api/' + p)));
-    Object.assign(S, { project, graph, events, findings, alarms, checkpoints, triage, error: null, loading: false });
-    showBanner(null);
-  } catch (e) {
-    S.loading = false; S.error = e.message; showBanner('Scan data could not be read. ' + e.message + '.', true);
-    if (!S.graph) S.graph = { nodes: [], edges: [] };
-  }
-  rebuildIndex();
-  document.title = (S.project ? S.project.name + ' – ' : '') + PRODUCT;
-  renderTopbar();
-  rebuildGraph(opts.keepView ? { fit: false } : undefined);
-  renderOutline(); renderTimeline();
-  renderAlarms(); renderChecks(); renderLinks();
-  renderDetail();
-}
-/* ---------- auto-refresh: poll /api/project every 5 s, reload in place when scanned_at changes ---------- */
-function scrollSnapshot() {
-  const out = [];
-  document.querySelectorAll('#app *').forEach(el => {
-    if (el.scrollTop > 0 || el.scrollLeft > 0) {
-      const key = el.id ? '#' + el.id : el.classList.length ? '.' + el.classList[0] : null;
-      if (!key) return;
-      out.push({ key, idx: [...document.querySelectorAll(key)].indexOf(el), top: el.scrollTop, left: el.scrollLeft });
-    }
-  });
-  return out;
-}
-function scrollRestore(snap) {
-  for (const s of snap) {
-    const el = document.querySelectorAll(s.key)[s.idx];
-    if (el) { el.scrollTop = s.top; el.scrollLeft = s.left; }
-  }
-}
-let refreshBusy = false;
-async function autoRefreshTick() {
-  if (READONLY || refreshBusy || document.hidden || S.loading || !S.project) return;
-  if (document.querySelector('.scrim')) return;   // a dialog is open; try again next tick
-  refreshBusy = true;
-  try {
-    const p = await apiGet('/api/project');
-    if (p.scanned_at && p.scanned_at !== S.project.scanned_at) {
-      const snap = scrollSnapshot();
-      await loadAll({ keepView: true });
-      requestAnimationFrame(() => scrollRestore(snap));
-      setTimeout(() => scrollRestore(snap), 60);
-      const d = new Date();
-      toast('Updated · ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'));
-    }
-  } catch (e) { /* server briefly busy or gone: stay quiet, retry next tick */ }
-  refreshBusy = false;
-}
-function startAutoRefresh() {
-  if (READONLY) return;
-  setInterval(autoRefreshTick, 5000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); });
-}
-
 async function detectHub() {
   if (READONLY || !PID) return;
   try { const r = await fetch('/api/hub/status', { cache: 'no-store' }); HUB_ON = r.ok; } catch (e) { HUB_ON = false; }
   if (HUB_ON) { loadHubInfo(); setInterval(loadHubInfo, 60000); }
 }
-function boot() {
-  buildShell();
-  S.graph = { nodes: [], edges: [] }; rebuildIndex();
-  setGraphMsg({ t: 'Building graph…' });
-  setTab('graph');
-  detectHub().then(loadAll).then(() => {
-    startAutoRefresh();
-    rememberProject();
-    if (location.hash === '#/open') openPicker();
-    if (location.hash === '#/alarms') setTab('alarms');
+/* end of hub-mode block */
+
+/* sync for everyone: hub mode pulls from GitHub, single-project mode checks the files again */
+async function syncNow() {
+  if (READONLY) return;
+  const hc = hubControls();
+  if (hc.sync) return hc.sync();
+  setBusy('Checking your files…');
+  try { await apiPost('/api/scan', {}); await loadAll(); toast('Checked your files again.'); }
+  catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close', primary: true }]) }); }
+  setBusy(null);
+}
+let BUSY = null;
+function setBusy(msg) { BUSY = msg; renderStatus(); }
+
+/* ======================================================================
+   3. MODEL. Items are derived in the browser (spec section 1).
+   ====================================================================== */
+const PAPER = new Set(['thesis', 'rq', 'section', 'figure', 'table', 'equation']);
+const FILEK = new Set(['asset', 'result', 'run', 'code', 'config', 'data', 'doc']);
+const PROPK = new Set(['includes', 'generated_by', 'traces_to', 'produced_by', 'executes', 'reads', 'imports', 'value_match']);
+const STRUCT = new Set(['contains', 'answers', 'refs']);
+const KIND_WORD = { thesis: 'Main claim', rq: 'Research question', section: 'Section', figure: 'Figure', table: 'Table', equation: 'Equation', reference: 'Reference', code: 'Shared code', data: 'Shared data' };
+const KIND_GLYPH = { thesis: '◆', rq: '?', section: '§', figure: '▣', table: '▦', equation: '∑', code: '{ }', data: '{ }', reference: '[ ]' };
+const KIND_TINT = { thesis: '--layer-thesis-t', rq: '--layer-question-t', section: '--layer-section-t', figure: '--layer-paper-t', table: '--layer-paper-t', equation: '--layer-paper-t', code: '--layer-code-t', data: '--layer-result-t', reference: '--layer-reference-t' };
+const FILE_WORD = { asset: 'A figure file', result: 'A result file', run: 'A run', code: 'A script', config: 'A settings file', data: 'A data file', doc: 'A document' };
+const EV_GROUPS = [['Results and figures', ['result', 'asset']], ['Scripts', ['code']], ['Runs', ['run']], ['Settings', ['config']], ['Data', ['data', 'doc']]];
+
+function edgeProp(e) {
+  if (!PROPK.has(e.kind)) return false;
+  if (e.kind === 'value_match') return e.status === 'approved';
+  return e.status === 'detected' || e.status === 'approved';
+}
+function rebuildIndex() {
+  const g = S.graph || { nodes: [], edges: [] };
+  IX.node = new Map(g.nodes.map(n => [n.id, n]));
+  IX.pout = new Map(); IX.pin = new Map();
+  const add = (m, k, e) => { let a = m.get(k); if (!a) m.set(k, a = []); a.push(e); };
+  for (const e of g.edges) if (edgeProp(e)) { add(IX.pout, e.from, e); add(IX.pin, e.to, e); }
+  IX.alarm = new Map();
+  if (S.alarms) for (const grp of S.alarms.groups) {
+    for (const c of grp.changed) add(IX.alarm, c.node_id, { group: grp, role: 'changed', entry: c });
+    for (const d of grp.downstream) add(IX.alarm, d.node_id, { group: grp, role: 'downstream', entry: d });
+  }
+  IX.hasCp = !!(S.alarms && S.alarms.checkpoint);
+  IX.repoRole = Object.fromEntries(((S.project && S.project.repos) || []).map(r => [r.id, r.role]));
+  IX.groupById = new Map(((S.alarms && S.alarms.groups) || []).map(x => [x.id, x]));
+  buildModel();
+}
+function triageEntry(type, id) { const e = S.triage && S.triage.entries && S.triage.entries[type + ':' + id]; return e || null; }
+function effState(type, id) {
+  const e = triageEntry(type, id);
+  if (!e) return { state: 'unreviewed', outdated: false, entry: null };
+  return { state: e.effective_state || e.state, outdated: !!e.outdated, entry: e };
+}
+function nodeFlag(id) {   // s(x) in spec 1.4
+  const t = effState('node', id), inAl = IX.alarm.has(id);
+  if (t.state === 'needs_fixing') return 'fix';
+  if (t.state === 'unreviewed' && (inAl || t.outdated)) return 'look';
+  if (t.state === 'reviewed' && inAl) return 'fine';
+  if (t.state === 'ignored' && inAl) return 'ign';
+  return null;
+}
+const numParts = s => String(s == null ? '' : s).split('.').map(p => /^\d+$/.test(p) ? [0, +p] : [1, p.toLowerCase()]);
+function cmpNum(a, b) {
+  const A = numParts(a), B = numParts(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i], y = B[i];
+    if (!x) return -1; if (!y) return 1;
+    if (x[0] !== y[0]) return x[0] - y[0];
+    if (x[1] !== y[1]) return x[1] < y[1] ? -1 : 1;
+  }
+  return 0;
+}
+function tidyCaption(s) { return String(s || '').replace(/\s+/g, ' ').replace(/[.:]\s*$/, '').trim(); }
+function itemTitle(n) {
+  const a = n.attrs || {}, cap = tidyCaption(a.caption || n.detail);
+  switch (n.kind) {
+    case 'thesis': return 'Main claim';
+    case 'rq': { const d = (n.detail || a.text || '').replace(/^RQ\s?\d+\s*[:.]?\s*/i, ''); return n.name + (d ? ' — ' + trunc(d, 90) : ''); }
+    case 'section': {
+      const word = a.in_appendix ? 'Appendix' : 'Section', ttl = a.title || n.detail || '';
+      return (a.number ? word + ' ' + a.number : word) + (ttl ? ' — ' + ttl : '');
+    }
+    case 'figure': return 'Figure ' + (a.number || '') + (cap ? ' — ' + trunc(cap, 80) : '');
+    case 'table': return 'Table ' + (a.number || '') + (cap ? ' — ' + trunc(cap, 80) : '');
+    case 'equation': return 'Equation ' + (a.number || '');
+    case 'reference': return n.name.replace(/^\[|\]$/g, '') + (a.title || n.detail ? ' — ' + trunc(a.title || n.detail, 70) : '');
+    default: return n.name;
+  }
+}
+function shortTitle(n) {   // used on graph labels and tree rows
+  const a = n.attrs || {};
+  switch (n.kind) {
+    case 'thesis': return 'Main claim';
+    case 'rq': return n.name;
+    case 'section': return (a.in_appendix ? 'Appendix ' : '§') + (a.number || '') + ' ' + (a.title || n.detail || '');
+    case 'figure': case 'table': { const cap = tidyCaption(a.caption || n.detail); return (n.kind === 'figure' ? 'Figure ' : 'Table ') + (a.number || '') + (cap ? ' · ' + cap : ''); }
+    case 'equation': return 'Equation ' + (a.number || '');
+    default: return n.name;
+  }
+}
+function pathOf(n) { return (n.loc && n.loc.path) || n.name; }
+function refKind(ref) {   // README "Fig. 5" -> {kind, number}
+  const m = /^\s*(fig(?:ure)?s?|tab(?:le)?s?|app(?:endix)?|sec(?:tion)?|§)\.?\s*([A-Za-z]?[\d.]*[A-Za-z]?)/i.exec(ref || '');
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  const kind = w.startsWith('fig') ? 'figure' : w.startsWith('tab') ? 'table' : 'section';
+  return { kind, number: m[2].replace(/\.$/, ''), app: w.startsWith('app') };
+}
+
+function buildModel() {
+  const nodes = (S.graph && S.graph.nodes) || [], edges = (S.graph && S.graph.edges) || [];
+  M.items = []; M.byId = new Map(); M.itemsOf = new Map(); M.paperId = new Map(); M.readmeOnly = []; M.unused = []; M.noPaper = false;
+  M.parent = new Map(); M.iedges = []; M.nbOut = new Map(); M.nbIn = new Map();
+  const addTo = (m, k, v) => { let a = m.get(k); if (!a) m.set(k, a = []); a.push(v); };
+  const mk = (n, o) => {
+    const it = Object.assign({ id: n.id, node: n, nodes: [n.id], kind: n.kind, shared: false, ref: false, ev: [], sharedUse: [], users: [], finds: [], status: 'ok', links: 0, imp: 0, r: 16 }, o || {});
+    it.title = it.title || itemTitle(n); it.short = it.short || shortTitle(n);
+    it.kindWord = it.kindWord || KIND_WORD[it.kind] || it.kind;
+    M.items.push(it); M.byId.set(it.id, it); return it;
+  };
+  /* 1. paper-facing Items */
+  const paperNodes = nodes.filter(n => PAPER.has(n.kind));
+  M.noPaper = paperNodes.length === 0;
+  for (const n of paperNodes) { const it = mk(n); M.paperId.set(n.id, it.id); addTo(M.itemsOf, n.id, it.id); }
+  for (const n of nodes.filter(x => x.kind === 'item')) {   // README placeholders merge into the Figure/Table/Appendix with the same number
+    const rk = refKind(n.attrs && n.attrs.paper_ref); let hit = null;
+    if (rk) hit = paperNodes.find(p => p.kind === rk.kind && String((p.attrs || {}).number) === rk.number && (rk.kind !== 'section' || !rk.app || !!(p.attrs || {}).in_appendix));
+    if (hit) { const it = M.byId.get(hit.id); it.nodes.push(n.id); M.paperId.set(n.id, it.id); addTo(M.itemsOf, n.id, it.id); }
+    else if (M.noPaper && rk) {   // code-only project: README rows are all there is, so they become Items
+      const word = rk.kind === 'figure' ? 'Figure' : rk.kind === 'table' ? 'Table' : (rk.app ? 'Appendix' : 'Section');
+      const it = mk(n, { kind: rk.kind, title: word + ' ' + rk.number + ' (from your README)', short: word + ' ' + rk.number, readme: true });
+      M.paperId.set(n.id, it.id); addTo(M.itemsOf, n.id, it.id);
+    } else M.readmeOnly.push(n);
+  }
+  for (const n of nodes.filter(x => x.kind === 'reference')) { const it = mk(n, { ref: true }); addTo(M.itemsOf, n.id, it.id); M.paperId.set(n.id, it.id); }
+  const paperItems = M.items.filter(i => !i.ref);
+  /* 2. who depends on which file: reach along propagating edges, from every Item's paper node */
+  const reach = new Map();
+  for (const it of paperItems) {
+    const dist = new Map(); const q = [];
+    for (const s of it.nodes) { dist.set(s, 0); q.push(s); }
+    while (q.length) {
+      const cur = q.shift();
+      for (const e of IX.pout.get(cur) || []) {
+        const t = IX.node.get(e.to);
+        if (!t || dist.has(e.to) || PAPER.has(t.kind) || t.kind === 'reference' || t.kind === 'item') continue;
+        dist.set(e.to, dist.get(cur) + 1); q.push(e.to);
+      }
+    }
+    for (const [nid, d] of dist) if (d > 0) { let m = reach.get(nid); if (!m) reach.set(nid, m = new Map()); m.set(it.id, d); }
+  }
+  const evOwner = new Map(), evDist = new Map(), sharedNodes = new Map();
+  for (const [nid, m] of reach) {
+    if (m.size === 1) { const [iid, d] = [...m][0]; evOwner.set(nid, iid); evDist.set(nid, d); }
+    else sharedNodes.set(nid, [...m.keys()]);
+  }
+  const fileNodes = nodes.filter(n => FILEK.has(n.kind));
+  let changed = true;
+  while (changed) {   // |F| = 0: inherit from a node it depends on
+    changed = false;
+    for (const n of fileNodes) {
+      if (evOwner.has(n.id) || sharedNodes.has(n.id)) continue;
+      for (const e of IX.pout.get(n.id) || []) {
+        if (evOwner.has(e.to)) { evOwner.set(n.id, evOwner.get(e.to)); evDist.set(n.id, (evDist.get(e.to) || 1) + 1); changed = true; break; }
+      }
+    }
+  }
+  for (const [nid, iid] of evOwner) { const it = M.byId.get(iid); it.ev.push({ id: nid, dist: evDist.get(nid) }); addTo(M.itemsOf, nid, iid); }
+  for (const it of paperItems) it.ev.sort((a, b) => a.dist - b.dist || (a.id < b.id ? -1 : 1));
+  for (const [nid, users] of sharedNodes) {
+    const n = IX.node.get(nid), sk = (n.kind === 'code' || n.kind === 'config' || n.kind === 'run') ? 'code' : 'data';
+    const it = mk(n, { shared: true, kind: sk, kindWord: KIND_WORD[sk], title: n.kind === 'run' ? n.name : pathOf(n), short: n.kind === 'run' ? n.name : basename(pathOf(n)), users });
+    addTo(M.itemsOf, nid, it.id);
+    for (const u of users) M.byId.get(u).sharedUse.push(it.id);
+  }
+  M.unused = fileNodes.filter(n => !evOwner.has(n.id) && !sharedNodes.has(n.id));
+  /* 3. Item-level links */
+  const seen = new Set();
+  const addLink = (a, b, rel) => { const k = a + '|' + b + '|' + rel; if (a === b || seen.has(k)) return; seen.add(k); M.iedges.push({ a, b, rel }); addTo(M.nbOut, a, { id: b, rel }); addTo(M.nbIn, b, { id: a, rel }); };
+  for (const e of edges) {
+    if (e.status === 'rejected') continue;
+    const a = M.paperId.get(e.from), b = M.paperId.get(e.to);
+    if (STRUCT.has(e.kind) && a && b) { addLink(a, b, e.kind); if (e.kind === 'contains' && !M.parent.has(b)) M.parent.set(b, a); }
+    else if (e.kind === 'cites' && a && b) addLink(a, b, 'cites');
+  }
+  for (const it of M.items) if (it.shared) for (const u of it.users) addLink(u, it.id, 'uses');
+  /* importance / size (spec 1.5) */
+  for (const it of M.items) {
+    const nb = new Set();
+    for (const x of (M.nbOut.get(it.id) || []).concat(M.nbIn.get(it.id) || [])) if (!M.byId.get(x.id).ref) nb.add(x.id);
+    it.links = it.ref ? (M.nbIn.get(it.id) || []).length : nb.size;
+    it.imp = it.links + 0.5 * it.ev.length;
+  }
+  const imax = Math.max(1, ...M.items.filter(i => !i.ref).map(i => i.imp));
+  for (const it of M.items) {
+    let r = Math.max(16, 16 + 32 * Math.sqrt(it.imp / imax));
+    if (it.kind === 'thesis') r = Math.max(36, r);
+    if (it.shared) r = Math.max(12, 0.75 * r);
+    if (it.ref) r = Math.max(12, 0.6 * r);
+    it.r = Math.round(r);
+  }
+  M.rank = M.items.filter(i => !i.ref).sort((a, b) => b.imp - a.imp || (a.title < b.title ? -1 : 1)).map(i => i.id);
+  M.findsByItem = new Map();
+  for (const f of (S.findings && S.findings.findings) || []) {
+    const hit = new Set();
+    for (const nid of f.nodes || []) for (const iid of M.itemsOf.get(nid) || []) hit.add(iid);
+    for (const iid of hit) addTo(M.findsByItem, iid, f);
+  }
+  computeStatuses();
+  buildCards();
+}
+function itemNodeIds(it) { return it.shared ? [it.id] : it.nodes.concat(it.ev.map(e => e.id)); }
+function computeStatuses() {
+  for (const it of M.items) {
+    const flags = [];
+    for (const x of itemNodeIds(it)) { const f = nodeFlag(x); if (f) flags.push(f); }
+    it.finds = M.findsByItem.get(it.id) || [];
+    for (const f of it.finds) {
+      const st = effState('finding', f.id).state;
+      if (f.severity === 'warning') { if (st === 'unreviewed') flags.push('look'); else if (st === 'needs_fixing') flags.push('fix'); }
+    }
+    it.status = flags.includes('fix') ? 'fix' : flags.includes('look') ? 'look' : flags.includes('fine') ? 'fine' : flags.includes('ign') ? 'ign' : 'ok';
+  }
+  M.looked = M.items.filter(i => !i.ref && (i.status === 'look' || i.status === 'fix')).length;
+}
+function itemTargets(it) {
+  const out = [];
+  for (const x of itemNodeIds(it)) if (IX.alarm.has(x) || effState('node', x).outdated) out.push({ type: 'node', id: x });
+  for (const f of it.finds) if (f.severity === 'warning') out.push({ type: 'finding', id: f.id });
+  if (!out.length) out.push({ type: 'node', id: it.nodes[0] });
+  return out;
+}
+const worst = list => list.reduce((a, s) => (ST[s].rank > ST[a].rank ? s : a), 'ok');
+
+/* naming for anything that has an id */
+function itemFor(nodeId) { const a = M.itemsOf.get(nodeId); return a && a.length ? M.byId.get(a[0]) : null; }
+function nameOf(nodeId, opts) {
+  const n = IX.node.get(nodeId); if (!n) return nodeId;
+  if (n.kind === 'run') return (opts && opts.bare ? '' : 'the run ') + n.name.replace(/^run\s+/, '');
+  if (PAPER.has(n.kind) || n.kind === 'reference') { const it = M.byId.get(M.paperId.get(nodeId)); return it ? it.title : n.name; }
+  return pathOf(n);
+}
+function kindLabel(it) {   // "Table in Section 5"
+  if (it.shared) return it.kindWord;
+  const par = M.parent.get(it.id), p = par && M.byId.get(par);
+  const inSec = p && p.kind === 'section' ? ' in ' + (p.node.attrs.in_appendix ? 'Appendix ' : 'Section ') + (p.node.attrs.number || '') : '';
+  switch (it.kind) {
+    case 'figure': case 'table': case 'equation': return it.kindWord + (inSec || '');
+    case 'section': return (it.node.attrs && it.node.attrs.in_appendix ? 'Appendix' : 'Section') + ' of your paper';
+    default: return it.kindWord;
+  }
+}
+function repoWord(repoId) { return IX.repoRole[repoId] === 'paper' ? 'paper' : 'code'; }
+function itemSort(a, b) {
+  const A = a.node.attrs || {}, B = b.node.attrs || {};
+  const aa = A.in_appendix ? 1 : 0, bb = B.in_appendix ? 1 : 0;
+  if (aa !== bb) return aa - bb;
+  if (A.number != null && B.number != null && a.kind === b.kind) { const c = cmpNum(A.number, B.number); if (c) return c; }
+  const la = (a.node.loc && a.node.loc.line) || 0, lb = (b.node.loc && b.node.loc.line) || 0;
+  return (a.node.loc && b.node.loc && a.node.loc.path === b.node.loc.path ? la - lb : 0) || (a.title < b.title ? -1 : 1);
+}
+function neighboursOf(id, depth) {   // Item ids within `depth` hops (undirected)
+  const seen = new Map([[id, 0]]), q = [id];
+  while (q.length) {
+    const c = q.shift(), d = seen.get(c); if (d >= depth) continue;
+    for (const x of (M.nbOut.get(c) || []).concat(M.nbIn.get(c) || [])) {
+      const it = M.byId.get(x.id); if (!it || (it.ref && !S.gf.refs)) continue;
+      if (!seen.has(x.id)) { seen.set(x.id, d + 1); q.push(x.id); }
+    }
+  }
+  return seen;
+}
+
+/* ======================================================================
+   4. SENTENCES, CARDS, ACTIONS
+   ====================================================================== */
+const lead = it => it.title.split(' — ')[0];
+function fmtVal(v) {
+  v = String(v == null ? '' : v).trim().replace(/^["']|["']$/g, '');
+  return v.replace(/^(-?\d+)\.0+(e[-+]?\d+)$/i, '$1$2');
+}
+function humanKey(k) { return String(k).split('.').pop().replace(/[_-]+/g, ' ').trim(); }
+function keyChanges(an) {
+  const d = an && an.diffs && an.diffs[0]; if (!d || d.binary) return null;
+  const rm = new Map(), ad = new Map(), re = /^([-+])\s*"?([A-Za-z_][\w.\-]*)"?\s*[:=]\s*(.*?),?\s*$/;
+  for (const line of String(d.unified).split('\n')) {
+    if (line.startsWith('---') || line.startsWith('+++')) continue;
+    const m = re.exec(line); if (!m) continue;
+    (m[1] === '-' ? rm : ad).set(m[2], fmtVal(m[3]));
+  }
+  const out = [];
+  for (const [k, v] of ad) if (!rm.has(k) || rm.get(k) !== v) out.push({ key: humanKey(k), old: rm.get(k), now: v });
+  for (const [k, v] of rm) if (!ad.has(k)) out.push({ key: humanKey(k), old: v, now: null });
+  return out;
+}
+function analysisKey(gid, nid) { return gid + '|' + nid; }
+async function ensureAnalysis(gid, nid) {
+  const k = analysisKey(gid, nid);
+  if (S.an[k]) return S.an[k];
+  try { const a = await apiGet('/api/analyze?group=' + encodeURIComponent(gid) + '&node=' + encodeURIComponent(nid)); S.an[k] = a; return a; }
+  catch (e) { S.an[k] = { failed: e.message }; return S.an[k]; }
+}
+function causeInfo(g) {
+  const c = g.cause || {}, rw = repoWord(c.repo);
+  const changed = (g.changed || []).map(x => ({ n: IX.node.get(x.node_id), x })).filter(o => o.n);
+  const paper = changed.filter(o => PAPER.has(o.n.kind) || o.n.kind === 'item');
+  const files = changed.filter(o => !(PAPER.has(o.n.kind) || o.n.kind === 'item'));
+  const rem = g.removed || [];
+  let pieces;
+  if (c.kind === 'run') pieces = ['A run finished: ', mono((c.subject || '').replace(/^run\s+/, '').split(':')[0] || c.event_id)];
+  else if (c.kind === 'worktree') pieces = ['You have changes in ' + rw + ' that are not saved to git yet'];
+  else if (c.kind === 'snapshot') pieces = ['Your ' + rw + ' files differ from when you last checked'];
+  else if (c.kind === 'diverged') pieces = ['The history of your ' + rw + ' was rewritten since you last checked, so everything there is listed here.'];
+  else if (files.length === 0 && paper.length) {
+    if (paper.length === 1) { const it = M.byId.get(M.paperId.get(paper[0].n.id)); pieces = ['You edited ', it ? it.title : paper[0].n.name, ' in your paper (', mono(pathOf(paper[0].n)), ')']; }
+    else pieces = ['You edited ' + paper.length + ' places in your paper'];
+  } else if (files.length === 1 && !paper.length) {
+    const f = files[0], p = pathOf(f.n);
+    if (f.x.change === 'added') pieces = ['You added ', mono(p)];
+    else if (f.n.kind === 'config') {
+      const an = S.an[analysisKey(g.id, f.n.id)], kc = keyChanges(an);
+      if (kc && kc.length === 1 && kc[0].old != null && kc[0].now != null) pieces = ['You changed ', mono(p), ' (' + kc[0].key + ' ' + kc[0].old + ' → ' + kc[0].now + ')'];
+      else if (kc && kc.length > 1) pieces = ['You changed ' + kc.length + ' settings in ', mono(p)];
+      else pieces = ['You changed ', mono(p)];
+    } else if (f.n.kind === 'code') pieces = ['You edited ', mono(p)];
+    else pieces = ['Your file ', mono(p), ' changed'];
+  } else if (files.length + paper.length > 0) {
+    const names = files.slice(0, 2).map(o => basename(pathOf(o.n)));
+    const more = files.length - names.length;
+    pieces = files.length ? ['You edited ' + files.length + ' files in ' + rw + ' (' + names.join(', ') + (more > 0 ? ' and ' + more + ' more' : '') + ')'] : ['You edited ' + paper.length + ' places in your paper'];
+    if (files.length && paper.length) pieces.push(' and ' + paper.length + ' places in your paper');
+  } else if (rem.length) pieces = ['You removed ', mono(rem[0].path || rem[0].name || rem[0].node_id)];
+  else pieces = ['You changed ', mono((c.files || [])[0] || 'a file')];
+  return { pieces, time: relTime(c.time), abs: absTime(c.time), short: c.kind === 'commit' ? c.short : null, subject: c.subject };
+}
+function causeLine(g) {
+  const ci = causeInfo(g);
+  return h('span', { class: 'cause' }, ci.pieces, h('span', { class: 'muted', title: ci.abs }, ' · ' + ci.time),
+    ci.short ? h('span', { class: 'muted' }, ' · commit ') : null,
+    ci.short ? h('button', { class: 'hash mono', title: 'Click to copy the commit id', onclick: ev => { ev.stopPropagation(); copyText(ci.short); } }, ci.short) : null);
+}
+function copyText(t) {
+  const done = () => toast('Copied.');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, () => toast('Could not copy. Select it and press Ctrl+C.'));
+  else toast('Could not copy. Select it and press Ctrl+C.');
+}
+function ago(t) { return relTime(t); }
+
+function buildCards() {
+  M.cards = [];
+  const groups = (S.alarms && S.alarms.groups) || [];
+  for (const g of groups) {
+    const nodes = g.changed.map(c => ({ id: c.node_id, role: 'changed', entry: c })).concat(g.downstream.map(d => ({ id: d.node_id, role: 'downstream', entry: d })));
+    const items = new Map();
+    for (const nd of nodes) for (const iid of M.itemsOf.get(nd.id) || []) items.set(iid, M.byId.get(iid));
+    const list = [...items.values()].sort((a, b) => b.imp - a.imp || (a.title < b.title ? -1 : 1));
+    // consequence: Items first, then the files and runs on the way
+    const things = [], seenItem = new Set();
+    for (const d of g.downstream) {
+      const iid = M.paperId.get(d.node_id);
+      if (iid && !seenItem.has(iid)) { seenItem.add(iid); things.push({ it: M.byId.get(iid), imp: M.byId.get(iid).imp, depth: d.depth }); }
+    }
+    things.sort((a, b) => b.imp - a.imp);
+    const ev = [];
+    for (const d of g.downstream) {
+      if (M.paperId.has(d.node_id)) continue;
+      const n = IX.node.get(d.node_id); if (!n) continue;
+      let sfx = '';
+      if (d.output_identical === true) sfx = 'not regenerated yet'; else if (d.output_identical === false) sfx = 'regenerated, content differs';
+      ev.push({ id: d.node_id, name: nameOf(d.node_id), sfx, depth: d.depth });
+    }
+    ev.sort((a, b) => a.depth - b.depth);
+    const targets = nodes.map(n => ({ type: 'node', id: n.id }));
+    M.cards.push({ g, id: g.id, time: g.cause.time, nodes, items: list, itemsDown: things.map(t => t.it), ev, targets, count: things.length + ev.length });
+  }
+  M.cards.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+}
+function cardState(c) {
+  const sts = c.targets.map(t => effState(t.type, t.id));
+  const looked = sts.filter(s => s.state !== 'unreviewed').length;
+  let key;
+  if (sts.some(s => s.state === 'needs_fixing')) key = 'fix';
+  else if (looked === 0) key = 'look';
+  else if (looked < sts.length) key = 'partial';
+  else if (sts.every(s => s.state === 'ignored')) key = 'ign';
+  else key = 'fine';
+  return { key, looked, total: sts.length };
+}
+function consequenceLine(c) {
+  if (!c.count) return h('div', { class: 'conseq muted' }, 'Nothing else rests on this yet.');
+  const bits = [];
+  c.itemsDown.forEach(it => bits.push(h('b', null, lead(it))));
+  c.ev.forEach(e => bits.push([e.name.startsWith('the run') ? e.name : mono(e.name), e.sfx ? h('span', { class: 'muted' }, ' (' + e.sfx + ')') : null]));
+  const shown = bits.slice(0, 5), more = bits.length - shown.length;
+  const out = [];
+  shown.forEach((b, i) => { if (i) out.push(', '); out.push(b); });
+  return h('div', { class: 'conseq' }, plural(c.count, 'thing') + (c.count === 1 ? ' may' : ' may') + ' need a second look: ', out, more > 0 ? ' and ' + more + ' more' : '');
+}
+
+/* ----- triage / checkpoint / link actions ----- */
+function dedupe(ts) { const s = new Set(); return ts.filter(t => { const k = t.type + ':' + t.id; if (s.has(k)) return false; s.add(k); return true; }); }
+async function setTriageMany(targets, state, note, quiet) {
+  if (READONLY) return;
+  targets = dedupe(targets);
+  try {
+    for (const t of targets) {
+      const r = await apiPost('/api/triage', { target_type: t.type, target_id: t.id, state, note: note == null ? '' : note });
+      const en = r.entry; if (!en.effective_state) { en.effective_state = en.state; en.outdated = false; }
+      S.triage.entries[t.type + ':' + t.id] = en;
+    }
+    computeStatuses(); renderAll();
+    if (!quiet) toast('Saved.');
+  } catch (e) { toast('Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close', primary: true }]) }); await refreshTriage(); }
+}
+async function refreshTriage() { try { S.triage = await apiGet('/api/triage'); computeStatuses(); renderAll(); } catch (e) { /* ignore */ } }
+function noteOf(targets) {
+  for (const t of targets) { const e = triageEntry(t.type, t.id); if (e && e.note) return e.note; }
+  return '';
+}
+async function createCheckpoint(note) {
+  try {
+    const r = await apiPost('/api/checkpoints', { note: note || '', at: null });
+    S.alarms = r.alarms;
+    const [cps, ev, pr, tri] = await Promise.all([apiGet('/api/checkpoints'), apiGet('/api/events'), apiGet('/api/project'), apiGet('/api/triage')]);
+    S.checkpoints = cps; S.events = ev; S.project = pr; S.triage = tri;
+    rebuildIndex(); renderAll();
+    toast('Done. Last checked: ' + lastChecked(r.checkpoint.created_at) + '.');
+  } catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.'); }
+}
+function markAllDialog() {
+  if (READONLY) return;
+  const note = h('input', { type: 'text', maxlength: '500', placeholder: 'Add a note to this mark (optional)', 'aria-label': 'Add a note to this mark (optional)' });
+  modal('Mark everything as looked at?', h('div', null, h('p', null, 'Lemmata will start counting changes from now. Your notes and Looks fine / Needs fixing marks are kept. Earlier marks stay in History.'), note),
+    [{ label: 'Cancel' }, { label: 'Mark everything as looked at', primary: true, fn: () => createCheckpoint(note.value) }], { width: 440 });
+}
+async function decideLink(edgeId, decision, doneMsg) {
+  if (READONLY) return;
+  try {
+    await apiPost('/api/links/decide', { edge_id: edgeId, decision });
+    await loadAll();
+    if (doneMsg) toast(doneMsg);
+  } catch (e) { toast('Something broke on our side. Your files and marks are unchanged.'); }
+}
+
+/* "Why?" block: the chain of what rests on what, in plain words, then the diff */
+const CHAIN_PHRASE = { reads: 'reads', produced_by: 'is produced by', traces_to: 'is built from', includes: 'shows', generated_by: 'is made by', executes: 'runs', imports: 'imports', value_match: 'was linked by you to' };
+const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
+function whyBlock(g, nodeId) {
+  const box = h('div', { class: 'why-box' }, h('div', { class: 'muted' }, 'Loading the reason…'));
+  ensureAnalysis(g.id, nodeId).then(an => {
+    clear(box);
+    if (an.failed) { box.append(h('div', { class: 'muted' }, 'The reason could not be loaded. ' + an.failed)); return; }
+    const nodes = an.chain.nodes, eds = an.chain.edges;
+    const steps = [h('li', null, h('span', { class: 'sw' }, cap1(nameOf(nodes[0])) + ' changed.'))];
+    for (let i = 0; i < eds.length; i++) {
+      const parts = eds[i].split('|'), from = parts[0], kind = parts[1], to = parts[2];
+      const d = (g.downstream || []).find(x => x.node_id === nodes[i + 1]);
+      let extra = null;
+      if (d && d.output_identical === true) extra = 'It still has exactly the content it had when you last checked, so it may not have been regenerated yet.';
+      if (d && d.output_identical === false) extra = 'It was regenerated and its content now differs.';
+      steps.push(h('li', null, h('span', { class: 'sw' }, cap1(nameOf(from)) + ' ' + (CHAIN_PHRASE[kind] || 'depends on') + ' ' + nameOf(to) + '.'), extra ? h('div', { class: 'muted' }, extra) : null));
+    }
+    box.append(h('ol', { class: 'chain' }, steps));
+    for (const df of an.diffs || []) {
+      box.append(h('div', { class: 'diff-title' }, 'What changed in ', mono(df.path), ' since you last checked'));
+      box.append(df.binary ? h('div', { class: 'muted' }, 'This is not a text file, so there is nothing to show line by line.') : diffBlock(df.unified));
+      if (df.truncated) box.append(h('div', { class: 'muted' }, 'Only the first part of the change is shown.'));
+    }
+    box.append(h('details', { class: 'details' }, h('summary', null, 'Details'), h('div', { class: 'mono small' }, an.explanation || ''), h('div', { class: 'mono small muted' }, 'Change ' + g.id + ' · item ' + nodeId)));
   });
-  let rt = null;
-  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (G.cy) { G.cy.resize(); syncBands(); } renderTimeline(); }, 80); });
+  return box;
+}
+
+/* ======================================================================
+   5. GRAPH. Hand-written canvas + small force simulation (no library).
+   ====================================================================== */
+const RING = { thesis: 0, rq: 1, section: 2, figure: 3, table: 3, equation: 3, code: 4, data: 4, reference: 5, file: 6 };
+const STATUS_COL = { look: '--amber-text', fix: '--red', fine: '--verify', ign: '--muted', ok: '--muted' };
+function makeGraph(host, o) {
+  o = o || {};
+  const cv = h('canvas', { tabindex: o.mini ? '-1' : '0', role: 'img', 'aria-label': o.label || 'Graph of the items of your paper. Use the list view for a text version.' });
+  const tipEl = o.mini ? null : h('div', { class: 'gtip hidden' });
+  host.append(cv); if (tipEl) host.append(tipEl);
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = Math.max(1, window.devicePixelRatio || 1);
+  const V = { k: 1, tx: 0, ty: 0 };
+  let nodes = [], edges = [], byId = new Map(), adj = new Map(), out = new Map(), inn = new Map();
+  const pos = o.pos || new Map();
+  let hover = null, sel = null, kfocus = null, alpha = 0, raf = 0, needFit = true, labelTop = new Set();
+  let C = {};
+  const readColours = () => { C = {}; for (const k of ['ink', 'paper', 'surface', 'border', 'border-strong', 'muted', 'verify', 'amber', 'amber-text', 'red', 'up', 'down-stroke', 'sunken', 'amber-bg', 'red-bg', 'verify-bg']) C[k] = css('--' + k); C.font = css('--font-sans'); C.mono = css('--font-mono'); };
+  readColours();
+  const widths = new Map();
+  function tw(text, font) { const k = font + '|' + text; let w = widths.get(k); if (w == null) { ctx.font = font; w = ctx.measureText(text).width; widths.set(k, w); } return w; }
+
+  function setData(spec) {
+    readColours();
+    const old = new Map(byId);
+    nodes = []; edges = []; byId = new Map(); adj = new Map(); out = new Map(); inn = new Map();
+    const ringCount = {}; spec.nodes.forEach(n => { const r = RING[n.kind] == null ? 6 : RING[n.kind]; ringCount[r] = (ringCount[r] || 0) + 1; });
+    const ringIdx = {};
+    spec.nodes.forEach(n => {
+      const node = Object.assign({ x: 0, y: 0, vx: 0, vy: 0, pinned: false, hasPos: false }, n);
+      const p = pos.get(n.id), prev = old.get(n.id);
+      if (prev) { node.x = prev.x; node.y = prev.y; node.pinned = prev.pinned; node.hasPos = true; }
+      else if (p) { node.x = p.x; node.y = p.y; node.pinned = true; node.hasPos = true; }
+      nodes.push(node); byId.set(n.id, node);
+    });
+    spec.nodes.forEach(n => {
+      const node = byId.get(n.id); if (node.hasPos) return;
+      if (n.sat && byId.get(n.parent) && byId.get(n.parent).hasPos !== undefined) { const p = byId.get(n.parent); const a = (hashStr(n.id) % 628) / 100; node.x = p.x + Math.cos(a) * (p.r + 30); node.y = p.y + Math.sin(a) * (p.r + 30); return; }
+      const ring = RING[n.kind] == null ? 6 : RING[n.kind];
+      const i = ringIdx[ring] = (ringIdx[ring] == null ? 0 : ringIdx[ring] + 1), cnt = ringCount[ring];
+      const R = ring === 0 ? 0 : Math.max(ring * 125, cnt * 34 / (2 * Math.PI));
+      const a = (2 * Math.PI * i) / cnt + ring * 0.7;
+      node.x = Math.cos(a) * R; node.y = Math.sin(a) * R;
+    });
+    // satellites seeded before their parent had a position: fix now
+    nodes.forEach(n => { if (n.sat && !n.hasPos) { const p = byId.get(n.parent); if (p) { const a = (hashStr(n.id) % 628) / 100; n.x = p.x + Math.cos(a) * (p.r + 30); n.y = p.y + Math.sin(a) * (p.r + 30); } } });
+    for (const e of spec.edges) {
+      const s = byId.get(e.a), t = byId.get(e.b); if (!s || !t) continue;
+      const len = e.sat ? s.r + t.r + 16 : 76 + 0.7 * (s.r + t.r);
+      edges.push({ a: e.a, b: e.b, s, t, len, rel: e.rel, sat: !!e.sat });
+      for (const [m, k, v] of [[adj, e.a, e.b], [adj, e.b, e.a], [out, e.a, e.b], [inn, e.b, e.a]]) { let x = m.get(k); if (!x) m.set(k, x = new Set()); x.add(v); }
+    }
+    nodes.forEach(n => { n.deg = (adj.get(n.id) || new Set()).size || 1; });
+    const real = nodes.filter(n => !n.sat).sort((a, b) => b.imp - a.imp);
+    labelTop = new Set(real.slice(0, Math.min(o.mini ? 5 : 16, Math.max(o.mini ? 5 : 8, Math.ceil(0.2 * real.length)))).map(n => n.id));
+    if (sel && !byId.has(sel)) sel = null;
+    settle(old.size ? 140 : 300, old.size ? 0.7 : 1);
+    if (!old.size) needFit = true;
+    request();
+  }
+  function hashStr(s) { let x = 0; for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) >>> 0; return x; }
+  function step(a) {
+    for (const e of edges) {
+      const s = e.s, t = e.t; let dx = t.x - s.x, dy = t.y - s.y; const d = Math.hypot(dx, dy) || 1e-6;
+      const f = (d - e.len) / d * a * 0.4, bias = s.deg / (s.deg + t.deg);
+      if (!t.pinned) { t.vx -= dx * f * bias; t.vy -= dy * f * bias; }
+      if (!s.pinned) { s.vx += dx * f * (1 - bias); s.vy += dy * f * (1 - bias); }
+    }
+    const n = nodes.length;
+    for (let i = 0; i < n; i++) {
+      const A = nodes[i];
+      for (let j = i + 1; j < n; j++) {
+        const B = nodes[j]; let dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
+        if (d2 < 1e-4) { dx = (i % 7) - 3 + 0.5; dy = (j % 5) - 2 + 0.5; d2 = dx * dx + dy * dy; }
+        if (d2 > 90000) continue;
+        const d = Math.sqrt(d2), sA = 120 + 12 * A.r, sB = 120 + 12 * B.r, dd = Math.max(d2, 900);
+        if (!A.pinned) { A.vx -= dx * sB * a / dd; A.vy -= dy * sB * a / dd; }
+        if (!B.pinned) { B.vx += dx * sA * a / dd; B.vy += dy * sA * a / dd; }
+        const sep = A.r + B.r + 8;
+        if (d < sep) {
+          const p = (sep - d) / d * 0.5 * 0.9;
+          if (!A.pinned) { A.x -= dx * p; A.y -= dy * p; }
+          if (!B.pinned) { B.x += dx * p; B.y += dy * p; }
+        }
+      }
+    }
+    for (const q of nodes) {
+      if (q.pinned || q.drag) { q.vx = q.vy = 0; continue; }
+      q.vx -= q.x * 0.035 * a; q.vy -= q.y * 0.035 * a;
+      q.vx *= 0.6; q.vy *= 0.6; q.x += q.vx; q.y += q.vy;
+    }
+  }
+  function settle(ticks, a0) { let a = a0; for (let i = 0; i < ticks; i++) { step(a); a *= 0.9772; } }
+  function animate() {
+    raf = 0;
+    if (alpha > 0.004) { step(alpha); alpha *= 0.94; request(true); }
+    draw();
+  }
+  function request(anim) { if (!raf) raf = requestAnimationFrame(animate); }
+  function reheat(a) { alpha = Math.max(alpha, a); request(); }
+
+  function resize() {
+    const r = host.getBoundingClientRect(); const w = Math.round(r.width), hh = Math.round(r.height);
+    if (!w || !hh) return;
+    dpr = Math.max(1, window.devicePixelRatio || 1);
+    if (w !== W || hh !== H || cv.width !== Math.round(w * dpr)) { W = w; H = hh; cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); cv.style.width = w + 'px'; cv.style.height = hh + 'px'; if (needFit) fit(); }
+    request();
+  }
+  function fit(pad) {
+    if (!W || !nodes.length) return;
+    pad = pad == null ? (o.mini ? 14 : 40) : pad;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const n of nodes) { x0 = Math.min(x0, n.x - n.r); x1 = Math.max(x1, n.x + n.r); y0 = Math.min(y0, n.y - n.r); y1 = Math.max(y1, n.y + n.r); }
+    const bw = Math.max(1, x1 - x0), bh = Math.max(1, y1 - y0 + (o.mini ? 0 : 30));
+    V.k = Math.max(0.25, Math.min((W - 2 * pad) / bw, (H - 2 * pad - (o.mini ? 24 : 80)) / bh, o.mini ? 1 : 1.25));
+    V.tx = W / 2 - ((x0 + x1) / 2) * V.k; V.ty = (H - (o.mini ? 24 : 70)) / 2 - ((y0 + y1) / 2) * V.k + (o.mini ? 0 : -8);
+    needFit = false; request();
+  }
+  function zoomAt(f, cx, cy) {
+    const k2 = Math.max(0.25, Math.min(4, V.k * f)); f = k2 / V.k;
+    V.tx = cx - (cx - V.tx) * f; V.ty = cy - (cy - V.ty) * f; V.k = k2; request();
+  }
+  const toWorld = (sx, sy) => ({ x: (sx - V.tx) / V.k, y: (sy - V.ty) / V.k });
+  function hit(sx, sy) {
+    const w = toWorld(sx, sy); let best = null, bd = 1e9;
+    for (const n of nodes) {
+      const rr = Math.max(n.r, 9 / V.k) + 3 / V.k, d = Math.hypot(n.x - w.x, n.y - w.y);
+      if (d <= rr && d - n.r < bd) { best = n; bd = d - n.r; }
+    }
+    return best;
+  }
+  function focusSet() {
+    const f = hover || sel; if (!f) return null;
+    const s = new Set([f]); (adj.get(f) || new Set()).forEach(x => s.add(x)); return s;
+  }
+  function ringOf(n, ctx2) {
+    const st = n.status;
+    ctx2.setLineDash([]);
+    if (n.sat) { ctx2.lineWidth = 1.2; ctx2.strokeStyle = n.status && n.status !== 'ok' ? C[STATUS_COL[n.status].slice(2)] : C['border-strong']; ctx2.stroke(); return; }
+    if (st === 'look') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.amber; ctx2.setLineDash([6, 4]); ctx2.stroke(); }
+    else if (st === 'fix') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.red; ctx2.stroke(); ctx2.beginPath(); ctx2.arc(n.x, n.y, n.r + 4.5, 0, 6.2832); ctx2.lineWidth = 1.3; ctx2.stroke(); }
+    else if (st === 'fine') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.verify; ctx2.stroke(); }
+    else if (st === 'ign') { ctx2.lineWidth = 1.2; ctx2.strokeStyle = C.muted; ctx2.setLineDash([1.5, 3]); ctx2.stroke(); }
+    else { ctx2.lineWidth = 2; ctx2.strokeStyle = C['border-strong']; ctx2.stroke(); }
+    ctx2.setLineDash([]);
+  }
+  function draw() {
+    if (!W) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    const fs = focusSet(), f = hover || sel, dimS = hover ? fs : null;
+    ctx.save(); ctx.translate(V.tx, V.ty); ctx.scale(V.k, V.k);
+    for (const e of edges) {
+      const touch = f && (e.a === f || e.b === f);
+      ctx.beginPath(); ctx.moveTo(e.s.x, e.s.y); ctx.lineTo(e.t.x, e.t.y);
+      if (touch && !e.sat) {
+        ctx.globalAlpha = 1; ctx.lineWidth = 2 / V.k;
+        if (e.a === f) { ctx.strokeStyle = C.up; ctx.setLineDash([]); } else { ctx.strokeStyle = C['down-stroke']; ctx.setLineDash([6 / V.k, 4 / V.k]); }
+      } else { ctx.globalAlpha = dimS ? (dimS.has(e.a) && dimS.has(e.b) ? 0.4 : 0.07) : (e.sat ? 0.3 : 0.4); ctx.lineWidth = 1 / V.k; ctx.strokeStyle = C['border-strong']; ctx.setLineDash(e.sat ? [3 / V.k, 3 / V.k] : []); }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    for (const n of nodes) {
+      let a = 1;
+      if (dimS && !dimS.has(n.id)) a = 0.15; else if (!dimS && o.dimOk && n.status === 'ok' && !n.sat) a = 0.35;
+      ctx.globalAlpha = a;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 6.2832); ctx.fillStyle = n.tint || C.sunken; ctx.fill();
+      ringOf(n, ctx);
+      if (sel === n.id) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r + (n.status === 'fix' ? 8 : 5), 0, 6.2832); ctx.lineWidth = 3; ctx.strokeStyle = C.ink; ctx.stroke(); }
+      if (kfocus === n.id) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 8, 0, 6.2832); ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]); }
+      if (!n.sat && n.glyph) {
+        ctx.fillStyle = C.ink; ctx.font = '600 ' + Math.round(Math.max(10, Math.min(n.r * 0.85, 26))) + 'px ' + C.mono; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(n.glyph, n.x, n.y + 1);
+      }
+      if (!n.sat && n.status && n.status !== 'ok') {
+        const bx = n.x + n.r * 0.72, by = n.y - n.r * 0.72, br = Math.max(8, Math.min(11, n.r * 0.45));
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fillStyle = C.surface; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = C[STATUS_COL[n.status].slice(2)]; ctx.stroke();
+        ctx.fillStyle = C[STATUS_COL[n.status].slice(2)]; ctx.font = '700 ' + Math.round(br * 1.1) + 'px ' + C.font; ctx.fillText(ST[n.status].glyph, bx, by + 0.5);
+      }
+      if (n.pinned && !n.sat) { ctx.beginPath(); ctx.arc(n.x - n.r * 0.72, n.y - n.r * 0.72, 3, 0, 6.2832); ctx.fillStyle = C.ink; ctx.fill(); }
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+    drawLabels(fs);
+  }
+  function drawLabels(fs) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const placed = [], circles = nodes.map(n => ({ id: n.id, x: n.x * V.k + V.tx, y: n.y * V.k + V.ty, r: n.r * V.k }));
+    const cand = [];
+    const real = nodes.filter(n => !n.sat);
+    for (const n of real) {
+      let pr = 9;
+      if (hover === n.id || sel === n.id) pr = 0;
+      else if (fs && fs.has(n.id)) pr = 1;
+      else if (fs) continue;
+      else if (n.status !== 'ok') pr = 2;
+      else if (labelTop.has(n.id)) pr = 3;
+      else if (n.r * V.k >= 14) pr = 5;
+      else continue;
+      if (o.mini && pr > 1 && pr !== 3) continue;
+      cand.push({ n, pr });
+    }
+    if (hover) { const hn = byId.get(hover); if (hn && hn.sat) cand.push({ n: hn, pr: 0 }); }
+    cand.sort((a, b) => a.pr - b.pr || b.n.imp - a.n.imp);
+    const hits = (r, self) => {
+      if (r.x < 2 || r.y < 2 || r.x + r.w > W - 2 || r.y + r.h > H - 2) return true;
+      for (const p of placed) if (r.x < p.x + p.w + 2 && r.x + r.w + 2 > p.x && r.y < p.y + p.h + 2 && r.y + r.h + 2 > p.y) return true;
+      for (const c of circles) { if (c.id === self) continue; const cx = Math.max(r.x, Math.min(c.x, r.x + r.w)), cy = Math.max(r.y, Math.min(c.y, r.y + r.h)); if ((cx - c.x) ** 2 + (cy - c.y) ** 2 < c.r * c.r) return true; }
+      return false;
+    };
+    for (const { n, pr } of cand) {
+      const px = o.mini ? 11 : (n.r < 20 ? 12 : 13), font = (pr === 0 ? '600 ' : '') + px + 'px ' + C.font;
+      const title = trunc(n.sat ? n.label : (n.short || n.title), o.mini ? 18 : 26);
+      const flag = !n.sat && n.status !== 'ok' && !o.mini && pr <= 2;
+      const sline = flag ? ST[n.status].glyph + ' ' + ST[n.status].say : null;
+      const w1 = tw(title, font), w2 = sline ? tw(sline, '11px ' + C.font) : 0, w = Math.max(w1, w2), hh = px + 3 + (sline ? 14 : 0);
+      const sx = n.x * V.k + V.tx, sy = n.y * V.k + V.ty, rr = n.r * V.k;
+      const tries = [[sx - w / 2, sy + rr + 3], [sx - w / 2, sy - rr - 3 - hh], [sx + rr + 10, sy - hh / 2], [sx - rr - 10 - w, sy - hh / 2]];
+      let pos2 = null;
+      for (const t of tries) { const r = { x: t[0], y: t[1], w, h: hh }; if (!hits(r, n.id)) { pos2 = r; break; } if (pr > 2) { /* low priority: only first free spot */ } }
+      if (!pos2) { if (pr > 2) continue; pos2 = { x: tries[0][0], y: Math.min(tries[0][1], H - hh - 2), w, h: hh }; pos2.x = Math.max(2, Math.min(W - w - 2, pos2.x)); }
+      placed.push(pos2);
+      ctx.globalAlpha = 1; ctx.lineJoin = 'round';
+      const cx = pos2.x + w / 2;
+      ctx.textAlign = 'center';
+      ctx.font = font; ctx.lineWidth = 3; ctx.strokeStyle = C.paper; ctx.strokeText(title, cx, pos2.y); ctx.fillStyle = C.ink; ctx.fillText(title, cx, pos2.y);
+      if (sline) { ctx.font = '600 11px ' + C.font; ctx.strokeText(sline, cx, pos2.y + px + 3); ctx.fillStyle = C[STATUS_COL[n.status].slice(2)]; ctx.fillText(sline, cx, pos2.y + px + 3); }
+    }
+    ctx.textAlign = 'left';
+  }
+
+  /* ----- interaction ----- */
+  let drag = null, moved = false;
+  const evPos = ev => { const r = cv.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+  cv.addEventListener('mousedown', ev => {
+    if (ev.button !== 0) return;
+    const p = evPos(ev), n = hit(p.x, p.y); moved = false;
+    if (n && !o.mini) { drag = { type: 'node', n, sx: p.x, sy: p.y }; n.drag = true; }
+    else drag = { type: 'pan', sx: p.x, sy: p.y, tx: V.tx, ty: V.ty, n };
+    cv.focus({ preventScroll: true });
+  });
+  const onMove = ev => {
+    if (!cv.isConnected) return;
+    const p = evPos(ev);
+    if (drag) {
+      if (Math.hypot(p.x - drag.sx, p.y - drag.sy) > 3) moved = true;
+      if (moved) {
+        if (drag.type === 'node') { const w = toWorld(p.x, p.y); drag.n.x = w.x; drag.n.y = w.y; drag.n.pinned = true; reheat(0.25); }
+        else { V.tx = drag.tx + p.x - drag.sx; V.ty = drag.ty + p.y - drag.sy; request(); }
+        hideTip();
+      }
+      return;
+    }
+    const r = cv.getBoundingClientRect();
+    if (p.x < 0 || p.y < 0 || p.x > r.width || p.y > r.height) { if (hover) { hover = null; cv.style.cursor = ''; hideTip(); request(); if (o.onHover) o.onHover(null); } return; }
+    const n = hit(p.x, p.y), id = n ? n.id : null;
+    cv.style.cursor = n ? 'pointer' : 'grab';
+    if (id !== hover) { hover = id; request(); if (o.onHover && !(n && n.sat)) o.onHover(id); }
+    if (n) showTip(n, p); else hideTip();
+  };
+  const onUp = ev => {
+    if (!drag) return;
+    const d = drag; drag = null; if (d.n) d.n.drag = false;
+    if (!moved) {
+      if (d.n) { if (d.n.sat) { if (o.onClickSat) o.onClickSat(d.n); } else { sel = d.n.id; kfocus = null; if (o.onClick) o.onClick(d.n.id, ev); request(); } }
+      else if (!o.mini) { sel = null; if (o.onClick) o.onClick(null, ev); request(); }
+    } else if (d.type === 'node') { pos.set(d.n.id, { x: d.n.x, y: d.n.y }); if (o.onPin) o.onPin(pos); }
+  };
+  window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+  cv.addEventListener('dblclick', ev => { const p = evPos(ev), n = hit(p.x, p.y); if (!n) return; if (n.pinned && !n.sat) { n.pinned = false; pos.delete(n.id); if (o.onPin) o.onPin(pos); reheat(0.3); } else if (o.onExpand && !n.sat) o.onExpand(n.id); });
+  cv.addEventListener('wheel', ev => { if (o.mini) return; ev.preventDefault(); const p = evPos(ev); zoomAt(ev.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, { passive: false });
+  cv.addEventListener('keydown', ev => {
+    if (o.mini) return;
+    const order = nodes.filter(n => !n.sat).sort((a, b) => b.imp - a.imp).map(n => n.id);
+    if (ev.key === 'Tab') {
+      const i = order.indexOf(kfocus), j = i + (ev.shiftKey ? -1 : 1);
+      if (j >= 0 && j < order.length) { ev.preventDefault(); kfocus = order[j]; hover = null; request(); if (o.onFocus) o.onFocus(kfocus); }
+    } else if (ev.key === 'Enter' && kfocus) { sel = kfocus; if (o.onClick) o.onClick(kfocus, ev); request(); }
+    else if (ev.key === 'Escape') { sel = null; kfocus = null; if (o.onClick) o.onClick(null, ev); request(); }
+    else if (ev.key.startsWith('Arrow')) {
+      ev.preventDefault();
+      const from = byId.get(kfocus || sel); if (!from) { kfocus = order[0]; request(); return; }
+      const dx = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0, dy = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+      let best = null, bs = 1e9;
+      for (const id of adj.get(from.id) || []) { const n = byId.get(id); if (!n || n.sat) continue; const vx = n.x - from.x, vy = n.y - from.y, dot = (vx * dx + vy * dy) / (Math.hypot(vx, vy) || 1); if (dot > 0.3) { const sc = Math.hypot(vx, vy) / dot; if (sc < bs) { bs = sc; best = n; } } }
+      if (best) { kfocus = best.id; request(); if (o.onFocus) o.onFocus(kfocus); }
+    }
+  });
+  cv.addEventListener('mouseleave', () => { if (!drag && hover) { hover = null; hideTip(); request(); if (o.onHover) o.onHover(null); } });
+  function showTip(n, p) {
+    if (!tipEl || !o.tooltip) return;
+    clear(tipEl).append(o.tooltip(n)); tipEl.classList.remove('hidden');
+    tipEl.style.left = Math.min(p.x + 14, W - 270) + 'px'; tipEl.style.top = Math.min(p.y + 16, H - 90) + 'px';
+  }
+  function hideTip() { if (tipEl) tipEl.classList.add('hidden'); }
+  const ro = new ResizeObserver(() => resize()); ro.observe(host);
+  return {
+    setData, fit: () => { fit(); }, resize, redraw: request,
+    zoomBy: f => zoomAt(f, W / 2, H / 2),
+    setSelected(id) { sel = id; request(); },
+    rearrange() { pos.clear(); nodes.forEach(n => { n.pinned = false; }); if (o.onPin) o.onPin(pos); nodes.forEach(n => { n.x *= 0.3; n.y *= 0.3; }); settle(300, 1); fit(); },
+    focusOn(id) { const n = byId.get(id); if (n && W) { V.tx = W / 2 - n.x * V.k; V.ty = H / 2 - n.y * V.k; sel = id; request(); } },
+    visible: () => nodes.filter(n => !n.sat).map(n => n.id),
+    patch(spec) { for (const s of spec) { const n = byId.get(s.id); if (n) { n.status = s.status; n.short = s.short; n.title = s.title; n.item = s.item || n.item; } } request(); },
+    dimOnly(v) { o.dimOk = v; request(); },
+    hl(id) { hover = id; request(); },
+    destroy() { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); ro.disconnect(); if (raf) cancelAnimationFrame(raf); },
+  };
+}
+
+/* ======================================================================
+   6. PAGES (centre)
+   ====================================================================== */
+function menuPop(anchor, entries, opts) {
+  const old = $('#menu'); if (old) { old.remove(); if (old._anchor === anchor) return; }
+  opts = opts || {};
+  const r = anchor.getBoundingClientRect();
+  const m = h('div', { id: 'menu', class: 'menu', role: 'menu' }, entries.map(e => {
+    if (e.sep) return h('div', { class: 'msep' });
+    if (e.head) return h('div', { class: 'mhead' }, e.head);
+    const cls = 'mitem' + (e.disabled ? ' off' : '');
+    const inner = [h('span', null, e.label), e.hint ? h('span', { class: 'mhint' }, e.hint) : null];
+    if (e.href) return h('a', { class: cls, role: 'menuitem', href: e.href, download: e.download ? '' : null, onclick: () => m.remove() }, inner);
+    return h('button', { class: cls, role: 'menuitem', disabled: e.disabled || !e.fn, onclick: () => { m.remove(); if (e.fn) e.fn(); } }, inner);
+  }));
+  m._anchor = anchor;
+  document.body.append(m);
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  let left = opts.right ? r.right - mw : r.left, top = opts.up ? r.top - mh - 4 : r.bottom + 4;
+  if (opts.side) { left = r.right + 6; top = Math.max(8, r.bottom - mh); }
+  m.style.left = Math.max(8, Math.min(left, innerWidth - mw - 8)) + 'px'; m.style.top = Math.max(8, Math.min(top, innerHeight - mh - 8)) + 'px';
+  const off = ev => { if (!m.contains(ev.target) && ev.target !== anchor) { m.remove(); document.removeEventListener('mousedown', off, true); } };
+  setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+  const first = m.querySelector('button:not(:disabled), a'); if (first) first.focus();
+  m.addEventListener('keydown', ev => { if (ev.key === 'Escape') { m.remove(); anchor.focus(); } });
+}
+const doc = (...kids) => h('div', { class: 'doc' }, kids);
+function sec(title, id, ...kids) {
+  S.outline.push({ id, label: title });
+  return h('section', { class: 'dsec', id: 'sec-' + id }, h('h3', null, title), kids);
+}
+function emptyState(glyph, title, sub, actions) {
+  return h('div', { class: 'empty-state' }, h('div', { class: 'big' }, glyph), h('div', { class: 'et' }, title), sub ? h('div', { class: 'muted' }, sub) : null, actions ? h('div', { class: 'acts' }, actions) : null);
+}
+function itemLink(it, cls) {
+  return h('button', { class: 'ilink ' + (cls || ''), onclick: ev => openItem(it.id, ev.metaKey || ev.ctrlKey), title: ST[it.status].word }, h('span', { class: 'sg ' + it.status, 'aria-hidden': 'true' }, ST[it.status].glyph), ' ', it.title);
+}
+function triageButtons(targets, cur, key, opts) {
+  opts = opts || {};
+  const noteOpen = !!S.noteOpen[key];
+  const b = (state, label) => h('button', { class: 'btn s-' + state, 'aria-pressed': String(cur === state), disabled: READONLY, title: READONLY ? 'Read-only snapshot' : null, 'data-triage': state,
+    onclick: () => {
+      if (state === 'needs_fixing' && cur !== state) { S.noteOpen[key] = true; renderPage(true); setTimeout(() => { const i = $('#note-' + CSS.escape(key)); if (i) i.focus(); }, 0); return; }
+      setTriageMany(targets, cur === state ? 'unreviewed' : state, noteOf(targets));
+    } }, label);
+  return h('div', { class: 'tri-wrap' },
+    h('div', { class: 'tri' }, b('reviewed', 'Looks fine'), b('needs_fixing', 'Needs fixing'), b('ignored', 'Ignore')),
+    noteOpen ? h('div', { class: 'noterow' },
+      h('input', { type: 'text', id: 'note-' + key, maxlength: '2000', placeholder: 'Add a note (optional)', 'aria-label': 'Add a note (optional)', value: noteOf(targets), onkeydown: ev => { if (ev.key === 'Enter') ev.target.nextSibling.click(); } }),
+      h('button', { class: 'btn primary', onclick: ev => { const v = ev.target.previousSibling.value; S.noteOpen[key] = false; setTriageMany(targets, 'needs_fixing', v); } }, 'Save'),
+      h('button', { class: 'btn', onclick: () => { S.noteOpen[key] = false; renderPage(true); } }, 'Cancel')) : null);
+}
+
+/* ---------- Changes ---------- */
+function cpDate() { const cp = S.alarms && S.alarms.checkpoint; return cp ? dmon(cp.created_at) : null; }
+function pageChanges() {
+  const cp = S.alarms && S.alarms.checkpoint;
+  const root = doc(h('h1', { class: 'ptitle' }, 'What changed since you last looked'));
+  if (S.loading) { root.append(h('div', { class: 'muted' }, 'Reading your paper and code…'), [1, 2, 3].map(() => h('div', { class: 'skelcard' }))); return root; }
+  if (!cp) {
+    root.append(emptyState('○', 'You haven\'t set a starting point yet.', 'Lemmata needs to know when you last felt sure about your paper. It will then list everything that changes after that.',
+      [h('button', { class: 'btn primary', disabled: READONLY, onclick: () => createCheckpoint('') }, 'Start tracking from now')]));
+    return root;
+  }
+  const full = (S.checkpoints && S.checkpoints.checkpoints || []).find(c => c.id === cp.id) || cp;
+  root.append(h('div', { class: 'subline' }, h('span', null, 'Last checked: ' + lastChecked(cp.created_at)), cp.note ? h('span', { class: 'muted' }, ' · note "' + cp.note + '"') : null,
+    h('button', { class: 'btn', disabled: READONLY, title: READONLY ? 'Read-only snapshot' : null, onclick: markAllDialog }, 'Mark everything as looked at')));
+  const cards = M.cards, nChecks = (S.findings && S.findings.findings || []).length;
+  if (!cards.length) {
+    root.append(emptyState('✓', 'Nothing has changed since ' + absTime(cp.created_at) + '.', 'Everything Lemmata knows about is as you left it.',
+      [h('button', { class: 'linkbtn', onclick: () => openTab('checks') }, 'See your checks (' + nChecks + ')'), h('button', { class: 'linkbtn', onclick: () => openTab('graph') }, 'Open the graph')]));
+    return root;
+  }
+  root.append(h('div', { class: 'summary' },
+    h('button', { class: 'linkbtn', onclick: () => $('.card') && $('.card').scrollIntoView({ block: 'start' }) }, plural(cards.length, 'change')), ' · ',
+    h('button', { class: 'linkbtn', onclick: () => { S.chFilter = 'look'; renderPage(true); } }, plural(M.looked, 'item') + (M.looked === 1 ? ' may' : ' may') + ' need a second look'), ' · ',
+    h('button', { class: 'linkbtn', onclick: () => openTab('checks') }, plural(nChecks, 'check') + ' about your paper')));
+  const counts = { all: cards.length, look: 0, fix: 0, fine: 0, ign: 0 };
+  cards.forEach(c => { const k = cardState(c).key; counts[k === 'partial' ? 'look' : k]++; });
+  const chips = [['all', 'All'], ['look', 'Not looked at'], ['fix', 'Needs fixing'], ['fine', 'Looks fine'], ['ign', 'Ignored']];
+  root.append(h('div', { class: 'fchips', role: 'group', 'aria-label': 'Filter changes' }, chips.map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(S.chFilter === k), onclick: () => { S.chFilter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, counts[k])))));
+  let lastDay = null, shown = 0;
+  for (const c of cards) {
+    const k = cardState(c).key, kk = k === 'partial' ? 'look' : k;
+    if (S.chFilter !== 'all' && kk !== S.chFilter) continue;
+    const day = dayHeader(c.time);
+    if (day !== lastDay) { root.append(h('div', { class: 'dayhead' }, day)); lastDay = day; }
+    root.append(cardEl(c)); shown++;
+  }
+  if (!shown) root.append(h('div', { class: 'muted pad-t' }, 'No changes match this filter.'));
+  return root;
+}
+function cardEl(c) {
+  const st = cardState(c), g = c.g;
+  const label = st.key === 'partial' ? plainChip('↻', 'Partly looked at (' + st.looked + ' of ' + st.total + ')', 'look') : chip(st.key);
+  const done = (st.key === 'fine' || st.key === 'ign' || st.key === 'fix') && !S.openCard[c.id];
+  if (done) {
+    return h('article', { class: 'card done', 'data-card': c.id }, h('div', { class: 'cardline' }, label, causeLine(g),
+      h('button', { class: 'linkbtn', onclick: () => { S.openCard[c.id] = true; renderPage(true); } }, 'Show'),
+      h('button', { class: 'linkbtn', disabled: READONLY, onclick: () => setTriageMany(c.targets, 'unreviewed', noteOf(c.targets)) }, 'Undo')));
+  }
+  const primary = (c.itemsDown[0] || c.items[0]);
+  const whyKey = 'card:' + c.id, whyNode = pickWhyNode(c);
+  const flag = (g.flags || []).find(f => f.code === 'message_claims_no_change');
+  const rows = [];
+  const changedRows = c.nodes.filter(n => n.role === 'changed');
+  for (const n of changedRows) rows.push(h('div', { class: 'arow' }, plainChip('•', 'Changed'), ' ', PAPER.has((IX.node.get(n.id) || {}).kind) ? nameOf(n.id) : mono(nameOf(n.id))));
+  for (const it of c.itemsDown.concat(c.items.filter(i => !c.itemsDown.includes(i) && !c.nodes.some(n => n.role === 'changed' && M.itemsOf.get(n.id) && M.itemsOf.get(n.id).includes(i.id) && !it_isPaperNode(n.id))))) {
+    if (changedRows.some(n => M.paperId.get(n.id) === it.id)) continue;
+    const evs = c.ev.filter(e => (M.itemsOf.get(e.id) || []).includes(it.id));
+        rows.push(h('div', { class: 'arow' }, chip(it.status), ' ', h('button', { class: 'ilink', onclick: ev => openItem(it.id, ev.metaKey || ev.ctrlKey) }, it.title), h('span', { class: 'muted' }, '  ' + kindLabelShort(it)),
+      evs.length ? h('div', { class: 'aev muted' }, evs.map((e, i) => h('span', null, i ? ' · ' : '', e.name.startsWith('the run') ? e.name : mono(e.name), e.sfx ? ' (' + e.sfx + ')' : ''))) : null));
+  }
+  const openBtn = !primary ? null : (c.itemsDown.length + c.items.length > 1 && new Set(c.itemsDown.concat(c.items)).size > 1)
+    ? h('button', { class: 'btn', onclick: ev => menuPop(ev.currentTarget, [...new Set(c.itemsDown.concat(c.items))].map(it => ({ label: it.title, fn: () => openItem(it.id) })), { right: true }) }, 'Open items ▾')
+    : h('button', { class: 'btn', onclick: ev => openItem(primary.id, ev.metaKey || ev.ctrlKey) }, 'Open ' + lead(primary));
+  return h('article', { class: 'card st-' + st.key, 'data-card': c.id },
+    h('div', { class: 'cardhead' }, label, h('div', { class: 'cause-line' }, causeLine(g))),
+    consequenceLine(c),
+    h('div', { class: 'alist' }, rows),
+    flag ? h('div', { class: 'flag' }, '⚑ The commit message says "' + flag.phrase + '", but content changed in ' + plural((g.cause.files || []).length || g.changed.length, 'file') + '.') : null,
+    S.openWhy[whyKey] ? whyBlock(g, whyNode) : null,
+    h('div', { class: 'btnrow' },
+      h('button', { class: 'btn', 'aria-expanded': String(!!S.openWhy[whyKey]), onclick: () => { S.openWhy[whyKey] = !S.openWhy[whyKey]; renderPage(true); } }, 'Why?'),
+      triageButtons(c.targets, st.key === 'fine' ? 'reviewed' : st.key === 'fix' ? 'needs_fixing' : st.key === 'ign' ? 'ignored' : null, c.id),
+      h('span', { class: 'grow' }), openBtn));
+}
+const it_isPaperNode = id => M.paperId.has(id);
+function kindLabelShort(it) { const k = kindLabel(it); const m = /\b(in .*)$/.exec(k); return m ? m[1].replace(/^in /, '') : k; }
+function pickWhyNode(c) {
+  const d = c.g.downstream.find(x => M.paperId.has(x.node_id)); if (d) return d.node_id;
+  if (c.g.downstream.length) return c.g.downstream[c.g.downstream.length - 1].node_id;
+  return c.g.changed[0] ? c.g.changed[0].node_id : '';
+}
+
+/* ---------- Item page ---------- */
+function relevantEvents(it) {
+  const ids = new Set(itemNodeIds(it)), evPaths = it.ev.map(e => { const n = IX.node.get(e.id); return n ? n.repo + '|' + pathOf(n) : ''; });
+  if (it.shared) { const n = it.node; evPaths.push(n.repo + '|' + pathOf(n)); }
+  const out = [];
+  for (const ev of (S.events && S.events.events) || []) {
+    let hit = false;
+    if (ev.changed_nodes) hit = ev.changed_nodes.some(n => ids.has(n));
+    if (!hit && (!ev.changed_nodes || !ev.after_checkpoint)) hit = (ev.files || []).some(f => evPaths.includes(ev.repo + '|' + f.path));
+    if (hit) out.push(ev);
+  }
+  return out.sort((a, b) => (a.time < b.time ? 1 : -1));
+}
+function eventPieces(ev) {
+  const g = IX.groupById.get(ev.id); if (g) return causeInfo(g).pieces;
+  const rw = repoWord(ev.repo);
+  if (ev.kind === 'run') return ['A run finished: ', mono(ev.id.split('/').pop())];
+  if (ev.kind === 'worktree') return ['You have changes in ' + rw + ' that are not saved to git yet'];
+  if (ev.kind === 'snapshot') return ['Your ' + rw + ' files differ from when you last checked'];
+  if (ev.kind === 'diverged') return ['The history of your ' + rw + ' was rewritten since you last checked'];
+  const fs = ev.files || [];
+  if (fs.length === 1) {
+    const f = fs[0], n = IX.node.get('file:' + ev.repo + '/' + f.path);
+    if (f.status === 'A') return ['You added ', mono(f.path)];
+    if (f.status === 'D') return ['You removed ', mono(f.path)];
+    if (rw === 'paper' && /\.(tex|bib)$/.test(f.path)) return ['You edited your paper (', mono(f.path), ')'];
+    if (n && n.kind === 'config') return ['You changed ', mono(f.path)];
+    if (n && (n.kind === 'result' || n.kind === 'data')) return ['Your file ', mono(f.path), ' changed'];
+    return ['You edited ', mono(f.path)];
+  }
+  return ['You edited ' + fs.length + ' files in ' + rw];
+}
+function eventLine(ev, opts) {
+  opts = opts || {};
+  return h('div', { class: 'evline' }, h('span', { class: 'eg', 'aria-hidden': 'true' }, ev.kind === 'run' ? '▲' : ev.kind === 'commit' ? '●' : '◌'),
+    h('div', { class: 'evtx' }, h('span', null, eventPieces(ev)), h('span', { class: 'muted', title: absTime(ev.time) }, ' · ' + (opts.clock ? ev.time.slice(11, 16) : relTime(ev.time))), ev.kind === 'commit' ? h('span', { class: 'muted' }, ' · commit ', h('span', { class: 'mono' }, ev.short)) : null,
+      opts.subject && ev.subject ? h('div', { class: 'muted quote' }, '“' + ev.subject + '”') : null));
+}
+function whatThis(it) {
+  const P = [];
+  const nodes = it.ev.map(e => IX.node.get(e.id)).filter(Boolean);
+  const direct = it.nodes.flatMap(n => IX.pout.get(n) || []);
+  const first = (arr, f) => arr.find(f);
+  const resE = first(direct, e => e.kind === 'traces_to'), resN = resE ? IX.node.get(resE.to) : first(nodes, n => n.kind === 'result' || n.kind === 'data');
+  const runN = first(nodes, n => n.kind === 'run');
+  let scriptN = null;
+  const gen = first(direct, e => e.kind === 'generated_by'); if (gen) scriptN = IX.node.get(gen.to);
+  if (!scriptN && resN) { const pe = (IX.pout.get(resN.id) || []).find(e => e.kind === 'produced_by' && (IX.node.get(e.to) || {}).kind === 'code'); if (pe) scriptN = IX.node.get(pe.to); }
+  if (!scriptN && runN) { const ex = (IX.pout.get(runN.id) || []).find(e => e.kind === 'executes'); if (ex) scriptN = IX.node.get(ex.to); }
+  if (!scriptN) scriptN = first(nodes, n => n.kind === 'code') || null;
+  const assetN = first(nodes, n => n.kind === 'asset');
+  const par = M.parent.get(it.id), p = par && M.byId.get(par);
+  const where = p && p.kind === 'section' ? ' in ' + lead(p) : '';
+  const A = x => mono(pathOf(x));
+  switch (it.kind) {
+    case 'table':
+      P.push('A table' + where + '. ');
+      if (resN) { P.push('It is built from ', A(resN)); if (scriptN) { P.push(', produced by ', A(scriptN)); if (runN) P.push(' on ', nameOf(runN.id)); } P.push('.'); }
+      else P.push('It is not linked to a result file yet.');
+      break;
+    case 'figure':
+      P.push('A figure' + where + '. ');
+      if ((it.node.attrs || {}).manual) P.push('You said it is drawn by hand.');
+      else if (scriptN) { P.push('It is made by ', A(scriptN)); if (resN) P.push(' from ', A(resN)); P.push('.'); }
+      else if (assetN) P.push('It shows ', A(assetN), '. Lemmata does not know what makes it yet.');
+      else P.push('Lemmata does not know where it comes from yet.');
+      break;
+    case 'equation': P.push('An equation' + where + '.'); break;
+    case 'section': {
+      const k = (M.nbOut.get(it.id) || []).filter(x => x.rel === 'contains' && ['figure', 'table', 'equation'].includes(M.byId.get(x.id).kind)).length;
+      P.push((it.node.attrs.in_appendix ? 'Appendix ' : 'Section ') + (it.node.attrs.number || '') + ' of your paper. It contains ' + plural(k, 'figure, table or equation', 'figures, tables or equations') + '.'); break;
+    }
+    case 'thesis': {
+      const rq = (M.nbOut.get(it.id) || []).filter(x => M.byId.get(x.id).kind === 'rq').length, sc = (M.nbOut.get(it.id) || []).filter(x => M.byId.get(x.id).kind === 'section').length;
+      P.push('The abstract of your paper. ' + plural(rq, 'research question') + ' and ' + plural(sc, 'section') + ' rest under it.'); break;
+    }
+    case 'rq': {
+      const ss = (M.nbOut.get(it.id) || []).filter(x => x.rel === 'answers').map(x => lead(M.byId.get(x.id)));
+      P.push('A research question your paper states.' + (ss.length ? ' It is discussed in ' + ss.join(', ') + '.' : '')); break;
+    }
+    case 'reference': {
+      const ss = (M.nbIn.get(it.id) || []).map(x => lead(M.byId.get(x.id)));
+      P.push('A cited work.' + (ss.length ? ' Cited in ' + ss.join(', ') + '.' : ' Nothing cites it yet.')); break;
+    }
+    default:
+      if (it.shared) P.push('A file that ' + it.users.length + ' parts of your paper rest on: ' + it.users.map(u => lead(M.byId.get(u))).join(', ') + '.');
+      else P.push(it.kindWord + '.');
+  }
+  return P;
+}
+function nodeNote(nid) {   // "changed 2 days ago · commit 2836100" / "not changed"
+  const al = IX.alarm.get(nid);
+  if (!al) return 'not changed';
+  const ch = al.find(a => a.role === 'changed');
+  if (ch) { const c = ch.group.cause; return 'changed ' + relTime(c.time) + (c.short && c.kind === 'commit' ? ' · commit ' + c.short : ''); }
+  const d = al[0];
+  if (d.entry.output_identical === true) return 'not regenerated yet';
+  if (d.entry.output_identical === false) return 'regenerated, content differs';
+  return 'may need a second look';
+}
+function evidenceRow(nid) {
+  const n = IX.node.get(nid); if (!n) return null;
+  const f = nodeFlag(nid), al = IX.alarm.get(nid), open = !!S.openEv[nid];
+  const row = h('div', { class: 'evrow', 'data-ev': nid },
+    h('button', { class: 'evhead', 'aria-expanded': String(open), onclick: () => { S.openEv[nid] = !S.openEv[nid]; renderPage(true); } },
+      h('span', { class: 'caret' }, open ? '▾' : '▸'), mono(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n)), n.kind === 'run' ? h('span', { class: 'muted' }, ' run') : null,
+      f ? chip(f) : null, h('span', { class: 'muted note' }, nodeNote(nid))),
+    h('button', { class: 'linkbtn sm', onclick: () => copyText(pathOf(n)) }, 'Copy path'));
+  if (open) {
+    const body = h('div', { class: 'evbody' });
+    const ch = al && al.find(a => a.role === 'changed');
+    if (ch) { body.append(h('div', { class: 'muted' }, 'Loading what changed…')); ensureAnalysis(ch.group.id, nid).then(an => { clear(body); if (an.failed) body.append(h('div', { class: 'muted' }, 'The change could not be loaded. ' + an.failed)); else for (const df of an.diffs.filter(d => d.node_id === nid)) body.append(df.binary ? h('div', { class: 'muted' }, 'Not a text file.') : diffBlock(df.unified)); }); }
+    else body.append(h('div', { class: 'muted' }, al ? 'This file has not changed itself. It may need a second look because something it rests on changed.' : 'Not changed since last checked.'));
+    row.append(body);
+  }
+  return row;
+}
+function pageItem(it) {
+  S.outline = [];
+  const root = doc();
+  const st = ST[it.status];
+  root.append(h('div', { class: 'ititle' },
+    h('h1', { class: 'ptitle' }, it.title),
+    h('div', { class: 'imeta' }, h('span', { class: 'muted' }, kindLabel(it)), chip(it.status), it.finds.length ? plainChip('!', plural(it.finds.length, 'check')) : null,
+      h('span', { class: 'grow' }), h('button', { class: 'btn', onclick: () => { S.gf.mode = 'around'; S.sel = it.id; openTab('graph'); } }, 'Open graph around this item'))));
+  // why it needs attention
+  if (it.status !== 'ok') {
+    const targets = itemTargets(it), groups = [];
+    for (const nid of itemNodeIds(it)) for (const a of IX.alarm.get(nid) || []) if (!groups.includes(a.group)) groups.push(a.group);
+    const whyKey = 'item:' + it.id, g0 = groups[0];
+    const ch = g0 && g0.changed[0];
+    let sentence;
+    if (it.status === 'look') {
+      if (g0) {
+        const ev0 = it.ev.map(e => e.id).filter(id => (IX.alarm.get(id) || []).some(a => a.role === 'downstream' && a.entry.output_identical === true))[0];
+        sentence = h('span', null, 'Something this item rests on changed ' + relTime(g0.cause.time) + ': ' + lcFirst(textOf(causeInfo(g0).pieces)) + '. ' + (ev0 ? cap1(nameOf(ev0)) + ' has not been regenerated yet.' : ''));
+      } else sentence = h('span', null, 'One of the checks about this item needs a look. See "Checks about this item" below.');
+    } else if (it.status === 'fix') {
+      const e = targets.map(t => triageEntry(t.type, t.id)).find(x => x && x.state === 'needs_fixing');
+      sentence = h('span', null, 'You marked this as needing a fix' + (e ? ' on ' + dmon(e.updated_at) : '') + '.' + (noteOf(targets) ? ' Your note: “' + noteOf(targets) + '”' : ''));
+    } else if (it.status === 'fine') {
+      const e = targets.map(t => triageEntry(t.type, t.id)).find(x => x && x.state === 'reviewed');
+      sentence = h('span', null, 'You marked this as looking fine' + (e ? ' on ' + dmon(e.updated_at) : '') + '.');
+    } else sentence = h('span', null, 'You chose to ignore this item.');
+    const cur = { look: null, fix: 'needs_fixing', fine: 'reviewed', ign: 'ignored' }[it.status];
+    const outdated = itemNodeIds(it).some(x => effState('node', x).outdated);
+    root.append(h('div', { class: 'attn ' + it.status },
+      h('div', { class: 'atx' }, h('span', { class: 'sg ' + it.status }, st.glyph), ' ', sentence, outdated ? h('div', { class: 'muted' }, 'It changed again since you marked it, so Lemmata asks you to look again.') : null),
+      g0 && S.openWhy[whyKey] ? whyBlock(g0, it.nodes.find(n => (IX.alarm.get(n) || []).some(a => a.group === g0)) || itemNodeIds(it).find(n => (IX.alarm.get(n) || []).some(a => a.group === g0))) : null,
+      h('div', { class: 'btnrow' }, g0 ? h('button', { class: 'btn', 'aria-expanded': String(!!S.openWhy[whyKey]), onclick: () => { S.openWhy[whyKey] = !S.openWhy[whyKey]; renderPage(true); } }, 'Why?') : null,
+        triageButtons(targets, cur, it.id))));
+  }
+  root.append(sec('What this is', 'what', h('p', { class: 'what' }, whatThis(it))));
+  // evidence
+  const evBody = [];
+  if (it.shared) {
+    evBody.push(h('div', { class: 'evgroup' }, h('div', { class: 'evg' }, 'Used by'), it.users.map(u => h('div', { class: 'evrow' }, itemLink(M.byId.get(u))))));
+    const r = evidenceRow(it.id); if (r) evBody.push(h('div', { class: 'evgroup' }, h('div', { class: 'evg' }, 'This file'), r));
+  } else {
+    for (const [name, kinds] of EV_GROUPS) {
+      const rows = it.ev.filter(e => kinds.includes((IX.node.get(e.id) || {}).kind)).map(e => evidenceRow(e.id)).filter(Boolean);
+      if (rows.length) evBody.push(h('div', { class: 'evgroup' }, h('div', { class: 'evg' }, name), rows));
+    }
+    if (it.sharedUse.length) evBody.push(h('div', { class: 'evgroup' }, h('div', { class: 'evg' }, 'Shared with other items'), it.sharedUse.map(sid => {
+      const s = M.byId.get(sid); const others = s.users.filter(u => u !== it.id).map(u => lead(M.byId.get(u)));
+      return h('div', { class: 'evrow' }, h('button', { class: 'evhead', onclick: () => openItem(sid) }, h('span', { class: 'caret' }, '↗'), mono(s.title), h('span', { class: 'muted note' }, 'also used by ' + (others.join(', ') || 'nothing else'))));
+    })));
+  }
+  if (!evBody.length) {
+    evBody.push(h('div', { class: 'muted' }, 'Nothing behind this item yet. If it comes from a result file or script, add a note in the LaTeX source like % source: results/table2.csv.'));
+    evBody.push(h('button', { class: 'linkbtn', onclick: () => { S.showExample = !S.showExample; renderPage(true); } }, S.showExample ? 'Hide example' : 'Show example'));
+    if (S.showExample) evBody.push(h('div', { class: 'code' }, h('div', { class: 'ln' }, h('span', { class: 'n' }, '1'), '\\begin{table}'), h('div', { class: 'ln' }, h('span', { class: 'n' }, '2'), '% source: code:results/table2.csv'), h('div', { class: 'ln' }, h('span', { class: 'n' }, '3'), '\\caption{Main results}')));
+  }
+  root.append(sec('Behind this item', 'evidence', evBody));
+  // where it appears
+  const n = it.node;
+  if (!it.shared && n.loc && n.loc.path && !it.readme) {
+    const box = h('div', null, h('div', { class: 'muted' }, 'Loading…'));
+    const line = n.loc.line, end = Math.min(n.loc.end_line || line, line + 11);
+    if (line) getLines(n.repo, n.loc.path, line, end).then(r => { clear(box); box.append(h('div', { class: 'cap' }, n.loc.path + ' line ' + line), codeBlock(r.lines, r.start, [line], { label: 'Your paper source' })); })
+      .catch(() => { clear(box); box.append(h('div', { class: 'cap' }, n.loc.path + (line ? ' line ' + line : '')), (n.attrs || {}).caption ? h('div', { class: 'quote' }, 'Caption: “' + n.attrs.caption + '”') : h('div', { class: 'muted' }, 'The text is not available here.')); });
+    else clear(box).append(h('div', { class: 'cap' }, mono(n.loc.path)));
+    root.append(sec('In your paper', 'paper', box));
+  }
+  // checks
+  if (it.finds.length) root.append(sec('Checks about this item', 'checks', it.finds.map(f => h('div', { class: 'chk' }, h('div', null, findingSentence(f)), h('button', { class: 'linkbtn', onclick: () => { S.focusFinding = f.id; openTab('checks'); } }, 'Open evidence')))));
+  // history
+  const evs = relevantEvents(it);
+  root.append(sec('History', 'history', evs.length ? evs.slice(0, 12).map(e => eventLine(e)) : h('div', { class: 'muted' }, 'Nothing has changed here since the start.')));
+  // notes
+  const targets = itemTargets(it), cur = noteOf(targets);
+  const ta = h('textarea', { rows: '3', maxlength: '2000', 'aria-label': 'Your note', placeholder: 'Your note', disabled: READONLY }); ta.value = cur;
+  const earlier = targets.flatMap(t => ((triageEntry(t.type, t.id) || {}).history || []).filter(x => x.note).map(x => x)).sort((a, b) => (a.at < b.at ? 1 : -1));
+  root.append(sec('Notes', 'notes', ta,
+    h('div', { class: 'btnrow' }, h('button', { class: 'btn', disabled: READONLY, onclick: () => { const t0 = targets[0]; const ent = triageEntry(t0.type, t0.id); setTriageMany(targets, ent ? ent.state : 'unreviewed', ta.value); } }, 'Save note')),
+    earlier.length > 1 ? h('details', { class: 'details' }, h('summary', null, 'Earlier notes'), earlier.slice(1, 8).map(x => h('div', { class: 'muted' }, absTime(x.at) + ' — ' + x.note))) : null));
+  return root;
+}
+const lcFirst = s => s.charAt(0).toLowerCase() + s.slice(1);
+function textOf(pieces) { return pieces.map(p => (p && p.nodeType ? p.textContent : String(p))).join(''); }
+
+/* ---------- Evidence page (files and runs that are not Items) ---------- */
+function pageEvidence(nid) {
+  S.outline = [];
+  const n = IX.node.get(nid), root = doc();
+  if (!n) return root.append(h('div', { class: 'muted' }, 'This file is not part of the project any more.')), root;
+  const rn = n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n);
+  root.append(h('h1', { class: 'ptitle mono-title' }, rn));
+  const users = (M.itemsOf.get(nid) || []).map(i => M.byId.get(i));
+  root.append(h('p', { class: 'what' }, (FILE_WORD[n.kind] || 'A file') + (n.kind === 'item' ? ' listed in your README' : ' in your ' + (repoWord(n.repo) === 'paper' ? 'paper' : 'code')) + '. ' + (users.length ? 'It is used by ' + users.map(u => lead(u)).join(', ') + '.' : n.kind === 'item' ? 'It was listed in your README, but no figure or table in the paper has that number.' : 'It is not used by anything in the paper yet.')));
+  if (users.length) root.append(sec('Used by', 'used', users.map(u => h('div', { class: 'evrow' }, itemLink(u)))));
+  const r = evidenceRow(nid); if (r) { S.openEv[nid] = S.openEv[nid] !== false; root.append(sec('This file', 'file', r)); }
+  return root;
+}
+
+/* ---------- Checks ---------- */
+function findingSentence(f) {
+  const d = f.details || {}, tail = f.id.indexOf('/') >= 0 ? f.id.slice(f.id.indexOf('/') + 1) : f.id;
+  const itl = () => { const it = f.nodes && f.nodes.length ? M.byId.get(M.paperId.get(f.nodes[0])) : null; return it ? lead(it) : 'This item'; };
+  switch (f.check) {
+    case 'reference_unmatched': { const n = IX.node.get('ref:' + tail); const t = n ? ((n.attrs || {}).title || n.detail) : ''; return 'The reference "' + t + '" (' + tail + ') could not be matched in OpenAlex or Crossref. Check its title, year or DOI.'; }
+    case 'main_appendix_mismatch': return cap1(humanKey(d.name || tail)) + ' differs: the main text says ' + fmtVal(d.main_value) + ' and the appendix says ' + fmtVal(d.appendix_value) + '.';
+    case 'uncited_reference': return tail + ' is in your bibliography but nothing cites it.';
+    case 'unreferenced_float': { const it = itl(); return (f.evidence || []).some(e => e.role === 'begin') ? it + ' has no label, so it cannot be mentioned in the text.' : it + ' is never mentioned in the text.'; }
+    case 'undefined_ref': return 'The text refers to "' + tail + '", but nothing in the paper has that name.';
+    case 'undefined_cite': return 'The text cites "' + tail + '", which is not in your bibliography.';
+    case 'untraced_number': return 'The number ' + tail.split('#').pop() + ' in ' + itl() + ' was not found in any of your result files.';
+    case 'figure_without_provenance': return itl() + ' has no script or note saying where it comes from.';
+    default: return f.message;
+  }
+}
+function findingCard(f) {
+  const st = effState('finding', f.id), s = STATE_TO_ST[st.state] || 'look';
+  const cc = T.checkChip[f.check];
+  const its = [...new Set((f.nodes || []).map(n => M.paperId.get(n)).filter(Boolean))].map(i => M.byId.get(i));
+  const cur = st.state === 'unreviewed' ? null : st.state;
+  const e = st.entry;
+  return h('article', { class: 'card fcard' + (S.focusFinding === f.id ? ' focus' : ''), id: 'f-' + f.id.replace(/[^\w]/g, '_') },
+    h('div', { class: 'cardhead' }, chip(s), cc ? plainChip(cc[0], cc[1], 'look') : null, f.severity === 'info' ? h('span', { class: 'muted' }, 'for your information') : null),
+    h('div', { class: 'fsent' }, findingSentence(f)),
+    h('div', { class: 'fev' }, (f.evidence || []).slice(0, 4).map(ev => h('div', { class: 'fevr' }, mono(ev.path + ' line ' + ev.line), h('span', { class: 'quote' }, ' — “' + trunc(ev.text, 110) + '”')))),
+    its.length ? h('div', { class: 'fits muted' }, 'Concerns: ', its.map((it, i) => [i ? ', ' : '', h('button', { class: 'linkbtn', onclick: ev => openItem(it.id, ev.metaKey || ev.ctrlKey) }, lead(it))])) : null,
+    e && e.note ? h('div', { class: 'muted' }, 'Your note: “' + e.note + '”') : null,
+    triageButtons([{ type: 'finding', id: f.id }], cur, 'f:' + f.id));
+}
+function edgeSentence(e) {
+  const from = M.byId.get(M.paperId.get(e.from)), path = nameOf(e.to);
+  const pairs = [], re = /([\w.\-]+):\s*paper\s+([^,;]+),\s*config\s+([^;]+)/g; let m;
+  while ((m = re.exec(e.reason || ''))) pairs.push({ k: humanKey(m[1]), p: m[2].trim(), c: m[3].trim() });
+  const who = from ? lead(from) : 'Your paper';
+  if (!pairs.length) return who + ' and ' + path + ' seem to describe the same settings. Should Lemmata treat them as the same?';
+  const p0 = pairs[0];
+  return who + ' mentions ' + p0.k + ' ' + p0.p + ', and ' + path + ' sets ' + p0.k + ' to ' + p0.c + '.' + (pairs.length > 1 ? ' It also lines up ' + pairs.slice(1).map(p => p.k + ' (' + p.p + ')').join(', ') + '.' : '') + ' Should Lemmata treat them as the same setting?';
+}
+function pageChecks() {
+  S.outline = [];
+  const root = doc(h('h1', { class: 'ptitle' }, 'Checks'), h('p', { class: 'muted' }, 'Things Lemmata found by reading your paper and code. A check is a suggestion to look, not a verdict.'));
+  const fs = (S.findings && S.findings.findings) || [], checks = (S.findings && S.findings.checks) || [];
+  const notRun = checks.filter(c => c.status !== 'ran');
+  const sts = f => STATE_TO_ST[effState('finding', f.id).state] || 'look';
+  const counts = { all: fs.length, look: 0, fine: 0, fix: 0, ign: 0 }; fs.forEach(f => counts[sts(f)]++);
+  const chips = [['all', 'All'], ['look', 'Needs a second look'], ['fine', 'Looks fine'], ['fix', 'Needs fixing'], ['ign', 'Ignored']];
+  root.append(h('div', { class: 'fchips' }, chips.map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String((S.ckFilter || 'all') === k), onclick: () => { S.ckFilter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, counts[k]))),
+    notRun.length ? h('span', { class: 'fchip static' }, 'Not checked ', h('span', { class: 'n' }, notRun.length)) : null));
+  const byCheck = new Map(); fs.forEach(f => { if (!byCheck.has(f.check)) byCheck.set(f.check, []); byCheck.get(f.check).push(f); });
+  for (const key of T.checkOrder) {
+    const meta = checks.find(c => c.check === key), list = (byCheck.get(key) || []).filter(f => (S.ckFilter || 'all') === 'all' || sts(f) === S.ckFilter);
+    const open = S.checkSec[key] != null ? S.checkSec[key] : list.length > 0;
+    root.append(h('section', { class: 'csec' },
+      h('button', { class: 'csh', 'aria-expanded': String(open), onclick: () => { S.checkSec[key] = !open; renderPage(true); } }, h('span', { class: 'caret' }, open ? '▾' : '▸'), h('span', { class: 'cname' }, T.checkNames[key]), h('span', { class: 'cn' }, list.length)),
+      open ? h('div', { class: 'cbody' },
+        meta && meta.status !== 'ran' ? h('div', { class: 'muted' }, plainChip('–', 'Not checked', 'ign'), ' ' + (T.notRun[meta.note] ? 'No paper connected' : 'Not checked: ' + (T.notRun[meta.note] || meta.note || 'it could not run'))) : null,
+        list.length ? list.map(findingCard) : (meta && meta.status === 'ran' ? h('div', { class: 'muted' }, 'Nothing found.') : null)) : null));
+  }
+  // suggested links
+  const links = ((S.graph && S.graph.edges) || []).filter(e => e.kind === 'value_match');
+  const open = links.filter(e => e.status === 'proposed'), done = links.filter(e => e.status === 'approved'), hidden = links.filter(e => e.status === 'rejected');
+  const linkRow = e => {
+    const rows = [h('div', { class: 'fsent' }, edgeSentence(e))];
+    const to = nameOf(e.to), from = M.byId.get(M.paperId.get(e.from));
+    if (e.status === 'proposed') rows.push(h('div', { class: 'btnrow' }, plainChip('+', 'Suggested', 'proposed'), h('span', { class: 'grow' }),
+      h('button', { class: 'btn primary', disabled: READONLY, onclick: () => decideLink(e.id, 'approved', 'Linked. ' + (from ? lead(from) : 'Your paper') + ' now rests on ' + to + '.') }, 'Yes, link them'),
+      h('button', { class: 'btn', disabled: READONLY, onclick: () => decideLink(e.id, 'rejected') }, 'No, don\'t suggest this')));
+    else if (e.status === 'approved') rows.push(h('div', { class: 'btnrow' }, plainChip('✓', 'Linked', 'fine'), h('span', { class: 'grow' }), h('button', { class: 'btn', disabled: READONLY, onclick: () => decideLink(e.id, 'proposed') }, 'Undo')));
+    else rows.push(h('div', { class: 'btnrow' }, h('button', { class: 'btn', disabled: READONLY, onclick: () => decideLink(e.id, 'proposed') }, 'Bring back')));
+    return h('article', { class: 'card fcard' }, rows);
+  };
+  root.append(h('section', { class: 'csec', id: 'suggested' }, h('div', { class: 'csh static' }, h('span', { class: 'cname' }, 'Suggested links'), h('span', { class: 'cn' }, open.length)),
+    h('div', { class: 'cbody' }, h('p', { class: 'muted' }, 'Lemmata noticed matches between your paper and your files. Nothing is linked until you say so.'),
+      open.length ? open.map(linkRow) : h('div', { class: 'muted' }, 'No suggestions right now.'),
+      done.length ? [h('div', { class: 'evg' }, 'Linked by you'), done.map(linkRow)] : null,
+      hidden.length ? h('details', { class: 'details' }, h('summary', null, 'Hidden suggestions (' + hidden.length + ')'), hidden.map(linkRow)) : null)));
+  return root;
+}
+
+/* ---------- History ---------- */
+function pageHistory() {
+  S.outline = [];
+  const root = doc(h('h1', { class: 'ptitle' }, 'History'));
+  const evs = ((S.events && S.events.events) || []).slice();
+  const cp = S.alarms && S.alarms.checkpoint, cpT = cp ? Date.parse(cp.created_at) : null;
+  const F = S.histFilter;
+  root.append(h('div', { class: 'fchips' }, [['all', 'All'], ['code', 'Code'], ['paper', 'Paper'], ['runs', 'Runs']].map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { S.histFilter = k; renderPage(true); } }, l))));
+  const rows = evs.filter(e => F === 'all' || (F === 'runs' ? e.kind === 'run' : F === 'paper' ? repoWord(e.repo) === 'paper' && e.kind !== 'run' : repoWord(e.repo) === 'code' && e.kind !== 'run')).map(e => ({ t: Date.parse(e.time), ev: e }));
+  const marks = ((S.checkpoints && S.checkpoints.checkpoints) || []).filter(c => !(cp && c.id === cp.id)).map(c => ({ t: Date.parse(c.created_at), mark: c }));
+  const all = rows.concat(F === 'all' ? marks : []);
+  if (cp && F === 'all') all.push({ t: cpT + 0.5, rule: cp });
+  all.sort((a, b) => b.t - a.t);
+  if (!all.length) return root.append(h('div', { class: 'muted' }, 'No history yet.')), root;
+  let lastDay = null;
+  for (const r of all) {
+    const iso = r.ev ? r.ev.time : r.mark ? r.mark.created_at : r.rule.created_at;
+    if (r.rule) { root.append(h('div', { class: 'cprule' }, h('span', null, 'Last checked: ' + absTime(cp.created_at)))); continue; }
+    const day = dayHeader(iso);
+    if (day !== lastDay) { root.append(h('div', { class: 'dayhead' }, day === 'Today' || day === 'Yesterday' ? day : dmon(iso) + (dayDiff(iso) > 300 ? ' ' + iso.slice(0, 4) : ''))); lastDay = day; }
+    if (r.mark) root.append(h('div', { class: 'evline' }, h('span', { class: 'eg', 'aria-hidden': 'true' }, '⚑'), h('div', { class: 'evtx' }, 'You marked everything as looked at', r.mark.note ? h('span', { class: 'muted' }, ' · “' + r.mark.note + '”') : null, h('span', { class: 'muted' }, ' · ' + absTime(r.mark.created_at)))));
+    else root.append(h('div', { class: 'hrow' }, eventLine(r.ev, { subject: true, clock: true }), h('span', { class: 'muted rw' }, repoWord(r.ev.repo)), cpT != null ? h('span', { class: 'tag' }, r.t > cpT ? 'Since then' : 'Before') : null));
+  }
+  return root;
+}
+
+/* ---------- Graph tab ---------- */
+const GR = { host: null, g: null, sig: '', pos: new Map(), el: null };
+function graphSpec(opts) {
+  opts = opts || {};
+  const gf = S.gf, nodes = [], edges = [], ids = new Set();
+  const show = it => {
+    if (it.ref) return gf.refs;
+    if (it.shared) return gf.shared;
+    if (it.kind === 'thesis' || it.kind === 'rq') return true;
+    if (it.kind === 'section') return gf.sections;
+    return gf.floats;
+  };
+  let allowed = null;
+  if (opts.local) allowed = neighboursOf(opts.local, opts.depth);
+  else if (gf.mode === 'around' && S.sel && M.byId.has(S.sel)) allowed = neighboursOf(S.sel, gf.depth);
+  const mkNode = (it, scale) => ({ id: it.id, item: it, r: Math.max(opts.local ? 9 : 12, it.r * scale), kind: it.kind, status: it.status, imp: it.imp, title: it.title, short: it.short, tint: css(KIND_TINT[it.kind] || '--sunken'), glyph: KIND_GLYPH[it.kind] || '' });
+  for (const it of M.items) {
+    if (allowed ? !allowed.has(it.id) : !show(it)) continue;
+    nodes.push(mkNode(it, opts.local ? 0.62 : 1)); ids.add(it.id);
+  }
+  for (const e of M.iedges) if (ids.has(e.a) && ids.has(e.b)) edges.push({ a: e.a, b: e.b, rel: e.rel });
+  if (!opts.local) {
+    const cats = { code: gf.code, run: gf.runs, result: gf.results, asset: gf.results, data: gf.results, doc: gf.results, config: gf.settings };
+    const expand = it => gf.files || gf.expanded.includes(it.id);
+    for (const it of M.items) {
+      if (!ids.has(it.id) || it.ref || it.shared || !expand(it)) continue;
+      for (const e of it.ev) {
+        const n = IX.node.get(e.id); if (!n || !cats[n.kind]) continue;
+        const sid = 'sat:' + e.id + '@' + it.id;
+        nodes.push({ id: sid, sat: true, parent: it.id, r: 6, kind: 'file', status: nodeFlag(e.id) || 'ok', imp: 0, label: n.kind === 'run' ? n.name : basename(pathOf(n)), title: pathOf(n), nid: e.id, tint: css(n.kind === 'code' || n.kind === 'config' || n.kind === 'run' ? '--layer-code-t' : '--layer-result-t') });
+        edges.push({ a: it.id, b: sid, sat: true });
+      }
+    }
+    if (gf.unused && !allowed) {
+      for (const n of M.unused.slice(0, 60)) nodes.push({ id: 'sat:u:' + n.id, sat: true, parent: null, r: 6, kind: 'file', status: 'ok', imp: 0, label: basename(pathOf(n)), title: pathOf(n), nid: n.id, tint: css('--sunken') });
+    }
+  }
+  return { nodes, edges };
+}
+function itemTip(n) {
+  if (n.sat) return h('div', null, h('b', { class: 'mono' }, n.title), h('div', { class: 'muted' }, n.nid && (IX.node.get(n.nid) ? FILE_WORD[IX.node.get(n.nid).kind] || 'A file' : 'A file') + ' behind an item'));
+  const it = n.item;
+  return h('div', null, h('div', { class: 'tt' }, it.title), h('div', { class: 'muted' }, kindLabel(it)), h('div', { class: 'ttr' }, chip(it.status)), h('div', { class: 'muted' }, plural(it.links, 'connection')),
+    !it.ref && !it.shared && it.ev.length ? h('div', { class: 'muted' }, 'Double-click to show the files behind it.') : null);
+}
+function ensureGraph() {
+  if (GR.el) return;
+  GR.host = h('div', { class: 'ghost' });
+  GR.pos = new Map(lsGet(UIKEY + '.pos', []).map(p => [p[0], { x: p[1], y: p[2] }]));
+  GR.g = makeGraph(GR.host, {
+    pos: GR.pos, dimOk: false, tooltip: itemTip,
+    onClick: (id, ev) => { if (!id) { S.sel = null; renderRight(); return; } S.sel = id; openItem(id, true); },
+    onHover: id => { S.hoverItem = id; clearTimeout(GR.ht); GR.ht = setTimeout(renderRight, 70); },
+    onExpand: id => { const a = S.gf.expanded; const i = a.indexOf(id); if (i >= 0) a.splice(i, 1); else a.push(id); persistUI(); GR.sig = ''; syncGraph(); },
+    onClickSat: n => { if (n.nid) openNode(n.nid); },
+    onPin: p => lsSet(UIKEY + '.pos', [...p].map(([k, v]) => [k, Math.round(v.x), Math.round(v.y)])),
+  });
+  GR.el = h('div', { class: 'gview' });
+}
+function syncGraph() {
+  if (!GR.g) return;
+  const spec = graphSpec(), sig = JSON.stringify([spec.nodes.map(n => n.id), spec.edges.length, S.gf.mode, S.gf.depth, S.gf.mode === 'around' ? S.sel : '']);
+  GR.g.dimOnly(S.gf.onlyChanged);
+  if (sig !== GR.sig) { GR.sig = sig; GR.g.setData(spec); } else GR.g.patch(spec.nodes);
+  GR.g.setSelected(S.sel);
+}
+function pageGraph() {
+  ensureGraph();
+  const gf = S.gf, tb = h('div', { class: 'gtools' },
+    h('input', { type: 'search', id: 'gfind', placeholder: 'Find an item', 'aria-label': 'Find an item', oninput: ev => gFind(ev.target.value), onkeydown: ev => { if (ev.key === 'Enter') gFind(ev.target.value, true); } }),
+    h('div', { class: 'seg' }, h('button', { class: 'btn', 'aria-pressed': String(gf.mode === 'whole'), onclick: () => { gf.mode = 'whole'; persistUI(); renderPage(); } }, 'Whole paper'),
+      h('button', { class: 'btn', 'aria-pressed': String(gf.mode === 'around'), title: S.sel ? null : 'Pick an item first', onclick: () => { if (!S.sel) { toast('Click an item first, then choose Around this item.'); return; } gf.mode = 'around'; persistUI(); renderPage(); } }, 'Around this item')),
+    gf.mode === 'around' ? h('label', { class: 'depth' }, 'Depth ', h('input', { type: 'range', min: '1', max: '3', value: String(gf.depth), 'aria-label': 'How many steps away to show', oninput: ev => { gf.depth = +ev.target.value; ev.target.nextSibling.textContent = gf.depth; persistUI(); syncGraph(); } }), h('span', null, String(gf.depth))) : null,
+    h('button', { class: 'btn', id: 'btn-filters', 'aria-haspopup': 'true', onclick: ev => filtersPop(ev.currentTarget) }, 'Filters'),
+    h('button', { class: 'btn', 'aria-pressed': String(S.listView), onclick: () => { S.listView = !S.listView; renderPage(); } }, 'List view'),
+    h('button', { class: 'btn', onclick: () => GR.g.rearrange() }, 'Re-arrange'),
+    h('span', { class: 'grow' }),
+    h('button', { class: 'btn', 'aria-label': 'Zoom out', onclick: () => GR.g.zoomBy(1 / 1.25) }, '−'), h('button', { class: 'btn', 'aria-label': 'Zoom in', onclick: () => GR.g.zoomBy(1.25) }, '+'),
+    h('button', { class: 'btn', onclick: () => GR.g.fit() }, 'Fit'));
+  const legend = h('div', { class: 'glegend' },
+    h('div', null, Object.values(ST).map(s => h('span', { class: 'lg ' + s.cls }, s.glyph + ' ' + s.word))),
+    h('div', { class: 'muted' }, 'Circle size = how many things connect to it. Double-click an item to see the files behind it.'),
+    S.sel ? h('div', null, h('span', { class: 'lg up' }, '▲ Rests on (blue, solid)'), h('span', { class: 'lg down' }, '▼ Supports (orange, dashed)')) : null);
+  const wrap = h('div', { class: 'gpage' }, tb);
+  if (S.listView) wrap.append(graphList());
+  else {
+    GR.el.replaceChildren(GR.host, legend);
+    wrap.append(GR.el);
+    if (!M.items.filter(i => !i.ref).length) GR.el.append(h('div', { class: 'gmsg' }, 'There is nothing to draw yet. Lemmata draws your paper\'s figures, tables and sections once it has read a paper or a README.'));
+  }
+  return wrap;
+}
+function afterGraphAttach() { if (S.listView || !GR.g) return; syncGraph(); GR.g.resize(); }
+function gFind(q, enter) {
+  q = q.trim().toLowerCase(); if (!q || !GR.g) return;
+  const it = M.items.find(i => i.title.toLowerCase().includes(q) && GR.g.visible().includes(i.id));
+  if (it && enter) { GR.g.focusOn(it.id); S.sel = it.id; renderRight(); }
+  else if (it) GR.g.focusOn(it.id);
+}
+function filtersPop(anchor) {
+  const gf = S.gf;
+  const cb = (key, label, sub) => h('label', { class: 'fcb' + (sub ? ' sub' : '') }, h('input', { type: 'checkbox', checked: gf[key] ? '' : null, onchange: ev => { gf[key] = ev.target.checked; persistUI(); GR.sig = ''; syncGraph(); if (key === 'files') filtersPop(anchor), filtersPop(anchor); } }), ' ' + label);
+  const m = h('div', { id: 'menu', class: 'menu fpop', role: 'dialog', 'aria-label': 'Filters' },
+    h('div', { class: 'mhead' }, 'Show'), cb('sections', 'Sections'), cb('floats', 'Figures, tables and equations'), cb('shared', 'Shared code and data'), cb('refs', 'References'),
+    cb('files', 'Files behind items'), gf.files ? [cb('code', 'Code', true), cb('runs', 'Runs', true), cb('results', 'Results and data', true), cb('settings', 'Settings', true)] : null,
+    cb('unused', 'Files not used by the paper'),
+    h('div', { class: 'msep' }), cb('onlyChanged', 'Only things that changed'));
+  const old = $('#menu'); if (old) { old.remove(); if (old.classList.contains('fpop') && old._anchor === anchor && !m._again) { return; } }
+  m._anchor = anchor; document.body.append(m);
+  const r = anchor.getBoundingClientRect(); m.style.left = Math.min(r.left, innerWidth - 300) + 'px'; m.style.top = (r.bottom + 4) + 'px';
+  const off = ev => { if (!m.contains(ev.target) && ev.target !== anchor) { m.remove(); document.removeEventListener('mousedown', off, true); } };
+  setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+}
+function graphList() {
+  const rows = M.items.filter(i => !i.ref || S.gf.refs);
+  const key = S.listSort || 'imp';
+  rows.sort((a, b) => key === 'title' ? (a.title < b.title ? -1 : 1) : key === 'status' ? ST[b.status].rank - ST[a.status].rank : b.links - a.links);
+  const th = (k, l) => h('th', { scope: 'col' }, h('button', { class: 'linkbtn', onclick: () => { S.listSort = k; renderPage(true); } }, l));
+  return h('div', { class: 'glist' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, th('title', 'Item'), h('th', { scope: 'col' }, 'Kind'), th('status', 'Status'), th('imp', 'Connections'))),
+    h('tbody', null, rows.map(i => h('tr', null, h('td', null, h('button', { class: 'linkbtn', onclick: ev => openItem(i.id, ev.metaKey || ev.ctrlKey) }, i.title)), h('td', null, kindLabel(i)), h('td', null, chip(i.status)), h('td', { class: 'mono' }, i.links))))));
+}
+
+/* ======================================================================
+   7. SHELL: ribbon, explorer, tabs, right sidebar, status bar, palette, intro
+   ====================================================================== */
+Object.assign(S, { outline: [], openCard: {}, openEv: {}, hoverItem: null, ckFilter: 'all', focusFinding: null, showExample: false, listSort: 'imp' });
+function persistUI() {
+  lsSet(UIKEY, { tabs: S.tabs.map(t => ({ k: t.k, id: t.id })), active: S.active, leftOpen: S.leftOpen, rightOpen: S.rightOpen, leftW: S.leftW, rightW: S.rightW, gf: S.gf, treeOpen: S.treeOpen });
+}
+function restoreUI() {
+  const u = lsGet(UIKEY, null);
+  if (u) {
+    Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
+    if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+  }
+  if (!S.tabs.length) { S.tabs = [{ k: 'changes' }, { k: 'graph' }]; S.active = 0; }
+  if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
+  if (innerWidth < 1280 && !u) S.rightOpen = false;
+}
+function pruneTabs() {
+  const keep = S.tabs.filter(t => (t.k === 'item' ? M.byId.has(t.id) : t.k === 'node' ? IX.node.has(t.id) : true));
+  if (keep.length !== S.tabs.length) { const cur = S.tabs[S.active]; S.tabs = keep.length ? keep : [{ k: 'changes' }]; S.active = Math.max(0, S.tabs.indexOf(cur)); }
+}
+const tabKey = t => t.k + (t.id ? '|' + t.id : '');
+function tabTitle(t) {
+  switch (t.k) {
+    case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
+    case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History';
+    case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
+    case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
+  }
+  return '';
+}
+const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }' };
+function openTab(k, id, opts) {
+  opts = opts || {};
+  const key = tabKey({ k, id });
+  let i = S.tabs.findIndex(t => tabKey(t) === key);
+  if (i < 0) {
+    if (opts.replace && S.active >= 0 && S.tabs[S.active] && ['item', 'node'].includes(S.tabs[S.active].k)) { S.tabs[S.active] = { k, id }; i = S.active; }
+    else {
+      S.tabs.push({ k, id });
+      if (S.tabs.length > 8) { const act = S.tabs[S.tabs.length - 1]; const cand = S.tabs.filter(t => t !== act).sort((a, b) => (a.used || 0) - (b.used || 0))[0]; S.tabs.splice(S.tabs.indexOf(cand), 1); }
+      i = S.tabs.findIndex(t => tabKey(t) === key);
+    }
+  }
+  activate(i);
+}
+function openItem(id, newTab) {
+  const it = M.byId.get(id); if (!it) return;
+  S.sel = id; openTab('item', id, { replace: !newTab });
+}
+function openNode(nid) {
+  const it = itemFor(nid);
+  if (it) { S.openEv[nid] = true; openItem(it.id, false); setTimeout(() => { const el = $('[data-ev="' + CSS.escape(nid) + '"]'); if (el) el.scrollIntoView({ block: 'center' }); }, 30); }
+  else openTab('node', nid, { replace: true });
+}
+function activate(i, noNav) {
+  S.active = i; const t = S.tabs[i]; t.used = Date.now();
+  if (t.k === 'item') S.sel = t.id;
+  if (!noNav) { S.nav = S.nav.slice(0, S.navPos + 1); S.nav.push(tabKey(t)); S.navPos = S.nav.length - 1; }
+  persistUI(); const pgel = $('#page'); if (pgel && !noNav) pgel.scrollTop = 0; renderAll();
+}
+function closeTab(i) {
+  S.tabs.splice(i, 1);
+  if (!S.tabs.length) S.tabs.push({ k: 'changes' });
+  S.active = Math.min(S.active > i ? S.active - 1 : S.active, S.tabs.length - 1);
+  activate(S.active, true);
+}
+function navGo(d) {
+  const p = S.navPos + d; if (p < 0 || p >= S.nav.length) return;
+  S.navPos = p; const key = S.nav[p]; const i = S.tabs.findIndex(t => tabKey(t) === key);
+  if (i >= 0) activate(i, true); else { const [k, id] = key.split('|'); S.tabs.push({ k, id }); activate(S.tabs.length - 1, true); }
+}
+
+/* ---------- shell DOM ---------- */
+function buildShell() {
+  const app = $('#app');
+  const rb = (id, glyph, label, fn, cls) => h('button', { class: 'rbtn ' + (cls || ''), id, 'aria-label': label, title: label, onclick: fn }, glyph);
+  app.append(
+    h('nav', { id: 'ribbon', 'aria-label': 'Main' },
+      rb('rb-changes', '◔', 'Changes', () => openTab('changes')), rb('rb-search', '⌕', 'Search (Ctrl+O)', () => quickSwitcher()), rb('rb-graph', '◉', 'Graph', () => openTab('graph')), rb('rb-cmd', '⌘', 'Command palette (Ctrl+P)', () => palette()),
+      h('span', { class: 'grow' }),
+      rb('rb-sync', '⟳', 'Sync now', () => syncNow()), rb('rb-help', '?', 'How Lemmata works', () => intro(true)), rb('rb-menu', '⋯', 'Project menu', ev => projectMenu(ev.currentTarget))),
+    h('aside', { id: 'left', 'aria-label': 'Explorer' },
+      h('div', { class: 'lsearch' }, h('input', { type: 'search', id: 'lsearch', placeholder: 'Search items, files and checks', 'aria-label': 'Search items, files and checks', oninput: ev => { S.query = ev.target.value; renderLeft(); } })),
+      h('div', { id: 'lefttree' })),
+    h('div', { class: 'resizer', id: 'lres', role: 'separator', 'aria-label': 'Resize explorer', onmousedown: ev => startResize(ev, 'left') }),
+    h('main', { id: 'centre' }, h('div', { id: 'banner', class: 'hidden', role: 'alert' }), h('div', { id: 'tabbar', role: 'tablist' }), h('div', { id: 'page', tabindex: '-1' })),
+    h('div', { class: 'resizer', id: 'rres', role: 'separator', 'aria-label': 'Resize side panel', onmousedown: ev => startResize(ev, 'right') }),
+    h('aside', { id: 'right', 'aria-label': 'Links for the open item' }),
+    h('footer', { id: 'status' }),
+    h('div', { id: 'extras' }));
+  layoutShell();
+}
+function renderShellExtras() {
+  const ex = clear($('#extras'));
+  const hc = hubControls();
+  if (HUB_ON && !READONLY && hc.zipInput) ex.append(h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }));
+}
+function layoutShell() {
+  const app = $('#app');
+  app.style.setProperty('--lw', S.leftOpen ? S.leftW + 'px' : '0px'); app.style.setProperty('--rw', S.rightOpen ? S.rightW + 'px' : '0px');
+  app.classList.toggle('noleft', !S.leftOpen); app.classList.toggle('noright', !S.rightOpen);
+}
+function toggleSide(which) { if (which === 'left') S.leftOpen = !S.leftOpen; else S.rightOpen = !S.rightOpen; layoutShell(); persistUI(); setTimeout(() => GR.g && GR.g.resize(), 160); }
+function startResize(ev, which) {
+  ev.preventDefault(); const x0 = ev.clientX, w0 = which === 'left' ? S.leftW : S.rightW;
+  const mv = e => { const d = e.clientX - x0; if (which === 'left') S.leftW = Math.max(220, Math.min(380, w0 + d)); else S.rightW = Math.max(260, Math.min(420, w0 - d)); layoutShell(); };
+  const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); persistUI(); if (GR.g) GR.g.resize(); };
+  window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+}
+function projectMenu(anchor) {
+  const hc = hubControls();
+  const es = [{ head: S.project ? S.project.name : PRODUCT }];
+  if (!READONLY) es.push({ label: 'Export report (HTML)', hint: 'A single file you can share', href: apiUrl('/api/export'), download: true });
+  es.push({ label: 'Sync now', fn: () => syncNow(), disabled: READONLY });
+  if (hc.menu.length) { es.push({ sep: true }); hc.menu.forEach(m => es.push(m)); }
+  es.push({ sep: true }, { label: 'Show "How Lemmata works"', fn: () => intro(true) }, { label: S.leftOpen ? 'Hide explorer' : 'Show explorer', fn: () => toggleSide('left') }, { label: S.rightOpen ? 'Hide side panel' : 'Show side panel', fn: () => toggleSide('right') });
+  menuPop(anchor, es, { up: true, side: true });
+}
+
+/* ---------- left sidebar ---------- */
+const sgl = st => h('span', { class: 'sg ' + st, 'aria-hidden': 'true' }, ST[st].glyph);
+function treeRow(depth, o) {
+  const row = h('div', { class: 'trow' + (o.active ? ' active' : '') + (o.cls ? ' ' + o.cls : ''), style: { paddingLeft: (8 + depth * 14) + 'px' }, role: 'treeitem', 'aria-expanded': o.open == null ? null : String(o.open), title: o.tooltip || null },
+    o.caret ? h('button', { class: 'caret', 'aria-label': o.open ? 'Collapse' : 'Expand', onclick: ev => { ev.stopPropagation(); o.toggle(); } }, o.open ? '▾' : '▸') : h('span', { class: 'caret ph' }),
+    o.status ? sgl(o.status) : null,
+    h('button', { class: 'tlabel' + (o.serif ? ' serif' : ''), onclick: ev => o.click(ev) }, h('span', { class: 'tt1' }, o.title), o.sub ? h('span', { class: 'tsub' }, o.sub) : null),
+    o.roll ? h('span', { class: 'roll', title: o.roll + ' items need a second look' }, '↻ ' + o.roll) : null,
+    o.right ? h('span', { class: 'tkind' }, o.right) : null);
+  return row;
+}
+function secHead(key, title, count, open) {
+  return h('div', { class: 'lsec' }, h('button', { class: 'lsh', 'aria-expanded': String(open), onclick: () => { S.treeOpen[key] = !open; persistUI(); renderLeft(); } }, h('span', { class: 'caret' }, open ? '▾' : '▸'), title), count != null ? h('span', { class: 'lcount' }, count) : null);
+}
+function navRow(label, glyph, onclick, badge, active) {
+  return h('button', { class: 'navrow' + (active ? ' active' : ''), onclick }, h('span', { class: 'ng', 'aria-hidden': 'true' }, glyph), h('span', null, label), badge ? h('span', { class: 'badge', title: badge + ' to look at' }, badge) : null);
+}
+function activeIs(k, id) { const t = S.tabs[S.active]; return !!t && t.k === k && (id == null || t.id === id); }
+function rollUp(it) {
+  let n = 0; const seen = new Set();
+  const walk = id => { for (const x of M.nbOut.get(id) || []) if (x.rel === 'contains' && !seen.has(x.id)) { seen.add(x.id); const c = M.byId.get(x.id); if (c && (c.status === 'look' || c.status === 'fix')) n++; walk(x.id); } };
+  walk(it.id); return n;
+}
+function paperRows(parent, depth, out, visited) {
+  const kids = (M.nbOut.get(parent.id) || []).filter(x => x.rel === 'contains').map(x => M.byId.get(x.id)).filter(c => c && !c.ref && M.parent.get(c.id) === parent.id).sort(itemSort);
+  for (const c of kids) {
+    if (visited.has(c.id)) continue; visited.add(c.id);
+    const sub = (M.nbOut.get(c.id) || []).some(x => x.rel === 'contains');
+    const open = S.treeOpen['p:' + c.id] != null ? S.treeOpen['p:' + c.id] : true;
+    if (S.onlyLook && c.status !== 'look' && c.status !== 'fix' && !rollUp(c)) continue;
+    out.push(treeRow(depth, { title: c.short, serif: c.kind === 'section', status: c.status, caret: sub, open, toggle: () => { S.treeOpen['p:' + c.id] = !open; renderLeft(); }, click: ev => openItem(c.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', c.id), roll: sub && !open ? rollUp(c) || null : null, tooltip: ST[c.status].word + ' · ' + c.title }));
+    if (sub && open) paperRows(c, depth + 1, out, visited);
+  }
+}
+function paperSection() {
+  const open = S.treeOpen.paper != null ? S.treeOpen.paper : true, out = [];
+  const real = M.items.filter(i => !i.ref && !i.shared && !i.readme);
+  out.push(secHead('paper', 'Paper', null, open));
+  if (!open) return out;
+  const body = h('div', { class: 'tree', role: 'tree' });
+  if (M.noPaper) {
+    body.append(h('div', { class: 'lempty' }, 'No paper connected yet.', h('div', null, h('button', { class: 'linkbtn', onclick: ev => projectMenu($('#rb-menu')) }, 'Connect your paper'))));
+    for (const it of M.items.filter(i => i.readme).sort((a, b) => cmpNum(a.title, b.title))) body.append(treeRow(0, { title: it.short, status: it.status, click: ev => openItem(it.id), active: activeIs('item', it.id), right: it.kindWord }));
+  } else {
+    const th = real.find(i => i.kind === 'thesis'); const visited = new Set();
+    if (th) body.append(treeRow(0, { title: 'Main claim', status: th.status, click: ev => openItem(th.id), active: activeIs('item', th.id) }));
+    const rqs = real.filter(i => i.kind === 'rq').sort((a, b) => cmpNum(a.node.name, b.node.name));
+    if (rqs.length) {
+      const o = S.treeOpen.rqs != null ? S.treeOpen.rqs : true; body.append(treeRow(0, { title: 'Research questions', caret: true, open: o, toggle: () => { S.treeOpen.rqs = !o; renderLeft(); }, click: () => { S.treeOpen.rqs = !o; renderLeft(); }, roll: !o ? rqs.filter(r => r.status === 'look' || r.status === 'fix').length || null : null }));
+      if (o) rqs.forEach(r => body.append(treeRow(1, { title: r.title, status: r.status, click: ev => openItem(r.id), active: activeIs('item', r.id) })));
+    }
+    const tops = real.filter(i => i.kind === 'section' && (!M.parent.get(i.id) || (M.byId.get(M.parent.get(i.id)) || {}).kind === 'thesis')).sort(itemSort);
+    let appDiv = false;
+    for (const s of tops) {
+      if (s.node.attrs.in_appendix && !appDiv) { appDiv = true; body.append(h('div', { class: 'ldiv' }, 'Appendix')); visited.add('x'); }
+      const sub = (M.nbOut.get(s.id) || []).some(x => x.rel === 'contains'), o = S.treeOpen['p:' + s.id] != null ? S.treeOpen['p:' + s.id] : true;
+      if (S.onlyLook && s.status !== 'look' && s.status !== 'fix' && !rollUp(s)) continue;
+      const rows = [];
+      rows.push(treeRow(0, { title: s.short, serif: true, status: s.status, caret: sub, open: o, toggle: () => { S.treeOpen['p:' + s.id] = !o; renderLeft(); }, click: ev => openItem(s.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', s.id), roll: sub && !o ? rollUp(s) || null : null, tooltip: ST[s.status].word + ' · ' + s.title }));
+      visited.add(s.id); if (sub && o) paperRows(s, 1, rows, visited);
+      rows.forEach(r => body.append(r));
+    }
+    const orphans = real.filter(i => ['figure', 'table', 'equation'].includes(i.kind) && !M.parent.get(i.id)).sort(itemSort);
+    if (orphans.length) { body.append(h('div', { class: 'ldiv' }, 'Other items')); orphans.forEach(c => body.append(treeRow(0, { title: c.short, status: c.status, click: ev => openItem(c.id), active: activeIs('item', c.id) }))); }
+    body.append(h('label', { class: 'lfoot' }, h('input', { type: 'checkbox', checked: S.onlyLook ? '' : null, onchange: ev => { S.onlyLook = ev.target.checked; renderLeft(); } }), ' Only things to look at'));
+  }
+  out.push(body); return out;
+}
+function startOf(n) { const t = (n.attrs || {}).started_at; return t ? dmon(t) + ' ' + t.slice(11, 16) : ''; }
+function experimentsSection() {
+  const open = S.treeOpen.exp != null ? S.treeOpen.exp : M.noPaper, out = [], runs = (S.graph.nodes || []).filter(n => n.kind === 'run');
+  out.push(secHead('exp', 'Experiments', runs.length || null, open));
+  if (!open) return out;
+  const body = h('div', { class: 'tree', role: 'tree' });
+  if (!runs.length) body.append(h('div', { class: 'lempty' }, 'No runs recorded yet. Lemmata finds runs from files like runs/train_main.json.'));
+  const groups = new Map();
+  for (const r of runs) { const ex = (IX.pout.get(r.id) || []).find(e => e.kind === 'executes'); const key = ex ? pathOf(IX.node.get(ex.to) || { name: ex.to }) : 'Other runs'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); }
+  for (const [k, rs] of groups) {
+    body.append(treeRow(0, { title: k === 'Other runs' ? k : 'Experiment: ' + basename(k), cls: 'grp', click: () => { }, tooltip: k }));
+    for (const r of rs) { const it = itemFor(r.id); body.append(treeRow(1, { title: r.name.replace(/^run\s+/, '') + (startOf(r) ? ' · ' + startOf(r) : ''), status: it ? it.status : null, click: () => openNode(r.id), tooltip: ((r.attrs || {}).command || '') + (startOf(r) ? ' — started ' + startOf(r) : '') })); }
+  }
+  out.push(body); return out;
+}
+function usedByText(nid) {
+  const its = (M.itemsOf.get(nid) || []).map(i => M.byId.get(i));
+  if (!its.length) return 'Not used by the paper';
+  if (its[0].shared) return 'Shared by ' + its[0].users.map(u => lead(M.byId.get(u))).slice(0, 3).join(' and ');
+  return 'Part of ' + lead(its[0]);
+}
+function codeSection() {
+  const open = S.treeOpen.code != null ? S.treeOpen.code : M.noPaper, out = [];
+  const codeRepos = new Set(((S.project && S.project.repos) || []).filter(r => r.role === 'code').map(r => r.id));
+  const files = (S.graph.nodes || []).filter(n => ['code', 'config', 'data', 'doc', 'result', 'asset'].includes(n.kind) && (codeRepos.size ? codeRepos.has(n.repo) : true));
+  out.push(secHead('code', 'Code', files.length || null, open));
+  if (!open) return out;
+  const body = h('div', { class: 'tree', role: 'tree' });
+  if (!files.length) body.append(h('div', { class: 'lempty' }, 'No code connected. Connect your code repo in the project menu.'));
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) { let d = root; const parts = pathOf(f).split('/'); for (const p of parts.slice(0, -1)) { if (!d.dirs.has(p)) d.dirs.set(p, { dirs: new Map(), files: [] }); d = d.dirs.get(p); } d.files.push(f); }
+  const draw = (d, depth, prefix) => {
+    for (const [name, sub] of [...d.dirs].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const key = 'c:' + prefix + name, o = !!S.treeOpen[key];
+      body.append(treeRow(depth, { title: name + '/', caret: true, open: o, toggle: () => { S.treeOpen[key] = !o; renderLeft(); }, click: () => { S.treeOpen[key] = !o; renderLeft(); }, cls: 'folder' }));
+      if (o) draw(sub, depth + 1, prefix + name + '/');
+    }
+    for (const f of d.files.sort((a, b) => (a.name < b.name ? -1 : 1))) body.append(treeRow(depth, { title: basename(pathOf(f)), sub: usedByText(f.id), click: () => openNode(f.id), active: activeIs('item', (itemFor(f.id) || {}).id) || activeIs('node', f.id), tooltip: pathOf(f) }));
+  };
+  draw(root, 0, '');
+  if (M.readmeOnly.length) { body.append(h('div', { class: 'ldiv' }, 'Listed in README, not found in the paper')); M.readmeOnly.forEach(n => body.append(treeRow(0, { title: n.name, click: () => openTab('node', n.id, { replace: true }) }))); }
+  out.push(body); return out;
+}
+function searchResults() {
+  const q = S.query.trim().toLowerCase(), words = q.split(/\s+/);
+  const ok = s => words.every(w => s.toLowerCase().includes(w));
+  const rows = [];
+  for (const it of M.items) if ((!it.ref || S.gf.refs) && ok(it.title + ' ' + it.kindWord)) rows.push({ t: it.title, k: it.kindWord, st: it.status, fn: () => openItem(it.id) });
+  for (const n of S.graph.nodes) if (FILEK.has(n.kind) && ok(pathOf(n))) rows.push({ t: pathOf(n), k: FILE_WORD[n.kind].replace(/^An? /, ''), fn: () => openNode(n.id) });
+  for (const f of (S.findings && S.findings.findings) || []) { const s = findingSentence(f); if (ok(s)) rows.push({ t: s, k: 'Check', fn: () => { S.focusFinding = f.id; openTab('checks'); } }); }
+  const box = h('div', { class: 'tree' }, h('div', { class: 'ldiv' }, 'Results'));
+  if (!rows.length) box.append(h('div', { class: 'lempty' }, 'Nothing matches "' + S.query + '".'));
+  rows.slice(0, 50).forEach(r => box.append(treeRow(0, { title: r.t, status: r.st, right: r.k, click: () => { r.fn(); } })));
+  return box;
+}
+function renderLeft() {
+  const box = clear($('#lefttree'));
+  if (S.query.trim()) { box.append(searchResults()); return; }
+  const nCards = M.cards.filter(c => { const k = cardState(c).key; return k === 'look' || k === 'partial'; }).length;
+  const nChecks = ((S.findings && S.findings.findings) || []).length;
+  box.append(navRow('Changes', '◔', () => openTab('changes'), nCards || null, activeIs('changes')), paperSection(), experimentsSection(), codeSection(),
+    navRow('Checks', '!', () => openTab('checks'), nChecks || null, activeIs('checks')), navRow('History', '⚑', () => openTab('history'), null, activeIs('history')));
+}
+
+/* ---------- tab bar, page ---------- */
+function renderTabbar() {
+  const bar = clear($('#tabbar'));
+  bar.append(h('button', { class: 'tbtn', 'aria-label': 'Back', title: 'Back (Ctrl+[)', disabled: S.navPos <= 0, onclick: () => navGo(-1) }, '←'),
+    h('button', { class: 'tbtn', 'aria-label': 'Forward', title: 'Forward (Ctrl+])', disabled: S.navPos >= S.nav.length - 1, onclick: () => navGo(1) }, '→'),
+    h('button', { class: 'tbtn', 'aria-label': S.leftOpen ? 'Hide explorer' : 'Show explorer', title: 'Explorer (Ctrl+\\)', onclick: () => toggleSide('left') }, '☰'));
+  S.tabs.forEach((t, i) => {
+    bar.append(h('div', { class: 'tab' + (i === S.active ? ' on' : ''), role: 'tab', 'aria-selected': String(i === S.active) },
+      h('button', { class: 'tlink', onclick: () => activate(i), onauxclick: ev => { if (ev.button === 1) closeTab(i); }, title: tabTitle(t) }, h('span', { class: 'tg', 'aria-hidden': 'true' }, TAB_GLYPH[t.k]), ' ' + tabTitle(t)),
+      h('button', { class: 'tx', 'aria-label': 'Close ' + tabTitle(t), onclick: () => closeTab(i) }, '×')));
+  });
+  bar.append(h('button', { class: 'tbtn', 'aria-label': 'New tab', title: 'Open an item (Ctrl+O)', onclick: () => quickSwitcher() }, '+'), h('span', { class: 'grow' }),
+    h('button', { class: 'tbtn', 'aria-label': S.rightOpen ? 'Hide side panel' : 'Show side panel', title: 'Side panel (Ctrl+Shift+\\)', onclick: () => toggleSide('right') }, '◨'));
+}
+function renderPage(keepScroll) {
+  const pg = $('#page'), st = pg.scrollTop, t = S.tabs[S.active];
+  if (!t) return;
+  if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : '';
+  S.outline = [];
+  let el;
+  if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
+  else if (t.k === 'changes') el = pageChanges();
+  else if (t.k === 'graph') el = pageGraph();
+  else if (t.k === 'item') { const it = M.byId.get(t.id); el = it ? pageItem(it) : doc(h('div', { class: 'muted' }, 'This item is not in the project any more.')); }
+  else if (t.k === 'node') el = pageEvidence(t.id);
+  else if (t.k === 'checks') el = pageChecks();
+  else if (t.k === 'history') el = pageHistory();
+  pg.append(el);
+  if (t.k === 'graph') afterGraphAttach();
+  if (keepScroll) pg.scrollTop = st;
+  else if (t.k === 'checks' && S.focusFinding) { const f = $('#f-' + S.focusFinding.replace(/[^\w]/g, '_')); if (f) f.scrollIntoView({ block: 'center' }); }
+  renderOutlineSoon();
+}
+let outT = 0; function renderOutlineSoon() { cancelAnimationFrame(outT); outT = requestAnimationFrame(renderRight); }
+
+/* ---------- right sidebar ---------- */
+const REL_OUT = { contains: 'contains', answers: 'is answered in', refs: 'refers to', cites: 'cites', uses: 'uses' };
+const REL_IN = { contains: 'contains it', answers: 'asks what it answers', refs: 'refers to it', cites: 'cites it', uses: 'uses it' };
+const EV_REL = { result: 'built from', asset: 'shows', code: 'made by', run: 'run', config: 'settings', data: 'data', doc: 'document' };
+function focusItem() {
+  const t = S.tabs[S.active]; if (!t) return null;
+  if (t.k === 'item') return M.byId.get(t.id);
+  if (t.k === 'graph') return M.byId.get(S.hoverItem || S.sel) || null;
+  return null;
+}
+function acc(title, count, body, key) {
+  const open = S.treeOpen['r:' + key] !== false;
+  return h('section', { class: 'racc' }, h('button', { class: 'rh', 'aria-expanded': String(open), onclick: () => { S.treeOpen['r:' + key] = !open; renderRight(); } }, h('span', { class: 'caret' }, open ? '▾' : '▸'), title, count != null ? h('span', { class: 'rc' }, count) : null), open ? h('div', { class: 'rb' }, body) : null);
+}
+function rrow(label, rel, st, onclick, hov) {
+  return h('button', { class: 'rrow', onclick, onmouseenter: hov ? () => { if (RG.g) RG.g.hl(hov); } : null }, st ? sgl(st) : h('span', { class: 'sg ph' }), h('span', { class: 'rl' }, label), h('span', { class: 'rrel' }, rel));
+}
+function renderRight() {
+  const box = clear($('#right'));
+  if (RG.g) { RG.g.destroy(); RG.g = null; }
+  const it = focusItem();
+  if (!it) { box.append(h('div', { class: 'rempty' }, 'Open an item to see what it rests on and what rests on it.')); return; }
+  box.append(h('div', { class: 'rtitle' }, h('div', { class: 'serif rt' }, it.title), chip(it.status)));
+  const merge = (list, rels) => { const m = new Map(); for (const x of list) { if (M.byId.get(x.id).ref && !S.gf.refs) continue; const e = m.get(x.id) || { id: x.id, rels: [] }; const w = rels[x.rel]; if (!e.rels.includes(w)) e.rels.push(w); m.set(x.id, e); } return [...m.values()]; };
+  const outs = merge(M.nbOut.get(it.id) || [], REL_OUT), ins = merge(M.nbIn.get(it.id) || [], REL_IN);
+  const rest = [];
+  if (!it.shared) for (const e of it.ev.slice(0, 7)) { const n = IX.node.get(e.id); if (!n) continue; rest.push(rrow(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n), EV_REL[n.kind] || '', nodeFlag(e.id), () => openNode(e.id))); }
+  if (!it.shared && it.ev.length > 7) rest.push(h('div', { class: 'muted rmore' }, 'and ' + (it.ev.length - 7) + ' more behind this item'));
+  outs.slice(0, 10).forEach(x => { const o = M.byId.get(x.id); rest.push(rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id)); });
+  if (outs.length > 10) rest.push(h('div', { class: 'muted rmore' }, 'and ' + (outs.length - 10) + ' more'));
+  box.append(acc('Rests on', rest.length, rest.length ? rest : h('div', { class: 'muted' }, 'Nothing. This item stands on its own.'), 'rests'));
+  const sup = ins.slice(0, 12).map(x => { const o = M.byId.get(x.id); return rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id); });
+  box.append(acc('Supports', ins.length, sup.length ? sup : h('div', { class: 'muted' }, 'Nothing else rests on this yet.'), 'supports'));
+  const lg = h('div', { class: 'lghost' });
+  box.append(acc('Local graph', null, [lg, h('div', { class: 'lgctl' }, h('button', { class: 'btn sm', 'aria-label': 'Fewer steps', disabled: S.localDepth <= 1, onclick: () => { S.localDepth--; renderRight(); } }, '−'), h('span', null, 'Depth ' + S.localDepth), h('button', { class: 'btn sm', 'aria-label': 'More steps', disabled: S.localDepth >= 3, onclick: () => { S.localDepth++; renderRight(); } }, '+'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn', onclick: () => { S.gf.mode = 'around'; S.sel = it.id; openTab('graph'); } }, 'Open in Graph tab'))], 'local'));
+  const evs = relevantEvents(it).slice(0, 5);
+  box.append(acc('Recent changes', null, [evs.length ? evs.map(e => eventLine(e)) : h('div', { class: 'muted' }, 'Nothing has changed here since the start.'), h('button', { class: 'linkbtn', onclick: () => openTab('history') }, 'See all in History')], 'recent'));
+  if (S.outline.length && activeIs('item')) box.append(acc('Outline', null, S.outline.map(o => h('button', { class: 'rrow', onclick: () => { const el = $('#sec-' + o.id); if (el) el.scrollIntoView({ block: 'start' }); } }, h('span', { class: 'rl' }, o.label))), 'outline'));
+  // local graph canvas
+  if (lg.isConnected && S.treeOpen['r:local'] !== false) {
+    lg.style.height = '200px';
+    const spec = graphSpec({ local: it.id, depth: S.localDepth });
+    RG.g = makeGraph(lg, { mini: true, pos: new Map(), label: 'Local graph of the open item', onClick: id => { if (id) openItem(id, false); } });
+    RG.g.setData(spec); RG.g.setSelected(it.id); RG.g.resize(); RG.g.fit();
+  }
+}
+const RG = { g: null };
+
+/* ---------- status bar ---------- */
+function renderStatus() {
+  const bar = clear($('#status')); if (!bar) return;
+  const cp = S.alarms && S.alarms.checkpoint, hc = hubControls();
+  const nChecks = ((S.findings && S.findings.findings) || []).length;
+  bar.append(
+    h('button', { class: 'sbtn', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last checked: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
+    h('button', { class: 'sbtn', onclick: () => openTab('changes') }, plural(M.looked || 0, 'thing') + ' to look at'),
+    h('button', { class: 'sbtn', onclick: () => openTab('checks') }, plural(nChecks, 'check')),
+    h('span', { class: 'grow' }),
+    BUSY ? h('span', { class: 'sbusy', role: 'status' }, BUSY) : null,
+    !BUSY && hc.status ? h('span', { class: 'sbtn static' }, hc.status) : null,
+    !BUSY && S.project && !hc.status ? h('span', { class: 'sbtn static' }, 'Checked ' + agoText(S.project.scanned_at)) : null,
+    READONLY ? null : h('button', { class: 'sbtn', disabled: !!BUSY, onclick: () => syncNow() }, 'Sync now'));
+}
+
+/* ---------- palette / switcher / intro ---------- */
+function fuzzy(q, s) {
+  q = q.toLowerCase(); s = s.toLowerCase(); if (!q) return 1;
+  let i = 0, score = 0, last = -2;
+  for (let j = 0; j < s.length && i < q.length; j++) if (s[j] === q[i]) { score += (j === last + 1 ? 3 : 1) + (j === 0 || ' /-_.'.includes(s[j - 1]) ? 2 : 0); last = j; i++; }
+  return i === q.length ? score : -1;
+}
+function listModal(placeholder, makeList, hint) {
+  let sel = 0, list = [];
+  const prev = document.activeElement;
+  const input = h('input', { type: 'text', class: 'pinput', placeholder, 'aria-label': placeholder, autocomplete: 'off', spellcheck: 'false' });
+  const ul = h('div', { class: 'plist', role: 'listbox' });
+  const close = () => { scrim.remove(); if (prev && prev.focus) prev.focus(); };
+  const draw = () => {
+    list = makeList(input.value); sel = Math.min(sel, Math.max(0, list.length - 1)); clear(ul);
+    list.slice(0, 8).forEach((r, i) => ul.append(h('div', { class: 'pitem' + (i === sel ? ' on' : '') + (r.disabled ? ' off' : ''), role: 'option', 'aria-selected': String(i === sel), onmouseenter: () => { sel = i; paint(); }, onclick: () => run(r) },
+      r.st ? sgl(r.st) : null, h('span', { class: 'pl' }, r.label), r.disabled ? h('span', { class: 'prel' }, r.reason) : r.hint ? h('span', { class: 'prel' }, r.hint) : null)));
+    if (!list.length) ul.append(h('div', { class: 'lempty' }, 'Nothing matches.'));
+  };
+  const paint = () => $$('.pitem', ul).forEach((e, i) => { e.classList.toggle('on', i === sel); e.setAttribute('aria-selected', String(i === sel)); });
+  const run = r => { if (r.disabled) return; close(); r.run(); };
+  input.addEventListener('input', () => { sel = 0; draw(); });
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { ev.preventDefault(); close(); }
+    else if (ev.key === 'ArrowDown') { ev.preventDefault(); sel = Math.min(Math.min(list.length, 8) - 1, sel + 1); paint(); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); sel = Math.max(0, sel - 1); paint(); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); if (list[sel]) run(list[sel]); }
+  });
+  const scrim = h('div', { class: 'scrim top', onclick: ev => { if (ev.target === scrim) close(); } }, h('div', { class: 'palette', role: 'dialog', 'aria-modal': 'true', 'aria-label': placeholder }, input, ul, hint ? h('div', { class: 'phint' }, hint) : null));
+  document.body.append(scrim); draw(); input.focus();
+}
+function quickSwitcher() {
+  listModal('Open an item or a file', q => {
+    const rows = [];
+    for (const it of M.items) { if (it.ref && !S.gf.refs && !q) continue; const s = fuzzy(q, it.title); if (s >= 0) rows.push({ s: s + 5, label: it.title, hint: kindLabel(it), st: it.status, run: () => openItem(it.id) }); }
+    for (const n of S.graph.nodes) if (FILEK.has(n.kind)) { const s = fuzzy(q, pathOf(n)); if (s >= 0) rows.push({ s, label: pathOf(n), hint: usedByText(n.id), run: () => openNode(n.id) }); }
+    return rows.sort((a, b) => b.s - a.s);
+  }, '↑↓ to move · Enter to open · Esc to close');
+}
+function currentItemCmd(state) {
+  const it = focusItem();
+  return it && !it.shared ? () => setTriageMany(itemTargets(it), state, noteOf(itemTargets(it))) : null;
+}
+function palette() {
+  const it = S.tabs[S.active] && S.tabs[S.active].k === 'item' ? M.byId.get(S.tabs[S.active].id) : null;
+  const cmds = [
+    { label: 'Go to Changes', run: () => openTab('changes') }, { label: 'Go to Graph', run: () => openTab('graph') }, { label: 'Go to Checks', run: () => openTab('checks') }, { label: 'Go to History', run: () => openTab('history') },
+    { label: 'Open item…', hint: 'Ctrl+O', run: () => quickSwitcher() },
+    { label: 'Mark everything as looked at', run: () => markAllDialog(), disabled: READONLY, reason: 'Read-only snapshot' },
+    { label: 'Mark this item as Looks fine', run: () => setTriageMany(itemTargets(it), 'reviewed', noteOf(itemTargets(it))), disabled: !it || READONLY, reason: it ? 'Read-only snapshot' : 'No item open' },
+    { label: 'Mark this item as Needs fixing', run: () => setTriageMany(itemTargets(it), 'needs_fixing', noteOf(itemTargets(it))), disabled: !it || READONLY, reason: it ? 'Read-only snapshot' : 'No item open' },
+    { label: 'Ignore this item', run: () => setTriageMany(itemTargets(it), 'ignored', noteOf(itemTargets(it))), disabled: !it || READONLY, reason: it ? 'Read-only snapshot' : 'No item open' },
+    { label: 'Sync now', run: () => syncNow(), disabled: READONLY, reason: 'Read-only snapshot' },
+    { label: 'Show files behind items', run: () => { S.gf.files = true; persistUI(); GR.sig = ''; openTab('graph'); } },
+    { label: 'Toggle left sidebar', run: () => toggleSide('left') }, { label: 'Toggle right sidebar', run: () => toggleSide('right') },
+    { label: 'Export report (HTML)', run: () => { location.href = apiUrl('/api/export'); }, disabled: READONLY, reason: 'Read-only snapshot' },
+    { label: 'How Lemmata works', run: () => intro(true) },
+  ];
+  listModal('Type a command or an item', q => cmds.map(c => ({ ...c, s: fuzzy(q, c.label) })).filter(c => c.s >= 0).sort((a, b) => b.s - a.s), '↑↓ to move · Enter to run · Esc to close');
+}
+function intro(force) {
+  if (!force && lsGet('lemmata.seen_intro', false)) return;
+  let step = 0;
+  const body = h('div', { class: 'intro' }), dots = h('div', { class: 'muted idots' });
+  const acts = h('div', { class: 'acts' });
+  const done = (go) => { lsSet('lemmata.seen_intro', true); scrim.remove(); document.removeEventListener('keydown', onKey, true); if (go) openTab('changes'); };
+  const draw = () => {
+    clear(body).append(h('h3', { class: 'serif' }, T.intro[step][0]), h('p', null, T.intro[step][1]));
+    clear(dots).append(step + 1 + ' of 3');
+    clear(acts).append(h('button', { class: 'linkbtn', onclick: () => done(false) }, 'Skip'), h('span', { class: 'grow' }),
+      step ? h('button', { class: 'btn', onclick: () => { step--; draw(); } }, 'Back') : null,
+      step < 2 ? h('button', { class: 'btn primary', onclick: () => { step++; draw(); } }, 'Next') : h('button', { class: 'btn primary', onclick: () => done(true) }, 'Show me what changed'));
+  };
+  const onKey = ev => { if (ev.key === 'Escape') done(false); };
+  document.addEventListener('keydown', onKey, true);
+  const scrim = h('div', { class: 'scrim' }, h('div', { class: 'modal introm', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'How Lemmata works' }, body, dots, acts));
+  document.body.append(scrim); draw();
+}
+
+/* ---------- keys ---------- */
+const typing = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+let gSeq = 0;
+document.addEventListener('keydown', ev => {
+  const mod = ev.metaKey || ev.ctrlKey, k = ev.key;
+  if (mod && !ev.altKey) {
+    if ((k === 'p' || k === 'P') && !ev.shiftKey) { ev.preventDefault(); palette(); }
+    else if (k === 'o' || k === 'O') { ev.preventDefault(); quickSwitcher(); }
+    else if (k === '\\') { ev.preventDefault(); toggleSide(ev.shiftKey ? 'right' : 'left'); }
+    else if (k === '[') { ev.preventDefault(); navGo(-1); }
+    else if (k === ']') { ev.preventDefault(); navGo(1); }
+    else if (k === 'w' || k === 'W') { ev.preventDefault(); closeTab(S.active); }
+    else if (/^[1-9]$/.test(k) && S.tabs[+k - 1]) { ev.preventDefault(); activate(+k - 1); }
+    return;
+  }
+  if (ev.altKey || typing(ev.target) || document.querySelector('.scrim')) return;
+  const t = S.tabs[S.active], recent = Date.now() - gSeq < 900;
+  if (k === '/' && t && t.k === 'graph') { ev.preventDefault(); const f = $('#gfind'); if (f) f.focus(); }
+  else if (k === '?') intro(true);
+  else if (k === 'g') { if (recent) { gSeq = 0; openTab('graph'); } else gSeq = Date.now(); }
+  else if (k === 'c' && recent) { gSeq = 0; openTab('changes'); }
+});
+
+/* ======================================================================
+   8. BOOT
+   ====================================================================== */
+function renderAll() {
+  renderLeft(); renderTabbar(); renderPage(true); renderStatus(); renderBanner();
+  document.title = (S.project ? S.project.name + ' – ' : '') + PRODUCT;
+}
+function renderBanner() {
+  const b = $('#banner'); if (!b) return; clear(b);
+  const msg = READONLY ? 'Read-only snapshot from ' + dmon(SNAP.exported_at || '') + '. You can look around but not change anything.' : null;
+  if (S.error && S.graph && S.graph.nodes.length) { b.classList.remove('hidden'); b.className = 'err'; b.append('Something broke on our side. Your files and marks are unchanged. ', h('button', { class: 'linkbtn', onclick: () => loadAll() }, 'Try again')); return; }
+  if (msg) { b.classList.remove('hidden'); b.className = 'info'; b.append(msg); } else b.classList.add('hidden');
+}
+async function loadAll() {
+  try {
+    const [project, graph, events, findings, alarms, checkpoints, triage] = await Promise.all(
+      ['project', 'graph', 'events', 'findings', 'alarms', 'checkpoints', 'triage'].map(p => apiGet('/api/' + p)));
+    Object.assign(S, { project, graph, events, findings, alarms, checkpoints, triage, error: null, loading: false });
+  } catch (e) {
+    S.loading = false; S.error = e.message; if (!S.graph) S.graph = { nodes: [], edges: [] };
+  }
+  rebuildIndex(); pruneTabs();
+  if (!S.hadGf && !S.gfAuto) { S.gfAuto = true; if (M.items.filter(i => i.shared).length > 12) { S.gf.shared = false; GR.sig = ''; } }
+  const first = !S.rendered; S.rendered = true;
+  renderAll(); renderShellExtras();
+  if (first) { persistUI(); }
+  prefetchCauses();
+}
+async function prefetchCauses() {
+  let any = false;
+  for (const g of (S.alarms && S.alarms.groups) || []) {
+    const cfg = g.changed.filter(c => (IX.node.get(c.node_id) || {}).kind === 'config');
+    if (g.changed.length === 1 && cfg.length === 1 && !S.an[analysisKey(g.id, cfg[0].node_id)]) { await ensureAnalysis(g.id, cfg[0].node_id); any = true; }
+  }
+  if (any && S.tabs[S.active] && S.tabs[S.active].k === 'changes') renderPage(true);
+  else if (any) renderRight();
+}
+let refreshBusy = false;
+async function autoRefreshTick() {
+  if (READONLY || refreshBusy || document.hidden || S.loading || !S.project) return;
+  if (document.querySelector('.scrim') || typing(document.activeElement)) return;
+  refreshBusy = true;
+  try {
+    const p = await apiGet('/api/project');
+    if (p.scanned_at && p.scanned_at !== S.project.scanned_at) { await loadAll(); toast('Updated. Lemmata found new changes.'); }
+  } catch (e) { /* server briefly busy: try again next tick */ }
+  refreshBusy = false;
+}
+function boot() {
+  restoreUI();
+  S.graph = { nodes: [], edges: [] }; rebuildIndex();
+  buildShell();
+  renderAll();
+  detectHub().then(loadAll).then(() => {
+    if (!READONLY) { setInterval(autoRefreshTick, 5000); document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); }); }
+    intro(false);
+  });
 }
 boot();

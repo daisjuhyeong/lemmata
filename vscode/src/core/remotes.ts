@@ -26,12 +26,15 @@ export function parseGitConfigRemotes(out: string): string[] {
 }
 
 export interface FolderRemotes { key: string; remotes: string[] }
-export interface Binding { project: HubProject; folders: { code?: string; paper?: string } }
+export interface Binding { project: HubProject; folders: { code?: string; paper?: string }; subdirs: { paper?: string } }
 
 /**
  * Match workspace folders to hub projects.
  *  - a github remote equal to project.code_repo binds the folder as the project's "code" repo;
- *  - an Overleaf remote equal to project.paper_source.project_id binds it as "paper";
+ *  - paper, project.paper_source.kind "github": a folder whose remote equals paper_source.repo binds as "paper"
+ *    (its own repo; or, when that repo is the code repo, the code folder again). With paper_source.subdir the hub path
+ *    paper/<rel> maps to <folder>/<subdir>/<rel> (`subdirs.paper`);
+ *  - paper, kind "overleaf" (only data from an old setup): a git.overleaf.com remote equal to project_id binds as "paper";
  *  - `override` (setting lemmata.project) restricts the result to that project id.
  * Returns one binding per project that has at least one matching folder; with an override, a binding is returned even
  * when no folder matches (the panel still works, nothing is mapped).
@@ -41,14 +44,20 @@ export function matchProjects(folders: FolderRemotes[], projects: HubProject[], 
   const out: Binding[] = [];
   for (const p of projects) {
     if (wanted && p.id !== wanted) continue;
-    const b: Binding = { project: p, folders: {} };
+    const b: Binding = { project: p, folders: {}, subdirs: {} };
     const repo = (p.code_repo || '').toLowerCase();
-    const ol = p.paper_source && p.paper_source.kind === 'overleaf' ? (p.paper_source.project_id || '').toLowerCase() : '';
+    const ps = p.paper_source;
+    const ghPaper = ps && ps.kind === 'github' ? (ps.repo || '').toLowerCase() : '';
+    const ol = ps && ps.kind === 'overleaf' ? (ps.project_id || '').toLowerCase() : '';
     for (const f of folders) {
       for (const url of f.remotes) {
         const r = parseRemote(url);
         if (!r) continue;
         if (r.kind === 'github' && repo && r.repo === repo && !b.folders.code) b.folders.code = f.key;
+        if (r.kind === 'github' && ghPaper && r.repo === ghPaper && !b.folders.paper) {
+          b.folders.paper = f.key;
+          if (ps && ps.subdir) b.subdirs.paper = ps.subdir;
+        }
         if (r.kind === 'overleaf' && ol && r.id === ol && !b.folders.paper) b.folders.paper = f.key;
       }
     }

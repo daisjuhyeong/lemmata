@@ -32,6 +32,7 @@ ALLOWED_PROTOCOLS = ["https"]  # tests (local fake GitHub over http) extend this
 PID_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 CODE_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 MAX_FILE = 50 * 1024 * 1024
+SUBDIR_MAX = 200
 MASKS = []  # absolute data paths that must never appear in an error message
 
 
@@ -106,6 +107,22 @@ def valid_branch(b):
         return False
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     return subprocess.run(["git", "check-ref-format", "--branch", b], capture_output=True, env=env, stdin=subprocess.DEVNULL).returncode == 0
+
+
+def valid_subdir(v):
+    """Folder inside the paper repo: relative, forward slashes, no `..`/`.` parts, no leading `-`, no .git alias, <= 200 chars.
+    Returns the normalised path (no trailing slash)."""
+    bad = ProjectError(400, "bad_request", "paper_subdir must be a relative folder such as paper or docs/paper.")
+    if not isinstance(v, str) or not v.strip() or len(v) > SUBDIR_MAX or v != v.strip():
+        raise bad
+    if v.startswith(("-", "/", "~")) or "\\" in v or re.search(r"[\x00-\x1f\x7f:]", v) or re.match(r"^[A-Za-z]:", v):
+        raise bad
+    parts = v.split("/")
+    if parts and parts[-1] == "":
+        parts = parts[:-1]
+    if not parts or any(p in ("", ".", "..") or is_git_alias(p) or _has_format_chars(p) for p in parts):
+        raise bad
+    return "/".join(parts)
 
 
 def slug(s):
@@ -293,6 +310,13 @@ class Manager:
         with a.lock:
             return a.engine.scan()
 
+    def overleaf_on(self):
+        return bool(self.cfg.load().get("overleaf_enabled", False))
+
+    def _need_overleaf(self):
+        if not self.overleaf_on():
+            raise ProjectError(404, "feature_disabled", "Overleaf is switched off.")
+
     # --- views
     def summary(self, pid):
         m = self.meta(pid)
@@ -301,8 +325,9 @@ class Manager:
             st = a.engine.project()
             al = a.engine.alarms()
         paper = self.root(pid) / "paper"
+        sub = self.paper_source(m).get("subdir")
         try:
-            versions = int(git(paper, ["rev-list", "--count", "HEAD"])) if (paper / ".git").exists() else 0
+            versions = int(git(paper, ["rev-list", "--count", "HEAD"] + (["--", sub] if sub else []))) if (paper / ".git").exists() else 0
         except ProjectError:
             versions = 0
         return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
@@ -314,6 +339,11 @@ class Manager:
         ps = m.get("paper_source")
         if isinstance(ps, dict) and ps.get("kind") == "overleaf" and ps.get("project_id"):
             return {"kind": "overleaf", "project_id": ps["project_id"]}
+        if isinstance(ps, dict) and ps.get("kind") == "github" and ps.get("repo"):
+            out = {"kind": "github", "repo": ps["repo"], "branch": ps.get("branch")}
+            if ps.get("subdir"):
+                out["subdir"] = ps["subdir"]
+            return out
         return {"kind": "zip"}
 
     def list(self):
@@ -343,7 +373,7 @@ class Manager:
         return hits[0]
 
     # --- create
-    def create(self, name, repo, branch, paper_overleaf=None):
+    def create(self, name, repo, branch, paper_overleaf=None, paper_repo=None, paper_branch=None, paper_subdir=None):
         if not isinstance(repo, str) or not CODE_REPO_RE.match(repo) or repo.endswith(".git") or ".." in repo:
             raise ProjectError(400, "bad_request", "code_repo must look like owner/name.")
         if branch is not None and not valid_branch(branch):
@@ -353,8 +383,16 @@ class Manager:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
         if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 100):
             raise ProjectError(400, "bad_request", "name must be text up to 100 characters.")
+        gh_src = None
+        if paper_repo not in (None, ""):
+            gh_src = self._check_github_source(paper_repo, paper_branch, paper_subdir)
+        elif paper_branch not in (None, "") or paper_subdir not in (None, ""):
+            raise ProjectError(400, "bad_request", "paper_branch and paper_subdir need paper_repo.")
         ol_id = None
         if paper_overleaf not in (None, ""):
+            if gh_src:
+                raise ProjectError(400, "bad_request", "Give either paper_repo or paper_overleaf, not both.")
+            self._need_overleaf()
             ol_id = parse_project(paper_overleaf)  # OverleafError -> 400
             if not self.ol.token():
                 raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
@@ -374,6 +412,8 @@ class Manager:
             paper = root / "paper"
             if ol_id:
                 self._overleaf_clone(ol_id, paper)
+            elif gh_src:
+                gh_src = self._github_clone(gh_src, paper, token, web)
             else:
                 paper.mkdir()
                 git(paper, ["init", "-q", "--template=" + str(tpl)])
@@ -381,11 +421,11 @@ class Manager:
             (root / ".lemmata").mkdir()
             (root / ".lemmata" / "project.json").write_text(json.dumps({
                 "schema": "lemmata.project/1", "name": (name or repo.split("/")[1]).strip(),
-                "repos": [{"id": "paper", "role": "paper", "path": "paper"}, {"id": "code", "role": "code", "path": "code"}]},
+                "repos": [self._paper_entry(gh_src.get("subdir") if gh_src else None), {"id": "code", "role": "code", "path": "code"}]},
                 indent=1) + "\n", encoding="utf-8")
             meta = {"schema": "lemmata.hubproject/1", "id": pid, "name": (name or repo.split("/")[1]).strip(),
                     "code_repo": repo, "branch": branch or got, "created": now_iso(), "last_sync": now_iso(),
-                    "paper_source": {"kind": "overleaf", "project_id": ol_id} if ol_id else {"kind": "zip"}}
+                    "paper_source": {"kind": "overleaf", "project_id": ol_id} if ol_id else (gh_src or {"kind": "zip"})}
             if ol_id:
                 meta["overleaf_last_fetch"] = time.time()
             self._save_meta(pid, meta)
@@ -402,8 +442,11 @@ class Manager:
         commit exists, and is restored from a backup if the swap itself fails."""
         root = self.root(pid)
         paper = root / "paper"
-        if self.paper_source(self.meta(pid))["kind"] == "overleaf":
+        kind = self.paper_source(self.meta(pid))["kind"]
+        if kind == "overleaf":
             raise ProjectError(409, "paper_is_overleaf", "This project's paper comes from Overleaf; switch it back to a zip first.")
+        if kind == "github":
+            raise ProjectError(409, "paper_is_github", "This project's paper comes from a GitHub repo; push your changes there, or switch the paper source to a zip first.")
         with self.oplock(pid):
             work = Path(self.data.tmp) / ("up-" + secrets.token_hex(6))
             backup = Path(self.data.tmp) / ("bk-" + secrets.token_hex(6))
@@ -495,57 +538,163 @@ class Manager:
             raise ProjectError(413, "overleaf_too_large", "The Overleaf project is larger than 500 MB.")
         return git(dest, ["rev-parse", "HEAD"])
 
-    def set_paper_source(self, pid, kind, project=None):
+    # --- GitHub paper source
+    @staticmethod
+    def _check_github_source(repo, branch, subdir):
+        """Validated {"kind":"github","repo","branch","subdir"?}; branch None means the repo's default branch (filled in at clone)."""
+        if not isinstance(repo, str) or not CODE_REPO_RE.match(repo) or repo.endswith(".git") or ".." in repo:
+            raise ProjectError(400, "bad_request", "paper_repo must look like owner/name.")
+        if branch not in (None, "") and not valid_branch(branch):
+            raise ProjectError(400, "bad_request", "bad paper_branch name.")
+        src = {"kind": "github", "repo": repo, "branch": branch or None}
+        if subdir not in (None, ""):
+            src["subdir"] = valid_subdir(subdir)
+        return src
+
+    def _github_clone(self, src, dest, token, web):
+        """Hardened clone of the paper repo into `dest` (never the code clone). Fills in the real branch. A `subdir` that is not
+        a folder of the clone removes it again and answers 400 paper_subdir_missing."""
+        tpl = self.data.hub / "empty-template"
+        tpl.mkdir(mode=0o700, exist_ok=True)
+        args = ["clone", "--depth", "1000", "--no-tags", "--no-recurse-submodules", "--template=" + str(tpl)]
+        if src.get("branch"):
+            args += ["--branch", src["branch"]]
+        try:
+            git(None, args + ["--", web + "/" + src["repo"] + ".git", str(dest)], token=token, scope_url=web)
+        except ProjectError as e:
+            shutil.rmtree(dest, ignore_errors=True)
+            t = e.message.lower()
+            if e.code == "git_failed" and "remote branch" in t:
+                raise ProjectError(404, "paper_branch_not_found", "The paper repo has no branch %r." % src.get("branch"))
+            if e.code == "git_failed" and ("not found" in t or "returned error: 40" in t or "authentication failed" in t or "terminal prompts disabled" in t):
+                raise ProjectError(404, "paper_repo_not_found", "GitHub has no repo %s that your account can read." % src["repo"])
+            raise
+        out = dict(src)
+        try:
+            if _tree_size(dest) > MAX_UNPACKED:
+                raise ProjectError(413, "paper_too_large", "The paper repo is larger than 500 MB.")
+            out["branch"] = git(dest, ["rev-parse", "--abbrev-ref", "HEAD"])
+            sub = src.get("subdir")
+            if sub:
+                d = (Path(dest) / sub).resolve()
+                if not d.is_dir() or not d.is_relative_to(Path(dest).resolve()) or (d == Path(dest).resolve()):
+                    raise ProjectError(400, "paper_subdir_missing", "The folder %r does not exist in %s (branch %s)." % (sub, src["repo"], out["branch"]))
+        except BaseException:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        return out
+
+    @staticmethod
+    def _paper_entry(subdir):
+        e = {"id": "paper", "role": "paper", "path": "paper/" + subdir if subdir else "paper"}
+        if subdir:
+            e["git_subdir"] = True  # engine: this folder lives inside the clone paper/; use that clone's history, filtered to it
+        return e
+
+    def _set_manifest_paper(self, pid, subdir):
+        p = self.root(pid) / ".lemmata" / "project.json"
+        man = read_json(p, {}) or {}
+        man["repos"] = [self._paper_entry(subdir) if r.get("id") == "paper" else r for r in man.get("repos", [])]
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(man, indent=1) + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+
+    def _swap_paper(self, pid, new_dir, source, subdir=None, set_meta=None, drop_meta=()):
+        """Atomic switch (caller holds the project's oplock): old paper/ is kept as paper.prev-<time>, `new_dir` becomes paper/,
+        manifest path and project.json follow; rolled back if any step fails. Then rescan."""
         root = self.root(pid)
-        if kind not in ("overleaf", "zip"):
-            raise ProjectError(400, "bad_request", 'kind must be "overleaf" or "zip".')
+        paper = root / "paper"
+        a = self.app(pid)
+        with a.lock:
+            m = self.meta(pid)
+            old_meta = json.loads(json.dumps(m))
+            man_path = root / ".lemmata" / "project.json"
+            old_man = man_path.read_bytes()
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            prev = root / ("paper.prev-" + stamp)
+            n = 1
+            while prev.exists():
+                n += 1
+                prev = root / ("paper.prev-%s-%d" % (stamp, n))
+            os.rename(paper, prev)
+            try:
+                os.rename(new_dir, paper)
+                self._set_manifest_paper(pid, subdir)
+                m["paper_source"] = source
+                for k in drop_meta:
+                    m.pop(k, None)
+                m.update(set_meta or {})
+                self._save_meta(pid, m)
+            except BaseException:
+                if paper.exists():
+                    os.rename(paper, new_dir)
+                os.rename(prev, paper)
+                man_path.write_bytes(old_man)
+                self._save_meta(pid, old_meta)
+                raise
+            a.engine.scan()
+
+    def set_paper_source(self, pid, kind, project=None, repo=None, branch=None, subdir=None):
+        root = self.root(pid)
+        if kind not in ("github", "overleaf", "zip"):
+            raise ProjectError(400, "bad_request", 'kind must be "github", "overleaf" or "zip".')
+        if kind == "overleaf":
+            self._need_overleaf()
         pid_ol = parse_project(project) if kind == "overleaf" else None
+        src = self._check_github_source(repo, branch, subdir) if kind == "github" else None
         paper = root / "paper"
         with self.oplock(pid):
             m = self.meta(pid)
-            if kind == "overleaf":
-                if not self.ol.token():
-                    raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
-                clone = Path(self.data.tmp) / ("ol-" + secrets.token_hex(6))
-                try:
+            clone = Path(self.data.tmp) / ("pp-" + secrets.token_hex(6))
+            try:
+                if kind == "github":
+                    token = self.gh.token()
+                    if not token:
+                        raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
+                    got = self._github_clone(src, clone, token, self.cfg.load()["github_web"].rstrip("/"))
+                    self._swap_paper(pid, clone, got, got.get("subdir"), drop_meta=("overleaf_last_fetch",))
+                elif kind == "overleaf":
+                    if not self.ol.token():
+                        raise ProjectError(409, "overleaf_token_missing", "Save your Overleaf Git token on the hub page first.")
                     self._overleaf_clone(pid_ol, clone)
-                    a = self.app(pid)
-                    with a.lock:
-                        prev = root / ("paper.prev-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-                        n = 1
-                        while prev.exists():
-                            n += 1
-                            prev = root / ("paper.prev-%s-%d" % (datetime.now().strftime("%Y%m%d-%H%M%S"), n))
-                        os.rename(paper, prev)
-                        try:
-                            os.rename(clone, paper)
-                        except BaseException:
-                            os.rename(prev, paper)
-                            raise
-                        m["paper_source"] = {"kind": "overleaf", "project_id": pid_ol}
-                        m["overleaf_last_fetch"] = time.time()
-                        self._save_meta(pid, m)
-                        a.engine.scan()
-                finally:
-                    shutil.rmtree(clone, ignore_errors=True)
-            elif self.paper_source(m)["kind"] == "overleaf":
-                with self.app(pid).lock:
-                    try:
-                        git(paper, ["remote", "remove", "origin"])
-                    except ProjectError:
-                        pass
-                    m["paper_source"] = {"kind": "zip"}
-                    m.pop("overleaf_last_fetch", None)
-                    self._save_meta(pid, m)
-                    self.app(pid).engine.scan()
+                    self._swap_paper(pid, clone, {"kind": "overleaf", "project_id": pid_ol}, None, set_meta={"overleaf_last_fetch": time.time()})
+                else:
+                    cur = self.paper_source(m)
+                    if cur["kind"] != "zip":
+                        if cur.get("subdir"):
+                            self._import_subdir(paper / cur["subdir"], clone, cur)
+                            self._swap_paper(pid, clone, {"kind": "zip"}, None, drop_meta=("overleaf_last_fetch",))
+                        else:
+                            with self.app(pid).lock:
+                                try:
+                                    git(paper, ["remote", "remove", "origin"])
+                                except ProjectError:
+                                    pass
+                                m["paper_source"] = {"kind": "zip"}
+                                m.pop("overleaf_last_fetch", None)
+                                self._save_meta(pid, m)
+                                self.app(pid).engine.scan()
+            finally:
+                shutil.rmtree(clone, ignore_errors=True)
             m = self.meta(pid)
         src = self.paper_source(m)
-        out = {"kind": src["kind"]}
-        if src.get("project_id"):
-            out["project_id"] = src["project_id"]
+        out = dict(src)
+        if "branch" in out and out["branch"] is None:
+            out.pop("branch")
         out["head"] = git(paper, ["rev-parse", "HEAD"])
-        out["versions"] = int(git(paper, ["rev-list", "--count", "HEAD"]))
+        out["versions"] = int(git(paper, ["rev-list", "--count", "HEAD"] + (["--", src["subdir"]] if src.get("subdir") else [])))
         return out
+
+    def _import_subdir(self, folder, dest, cur):
+        """Zip fallback from a subfolder source: the folder's files become a fresh one-commit paper repo (the shared clone is
+        not a zip-style repo)."""
+        tpl = self.data.hub / "empty-template"
+        tpl.mkdir(mode=0o700, exist_ok=True)
+        shutil.copytree(str(folder), str(dest), symlinks=True)
+        git(dest, ["init", "-q", "--template=" + str(tpl)])
+        git(dest, ["symbolic-ref", "HEAD", "refs/heads/main"])
+        git(dest, ["add", "-A", "-f"], extra_env=AUTHOR)
+        git(dest, ["commit", "-q", "--allow-empty", "-m", "Imported from %s/%s" % (cur["repo"], cur["subdir"])], extra_env=AUTHOR)
 
     # --- sync
     def sync(self, pid):
@@ -567,7 +716,7 @@ class Manager:
                     raise ProjectError(409, "not_fast_forward", "The branch was rewritten on GitHub; delete and re-add the project to re-clone it.")
                 head = git(code, ["rev-parse", "HEAD"])
                 changed = head != before
-            pp = self._sync_paper(pid, m, paper, a)
+            pp = self._sync_paper(pid, m, paper, a, token)
             with a.lock:
                 if changed or pp["changed"]:
                     a.engine.scan()
@@ -575,7 +724,31 @@ class Manager:
             self._save_meta(pid, m)
         return {"changed": changed, "head": head, "code": {"changed": changed, "head": head}, "paper": pp}
 
-    def _sync_paper(self, pid, m, paper, a):
+    def _sync_github_paper(self, m, paper, a, res, token, head):
+        src = self.paper_source(m)
+        web = self.cfg.load()["github_web"]
+        try:
+            git(paper, ["fetch", "--no-tags", "origin", src["branch"]], token=token, scope_url=web)
+            if _tree_size(paper / ".git") > 2 * MAX_UNPACKED:
+                raise ProjectError(413, "paper_too_large", "The paper repo history is larger than 1 GB; not merged.")
+            if src.get("subdir"):
+                try:
+                    git(paper, ["cat-file", "-e", "FETCH_HEAD:" + src["subdir"]])
+                except ProjectError:
+                    raise ProjectError(400, "paper_subdir_missing", "The folder %r no longer exists on GitHub; not merged." % src["subdir"])
+            with a.lock:
+                try:
+                    git(paper, ["merge", "--ff-only", "-q", "FETCH_HEAD"])
+                except ProjectError:
+                    raise ProjectError(409, "not_fast_forward", "The paper branch was rewritten on GitHub; connect the paper again.")
+            res["head"] = head()
+            res["changed"] = res["head"] != res.get("_before")
+        except ProjectError as e:
+            res["error"] = {"code": e.code, "message": e.message}
+        res.pop("_before", None)
+        return res
+
+    def _sync_paper(self, pid, m, paper, a, gh_token=None):
         """Fetch the Overleaf paper repo (never push); at most once per overleaf_min_interval seconds per project. Errors are
         reported in the result, they never abort the code sync. Mutates `m` (last fetch time); the caller saves it."""
         def head():
@@ -585,7 +758,13 @@ class Manager:
                 return None
         before = head()
         res = {"changed": False, "head": before, "source": self.paper_source(m)["kind"]}
+        if res["source"] == "github":
+            res["_before"] = before
+            return self._sync_github_paper(m, paper, a, res, gh_token, head)
         if res["source"] != "overleaf":
+            return res
+        if not self.overleaf_on():
+            res["skipped"] = "feature_disabled"  # Overleaf is switched off: never contacted
             return res
         gap = float(self.cfg.load().get("overleaf_min_interval", 120))
         if time.time() - float(m.get("overleaf_last_fetch") or 0) < gap:

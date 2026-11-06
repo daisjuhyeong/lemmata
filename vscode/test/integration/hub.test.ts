@@ -32,7 +32,7 @@ before(async () => {
   git(tmp, 'clone', '-q', path.join(fx.sample, 'code'), wsCode);
   git(tmp, 'clone', '-q', path.join(fx.sample, 'paper'), wsPaper);
   git(wsCode, 'remote', 'set-url', 'origin', 'git@github.com:Alice/Demo-Code.git');
-  git(wsPaper, 'remote', 'set-url', 'origin', 'https://git.overleaf.com/' + fx.overleaf_id);
+  git(wsPaper, 'remote', 'set-url', 'origin', 'https://github.com/' + fx.paper_repo + '.git');
 });
 after(() => { try { proc.stdin!.end(); } catch { /* */ } try { proc.kill(); } catch { /* */ } fs.rmSync(tmp, { recursive: true, force: true }); });
 
@@ -46,7 +46,7 @@ async function bindAll() {
 const wsOf = (d: Diag) => (d.folder === 'code' ? wsCode : wsPaper);
 const lineText = (d: Diag) => fs.readFileSync(path.join(wsOf(d), d.rel), 'utf8').split('\n')[d.line0];
 
-test('remote matching finds the project from the checkout (github + overleaf)', async () => {
+test('remote matching finds the project from the checkout (code and paper, both GitHub)', async () => {
   const b = await bindAll();
   assert.deepEqual(b.folders, { code: 'code', paper: 'paper' });
 });
@@ -134,6 +134,21 @@ test('auth: wrong token is unauthorized, closed port is offline, token is not in
   await assert.rejects(bad.projects(), (e: any) => e instanceof HubError && e.unauthorized && !String(e.message).includes('not-a-token'));
   const off = new HubClient('http://127.0.0.1:9', fx.token, 3000);
   await assert.rejects(off.projects(), (e: any) => e instanceof HubError && e.offline && !String(e.message).includes(fx.token));
+});
+
+test('paper inside the code repo (subdir): paper/<rel> lands in <code folder>/<subdir>/<rel>', async () => {
+  const wsMono = path.join(tmp, 'ws', 'mono');
+  git(tmp, 'clone', '-q', path.join(fx.sample, 'code'), wsMono);
+  git(wsMono, 'remote', 'set-url', 'origin', 'git@github.com:Alice/Demo-Code.git');
+  fs.cpSync(wsPaper, path.join(wsMono, 'docs', 'paper'), { recursive: true, filter: s => path.basename(s) !== '.git' });
+  const projects = (await client.projects()).map(p => ({ ...p, paper_source: { kind: 'github' as const, repo: 'alice/demo-code', subdir: 'docs/paper' } }));
+  const b = matchProjects([{ key: 'mono', remotes: remotes(wsMono) }], projects)[0];
+  assert.deepEqual(b.folders, { code: 'mono', paper: 'mono' });
+  const m = await loadModel(client, fx.pid);
+  const d = toDiagnostics(m, b.folders, b.subdirs).filter(x => x.kind === 'alarm');
+  const tex = d.find(x => x.rel === 'docs/paper/main.tex');
+  assert.ok(tex, 'Table 2 maps to docs/paper/main.tex');
+  assert.match(fs.readFileSync(path.join(wsMono, tex!.rel), 'utf8').split('\n')[tex!.line0], /\\begin\{table/);
 });
 
 test('sync works and returns code/paper results; checkpoint resets the alarms', async () => {

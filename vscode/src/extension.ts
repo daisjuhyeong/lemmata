@@ -128,7 +128,7 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
 
   /* ---------- diagnostics ---------- */
   diagnosticsFor(b: Bound): Diag[] {
-    return b.model ? toDiagnostics(b.model, b.binding.folders) : [];
+    return b.model ? toDiagnostics(b.model, b.binding.folders, b.binding.subdirs) : [];
   }
   private publish() {
     const per = new Map<string, { uri: vscode.Uri; list: vscode.Diagnostic[] }>();
@@ -192,7 +192,7 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
   /** Is this repo of the project open in the workspace? Used to dim panel-only rows. */
   mapped(b: Bound, loc: LocRef | null): vscode.Uri | null {
     if (!loc) return null;
-    const m = mapPath(b.binding.folders, loc.repo, loc.path);
+    const m = mapPath(b.binding.folders, loc.repo, loc.path, b.binding.subdirs);
     const f = m && this.folderByKey.get(m.folder);
     return m && f ? vscode.Uri.joinPath(f.uri, ...m.rel.split('/')) : null;
   }
@@ -378,12 +378,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
     }),
     c('lemmata.sync', async (it?: Item) => {
       const t = await pickProject(it); if (!t) return;
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: syncing from GitHub and Overleaf…' }, async () => {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: syncing your code and paper from GitHub…' }, async () => {
         try {
           const r = await t.client.sync(t.pid);
           const code = r.code ? r.code.changed : !!r.changed, paper = !!(r.paper && r.paper.changed);
           const perr = r.paper && r.paper.error;
-          if (perr) void vscode.window.showWarningMessage('Lemmata: Overleaf: ' + oneLine(perr, 200) + (code ? ' (code was synced)' : ''));
+          if (perr) void vscode.window.showWarningMessage('Lemmata: paper sync: ' + oneLine(perr, 200) + (code ? ' (code was synced)' : ''));
           else void vscode.window.showInformationMessage(code || paper ? 'Lemmata: synced' + (code ? ' code' : '') + (paper ? ' paper' : '') + ' and rescanned.' : 'Lemmata: already up to date.');
           await CTRL.refresh();
         } catch (e) { void fail('sync failed', e); }

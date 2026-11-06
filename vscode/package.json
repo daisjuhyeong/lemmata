@@ -2,7 +2,7 @@
   "name": "lemmata",
   "displayName": "Lemmata",
   "description": "Lemmata alarms and findings for your ML paper and code, shown as VS Code diagnostics.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "lemmata-local",
   "license": "UNLICENSED",
   "private": true,

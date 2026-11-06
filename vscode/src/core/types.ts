@@ -6,7 +6,7 @@ export interface HubProject {
   name: string;
   code_repo?: string | null;
   branch?: string | null;
-  paper_source?: { kind: 'zip' | 'overleaf'; project_id?: string };
+  paper_source?: { kind: 'zip' | 'github' | 'overleaf'; repo?: string; branch?: string; subdir?: string; project_id?: string };
   last_sync?: string | null;
   counts?: { recheck: number; findings: number };
 }

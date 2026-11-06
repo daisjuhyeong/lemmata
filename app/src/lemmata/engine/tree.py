@@ -38,6 +38,17 @@ def is_git_root(path):
     return top == os.path.realpath(str(path))
 
 
+def show_prefix(path):
+    """'' at the top of a work tree, else the folder's path inside it ('paper/'); '' outside git."""
+    p = run_git(path, ["rev-parse", "--show-prefix"], check=False)
+    return p.stdout.decode("utf-8", "replace").strip() if p.returncode == 0 else ""
+
+
+def in_work_tree(path):
+    p = run_git(path, ["rev-parse", "--is-inside-work-tree"], check=False)
+    return p.returncode == 0 and p.stdout.strip() == b"true"
+
+
 def rev_parse(path, rev):
     """Full commit sha for rev, or None."""
     p = run_git(path, ["rev-parse", "--verify", "--quiet", rev + "^{commit}"], check=False)
@@ -61,7 +72,8 @@ def is_ancestor(path, anc, desc):
 
 def status_entries(path):
     """[(status, path)] for uncommitted changes (A/M/D), excluding the hub folder."""
-    p = run_git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], check=False)
+    prefix = show_prefix(path)  # repo = a subfolder of a clone (manifest "git_subdir"): only that folder, paths relative to it
+    p = run_git(path, ["status", "--porcelain=v1", "-z", "--untracked-files=all"] + (["--", "."] if prefix else []), check=False)
     if p.returncode != 0:
         return []
     out = []
@@ -75,6 +87,10 @@ def status_entries(path):
         xy, fp = e[:2], e[3:]
         if xy[0] in "RC":
             i += 1  # skip the "from" path
+        if prefix:
+            if not fp.startswith(prefix):
+                continue
+            fp = fp[len(prefix):]
         if fp.startswith(".lemmata/"):
             continue
         if xy == "??" or "A" in xy:
@@ -90,10 +106,11 @@ def status_entries(path):
 class WorkTree:
     """The working directory of a repo (git or plain folder)."""
 
-    def __init__(self, root, repo_id):
+    def __init__(self, root, repo_id, subdir=False):
         self.root = str(root)
         self.repo_id = repo_id
-        self.is_git = is_git_root(root)
+        # subdir=True: `root` is a folder inside a git clone and that clone's history is used (git commands run from the folder)
+        self.is_git = is_git_root(root) or (bool(subdir) and in_work_tree(root))
         self._files = None
         self._blobs = {}
 

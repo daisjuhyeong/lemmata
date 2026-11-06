@@ -40,3 +40,9 @@ date | agent | operation | files touched | note
 2026-11-05 | web-eng | build | vscode/** | D1 fixed: serverUrl application scope, token bound to its origin; D4/D6; 23 unit + 8 integration
 2026-11-05 | pipeline-eng | build | app/src/lemmata/hub/projects.py, test_overleaf.py | D2 sync lock/throttle atomic, D3 short Overleaf errors, D5 clone/fetch caps; 113 tests
 2026-11-05 | lead | lint | vscode/package.json, settings.ts | verified D1 fix (scopes, per-origin token key); 23 unit + 113 py pass
+2026-11-06 | lead | build | wiki/sprints/S06/S06-brief.md | founder decisions: no Overleaf subscription (paper on GitHub, compiled in VS Code); Obsidian-style UI for non-experts, checked when needed
+2026-11-06 | designer | build | wiki/design/screens/s06-obsidian-redesign.md | Item model, layouts, plain-language copy
+2026-11-06 | pipeline-eng | build | hub/{projects,routes,config}.py, engine/{tree,history,analyze,manifest,api}.py, tests | github paper source (own repo or subdir); overleaf_enabled default off
+2026-11-06 | cto | build | ADR-005, wiki/architecture/overview.md, docs/SETUP-two-macs.md | no-Overleaf architecture, system overview, setup with paper repo
+2026-11-06 | web-eng-b | build | web/hub/*, mock_hub.py, vscode/* (0.1.1), desktop default URL, hub config --overleaf | hub pages without Overleaf, extension paper-repo matching
+2026-11-06 | web-eng-a | build | web/{index.html,app.js,app.css}, s06 screenshots | Obsidian-style project UI, hubControls, deduped sidebar

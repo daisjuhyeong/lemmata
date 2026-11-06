@@ -14,6 +14,7 @@ DEFAULTS = {
     "github_api": "https://api.github.com",
     "github_web": "https://github.com",
     "overleaf_git": "https://git.overleaf.com",
+    "overleaf_enabled": False,
     "overleaf_min_interval": 120,
     "allow_hosts": [],
     "owner": None,

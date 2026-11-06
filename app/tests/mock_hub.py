@@ -3,6 +3,8 @@
     python3 app/tests/mock_hub.py [--port 18770]       pairing code is ABCD2345
 
 Per-project UI/API: /p/<pid>/ serves web/ and proxies /p/<pid>/api/* to a fixture-engine server.
+Test hooks: POST /__mock/overleaf {"enabled": true} switches the dormant Overleaf feature on.
+Paper source: github (own repo or repo + subdir; unknown repo -> 404 paper_repo_not_found, subdir "missing" -> 400 paper_subdir_missing), zip.
 Test hooks: POST /__mock/gh {"mode": "ok|denied|expired", "pending": n} sets the next device-flow outcome.
 Not the real hub (that is app/src/lemmata/hub/); only for UI tests.
 """
@@ -29,6 +31,7 @@ REPOS = [
     {"full_name": "juhyeong/tad-metrics", "private": True, "default_branch": "main", "pushed_at": "2026-11-05T08:00:00Z", "description": "Alarm-Analyzer evaluation code for time-series anomaly detection"},
     {"full_name": "juhyeong/odad-survey-figs", "private": False, "default_branch": "main", "pushed_at": "2026-11-01T08:00:00Z", "description": "Figures for the ODAD survey"},
     {"full_name": "dais-lab/brats-recon", "private": True, "default_branch": "dev", "pushed_at": "2026-10-20T08:00:00Z", "description": ""},
+    {"full_name": "daisjuhyeong/www27-paper", "private": True, "default_branch": "main", "pushed_at": "2026-11-04T08:00:00Z", "description": "LaTeX source of the WWW 2027 submission"},
     {"full_name": "juhyeong/dotfiles", "private": False, "default_branch": "main", "pushed_at": "2026-08-20T08:00:00Z", "description": None},
 ]
 
@@ -40,6 +43,7 @@ class State:
         self.gh = {"mode": "ok", "pending": 2}
         self.polls = 0
         self.overleaf = False
+        self.overleaf_enabled = False   # S06: Overleaf is dormant, like the real hub's default
         self.projects = []
         self.engine_port = None
         self.lock = threading.Lock()
@@ -98,7 +102,28 @@ class H(BaseHTTPRequestHandler):
         self.route("DELETE")
 
     def status_obj(self):
-        return {"paired": self.authed(), "github": {"signed_in": bool(ST.user), "user": ST.user}, "overleaf_configured": ST.overleaf, "version": "0.1.0"}
+        o = {"paired": self.authed(), "github": {"signed_in": bool(ST.user), "user": ST.user}, "version": "0.1.0"}
+        if ST.overleaf_enabled:
+            o["overleaf_configured"] = ST.overleaf
+        return o
+
+    def paper_github(self, b, code_repo):
+        """Validate a github paper source like the real hub; returns (source, error_response_args)."""
+        repo, sub = b.get("repo"), b.get("subdir")
+        if not isinstance(repo, str) or repo.count("/") != 1:
+            return None, (400, "bad_request", "That is not a GitHub repository (owner/name).")
+        if not ST.user:
+            return None, (409, "not_signed_in", "Sign in with GitHub first.")
+        if repo not in [r["full_name"] for r in REPOS] and repo != code_repo:
+            return None, (404, "paper_repo_not_found", "GitHub has no repository %s that you can read." % repo)
+        if sub is not None and (not isinstance(sub, str) or not sub.strip("/") or ".." in sub.split("/") or sub.startswith("-")):
+            return None, (400, "bad_request", "That folder name is not valid.")
+        if sub and sub.strip("/") == "missing":
+            return None, (400, "paper_subdir_missing", "The repository has no folder called %s." % sub)
+        src = {"kind": "github", "repo": repo, "branch": b.get("branch") or "main"}
+        if sub:
+            src["subdir"] = sub.strip("/")
+        return src, None
 
     def route(self, m):
         self.__dict__.pop("_b", None)
@@ -109,7 +134,7 @@ class H(BaseHTTPRequestHandler):
             ST.gh.update(json.loads(self.body() or b"{}")); ST.polls = 0
             return self.send(200, ST.gh)
         if p == "/__mock/reset" and m == "POST":
-            ST.sessions.clear(); ST.user = None; ST.projects.clear(); ST.polls = 0; ST.overleaf = False; ST.gh.update({"mode": "ok", "pending": 2})
+            ST.sessions.clear(); ST.user = None; ST.projects.clear(); ST.polls = 0; ST.overleaf = False; ST.overleaf_enabled = False; ST.gh.update({"mode": "ok", "pending": 2})
             ST.paired_codes = {"ABCD2345"}
             return self.send(200, {})
         if p == "/api/hub/status":
@@ -125,6 +150,11 @@ class H(BaseHTTPRequestHandler):
         if p.startswith("/p/") or p.startswith("/api/") or p == "/mcp":
             if not self.authed():
                 return self.err(401, "unauthorized", "Pair this device first.")
+        if p == "/__mock/overleaf" and m == "POST":
+            ST.overleaf_enabled = bool(json.loads(self.body() or b"{}").get("enabled"))
+            return self.send(200, {"enabled": ST.overleaf_enabled})
+        if not ST.overleaf_enabled and (p.startswith("/api/hub/overleaf/")):
+            return self.send(404, {"error": "feature_disabled"})   # bare string, as the real hub
         if p == "/api/hub/overleaf/token" and m == "PUT":
             ST.overleaf = bool(json.loads(self.body() or b"{}").get("token"))
             return self.send(200, {"configured": ST.overleaf})
@@ -156,9 +186,18 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/hub/projects" and m == "POST":
             b = json.loads(self.body() or b"{}")
             time.sleep(1.2)
+            if b.get("paper_overleaf") and not ST.overleaf_enabled:
+                return self.send(404, {"error": "feature_disabled"})
+            src = {"kind": "zip"}
+            if b.get("paper_repo"):
+                src, bad = self.paper_github({"repo": b["paper_repo"], "branch": b.get("paper_branch"), "subdir": b.get("paper_subdir")}, b["code_repo"])
+                if bad:
+                    return self.err(*bad)
+            elif b.get("paper_branch") or b.get("paper_subdir"):
+                return self.err(400, "bad_request", "A paper folder or branch needs a paper repository.")
             name = b["code_repo"].split("/")[-1]
             pr = {"id": name + "-" + secrets.token_hex(2), "name": name, "code_repo": b["code_repo"], "branch": b.get("branch") or "main",
-                  "paper_versions": 0, "paper_source": {"kind": "zip"}, "last_sync": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "scanned_at": None, "counts": {"recheck": 0, "findings": 0}}
+                  "paper_versions": 3 if src["kind"] == "github" else 0, "paper_source": src, "last_sync": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "scanned_at": None, "counts": {"recheck": 0, "findings": 0}}
             ST.projects.append(pr)
             return self.send(201, {"project": pr})
         if p.startswith("/api/hub/projects/"):
@@ -168,6 +207,8 @@ class H(BaseHTTPRequestHandler):
                 return self.err(404, "not_found", "No such project.")
             if parts[5:] == ["paper"] and m == "POST":
                 data = self.body()
+                if pr["paper_source"].get("kind") == "github":
+                    return self.err(409, "paper_is_github", "The paper comes from GitHub; switch to a zip first.")
                 if self.headers.get("Content-Type") != "application/zip" or data[:2] != b"PK":
                     return self.err(400, "bad_zip", "That file is not a zip.")
                 pr["paper_versions"] += 1; pr["counts"] = {"recheck": 3, "findings": 2}
@@ -177,6 +218,16 @@ class H(BaseHTTPRequestHandler):
                 if b.get("kind") == "zip":
                     pr["paper_source"] = {"kind": "zip"}
                     return self.send(200, {"kind": "zip"})
+                if b.get("kind") == "github":
+                    src, bad = self.paper_github(b, pr["code_repo"])
+                    if bad:
+                        return self.err(*bad)
+                    time.sleep(0.5)
+                    pr["paper_source"] = src; pr["paper_versions"] = 4; pr["counts"] = {"recheck": 3, "findings": 2}
+                    pr["last_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    return self.send(200, dict(src, head="abc1234", versions=4))
+                if not ST.overleaf_enabled:
+                    return self.send(404, {"error": "feature_disabled"})
                 import re
                 mm = re.search(r"[0-9a-f]{24}", b.get("project") or "")
                 if not ST.overleaf:
@@ -193,7 +244,7 @@ class H(BaseHTTPRequestHandler):
             if parts[5:] == ["sync"] and m == "POST":
                 self.body()
                 pr["last_sync"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                return self.send(200, {"changed": False, "head": "abc1234", "code": {"changed": False, "head": "abc1234"}, "paper": {"changed": False, "head": "def5678"}})
+                return self.send(200, {"changed": False, "head": "abc1234", "code": {"changed": False, "head": "abc1234"}, "paper": {"changed": False, "head": "def5678", "source": pr["paper_source"]["kind"]}})
         if p.startswith("/p/"):
             parts = p.split("/", 3)   # '', 'p', pid, rest
             rest = parts[3] if len(parts) > 3 else ""

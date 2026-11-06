@@ -39,7 +39,7 @@ class Engine:
         repos = manifestmod.resolve(self.root, man)
         trees, infos, hist = {}, {}, {}
         for r in repos:
-            t = treemod.WorkTree(r["abs_path"], r["id"])
+            t = treemod.WorkTree(r["abs_path"], r["id"], r.get("git_subdir"))
             trees[r["id"]] = t
             info = {"id": r["id"], "role": r["role"], "path": r["path"], "abs_path": r["abs_path"],
                     "vcs": "git" if t.is_git else "none", "head": None, "branch": None, "dirty": False, "status": []}

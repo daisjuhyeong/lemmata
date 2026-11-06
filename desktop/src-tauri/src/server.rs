@@ -10,7 +10,7 @@ use tauri::{AppHandle, Url};
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub const DEFAULT_URL: &str = "http://dais-juhyeongs-mac-mini:8765";
+pub const DEFAULT_URL: &str = "http://100.111.135.94:8765";
 pub const UNREACHABLE: &str = "Can't reach the Mac mini. Is it on, and is Tailscale connected on both Macs?";
 const FILE: &str = "server.json";
 
@@ -45,7 +45,7 @@ pub fn forget_auto(app: &AppHandle) {
 pub fn normalise(input: &str) -> Result<Url, ErrorInfo> {
     let t = input.trim();
     let t = if t.contains("://") { t.to_string() } else { format!("http://{t}") };
-    let bad = || ErrorInfo::new("bad_url", "Enter the server address, for example http://dais-juhyeongs-mac-mini:8765", "");
+    let bad = || ErrorInfo::new("bad_url", "Enter the server address, for example http://100.111.135.94:8765", "");
     let u = Url::parse(&t).map_err(|_| bad())?;
     if !matches!(u.scheme(), "http" | "https") || u.host_str().is_none() {
         return Err(bad());

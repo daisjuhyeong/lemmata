@@ -39,7 +39,7 @@ def _cp_text(cp, nid, hub, infos):
         info = infos.get(ent["repo"])
         rev = cp["repos"].get(ent["repo"], {}).get("rev")
         if info and info["vcs"] == "git" and rev:
-            p = treemod.run_git(info["abs_path"], ["show", "%s:%s" % (rev, ent["path"])], check=False)
+            p = treemod.run_git(info["abs_path"], ["show", "%s:./%s" % (rev, ent["path"])], check=False)
             if p.returncode == 0:
                 data = p.stdout
     return data if data is not None else b"", ent

@@ -178,6 +178,8 @@ def cmd_config(args):
         kw["github_client_id"] = args.github_client_id
     if args.sync_interval:
         kw["sync_interval"] = args.sync_interval
+    if args.overleaf:
+        kw["overleaf_enabled"] = args.overleaf == "on"
     if args.allow_host:
         kw["allow_hosts"] = sorted(set(cfg.load().get("allow_hosts") or []) | set(args.allow_host))
     c = cfg.update(**kw) if kw else cfg.load()
@@ -257,4 +259,5 @@ def add_parser(sub):
     p.add_argument("--github-client-id")
     p.add_argument("--sync-interval", type=int)
     p.add_argument("--allow-host", action="append")
+    p.add_argument("--overleaf", choices=["on", "off"], help="switch the dormant Overleaf feature on or off (default off)")
     p.set_defaults(fn=cmd_config)

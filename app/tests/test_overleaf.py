@@ -60,7 +60,7 @@ class Base(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.data = Path(cls.tmp.name) / "Lemmata"
         cls.hub = Hub(cls.data, port=0, detect_tailscale=False)
-        cls.hub.cfg.update(github_client_id=CLIENT_ID, github_api=cls.gh.url, github_web=cls.gh.url, overleaf_git=cls.ov.url,
+        cls.hub.cfg.update(github_client_id=CLIENT_ID, github_api=cls.gh.url, github_web=cls.gh.url, overleaf_git=cls.ov.url, overleaf_enabled=True,
                            overleaf_min_interval=0)
         cls.srv = make_hub_server(cls.hub, host="127.0.0.1", port=0)
         cls.port = cls.srv.server_address[1]
