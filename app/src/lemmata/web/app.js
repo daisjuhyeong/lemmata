@@ -357,6 +357,22 @@ const STRUCT = new Set(['contains', 'answers', 'refs']);
 const KIND_WORD = { thesis: 'Main claim', rq: 'Research question', section: 'Section', figure: 'Figure', table: 'Table', equation: 'Equation', reference: 'Reference', code: 'Shared code', data: 'Shared data' };
 const KIND_GLYPH = { thesis: '◆', rq: '?', section: '§', figure: '▣', table: '▦', equation: '∑', code: '{ }', data: '{ }', reference: '[ ]' };
 const KIND_TINT = { thesis: '--layer-thesis-t', rq: '--layer-question-t', section: '--layer-section-t', figure: '--layer-paper-t', table: '--layer-paper-t', equation: '--layer-paper-t', code: '--layer-code-t', data: '--layer-result-t', reference: '--layer-reference-t' };
+/* colour by type: every kind of thing has its own layer colour (DESIGN.md --layer-*). Settings and data files use the code colour with a dashed border. */
+const TYPES = {
+  thesis: { word: 'Main claim', v: 'thesis', glyph: '◆' }, question: { word: 'Research question', v: 'question', glyph: '?' }, section: { word: 'Section', v: 'section', glyph: '§' },
+  paper: { word: 'Figure, table or equation', v: 'paper', glyph: '▣' }, result: { word: 'Result file', v: 'result', glyph: '▤' }, code: { word: 'Code', v: 'code', glyph: '{ }' },
+  run: { word: 'Run', v: 'run', glyph: '▶' }, reference: { word: 'Reference', v: 'reference', glyph: '[ ]' }, setting: { word: 'Settings and data', v: 'code', glyph: '≣', dash: true },
+};
+const TYPE_ORDER = ['thesis', 'question', 'section', 'paper', 'result', 'code', 'run', 'reference', 'setting'];
+const PAPER_GLYPH = { figure: '▣', table: '▦', equation: '∑' };
+function typeOfFile(kind) { return kind === 'result' || kind === 'asset' ? 'result' : kind === 'code' ? 'code' : kind === 'run' ? 'run' : 'setting'; }
+function typeOfItem(it) {
+  if (it.shared) return typeOfFile(it.node.kind);
+  return it.kind === 'thesis' ? 'thesis' : it.kind === 'rq' ? 'question' : it.kind === 'section' ? 'section' : it.kind === 'reference' ? 'reference' : 'paper';
+}
+const TCOL = {};
+function tcol(t) { let c = TCOL[t]; if (!c) { const v = TYPES[t].v; c = TCOL[t] = { s: css('--layer-' + v), t: css('--layer-' + v + '-t'), dash: !!TYPES[t].dash }; } return c; }
+const tdot = t => h('span', { class: 'tdot t-' + t, 'aria-hidden': 'true' });
 const FILE_WORD = { asset: 'A figure file', result: 'A result file', run: 'A run', code: 'A script', config: 'A settings file', data: 'A data file', doc: 'A document' };
 const EV_GROUPS = [['Results and figures', ['result', 'asset']], ['Scripts', ['code']], ['Runs', ['run']], ['Settings', ['config']], ['Data', ['data', 'doc']]];
 
@@ -824,7 +840,7 @@ function makeGraph(host, o) {
   const V = { k: 1, tx: 0, ty: 0 };
   let nodes = [], edges = [], byId = new Map(), adj = new Map(), out = new Map(), inn = new Map();
   const pos = o.pos || new Map();
-  let hover = null, sel = null, kfocus = null, alpha = 0, raf = 0, needFit = true, labelTop = new Set();
+  let hover = null, sel = null, kfocus = null, alpha = 0, raf = 0, needFit = true, labelTop = new Set(), fadeSel = false, emphNid = null, animUntil = 0;
   let C = {};
   const readColours = () => { C = {}; for (const k of ['ink', 'paper', 'surface', 'border', 'border-strong', 'muted', 'verify', 'amber', 'amber-text', 'red', 'up', 'down-stroke', 'sunken', 'amber-bg', 'red-bg', 'verify-bg']) C[k] = css('--' + k); C.font = css('--font-sans'); C.mono = css('--font-mono'); };
   readColours();
@@ -845,19 +861,27 @@ function makeGraph(host, o) {
       nodes.push(node); byId.set(n.id, node);
     });
     spec.nodes.forEach(n => {
-      const node = byId.get(n.id); if (node.hasPos) return;
-      if (n.sat && byId.get(n.parent) && byId.get(n.parent).hasPos !== undefined) { const p = byId.get(n.parent); const a = (hashStr(n.id) % 628) / 100; node.x = p.x + Math.cos(a) * (p.r + 30); node.y = p.y + Math.sin(a) * (p.r + 30); return; }
+      const node = byId.get(n.id); if (node.hasPos || n.sat) return;
       const ring = RING[n.kind] == null ? 6 : RING[n.kind];
       const i = ringIdx[ring] = (ringIdx[ring] == null ? 0 : ringIdx[ring] + 1), cnt = ringCount[ring];
       const R = ring === 0 ? 0 : Math.max(ring * 125, cnt * 34 / (2 * Math.PI));
       const a = (2 * Math.PI * i) / cnt + ring * 0.7;
-      node.x = Math.cos(a) * R; node.y = Math.sin(a) * R;
+      node.x = Math.cos(a) * R; node.y = Math.sin(a) * R; node.hasPos = true;
     });
-    // satellites seeded before their parent had a position: fix now
-    nodes.forEach(n => { if (n.sat && !n.hasPos) { const p = byId.get(n.parent); if (p) { const a = (hashStr(n.id) % 628) / 100; n.x = p.x + Math.cos(a) * (p.r + 30); n.y = p.y + Math.sin(a) * (p.r + 30); } } });
+    // satellites start on the side of their parent that faces away from the middle, spread in a fan
+    const kids = new Map();
+    spec.nodes.forEach(n => { if (n.sat && !byId.get(n.id).hasPos) { let a = kids.get(n.parent); if (!a) kids.set(n.parent, a = []); a.push(byId.get(n.id)); } });
+    const seedKids = pid => {
+      const p = byId.get(pid), list = kids.get(pid); if (!p || !list) return;
+      const out = Math.atan2(p.y, p.x) || 0, span = Math.min(2 * Math.PI, 0.55 * list.length + 0.6);
+      list.forEach((k, i) => { const a = out + (list.length > 1 ? (i / (list.length - 1) - 0.5) * span : 0); k.x = p.x + Math.cos(a) * (p.r + 28); k.y = p.y + Math.sin(a) * (p.r + 28); k.hasPos = true; });
+      list.forEach(k => seedKids(k.id));
+    };
+    for (const pid of [...kids.keys()]) if (!(byId.get(pid) || {}).sat) seedKids(pid);
+    const sibs = new Map(); for (const e of spec.edges) if (e.sat) sibs.set(e.a, (sibs.get(e.a) || 0) + 1);
     for (const e of spec.edges) {
       const s = byId.get(e.a), t = byId.get(e.b); if (!s || !t) continue;
-      const len = e.sat ? s.r + t.r + 16 : 76 + 0.7 * (s.r + t.r);
+      const len = e.sat ? s.r + t.r + 26 + 2.4 * (sibs.get(e.a) || 0) : 76 + 0.7 * (s.r + t.r);
       edges.push({ a: e.a, b: e.b, s, t, len, rel: e.rel, sat: !!e.sat });
       for (const [m, k, v] of [[adj, e.a, e.b], [adj, e.b, e.a], [out, e.a, e.b], [inn, e.b, e.a]]) { let x = m.get(k); if (!x) m.set(k, x = new Set()); x.add(v); }
     }
@@ -865,7 +889,13 @@ function makeGraph(host, o) {
     const real = nodes.filter(n => !n.sat).sort((a, b) => b.imp - a.imp);
     labelTop = new Set(real.slice(0, Math.min(o.mini ? 5 : 16, Math.max(o.mini ? 5 : 8, Math.ceil(0.2 * real.length)))).map(n => n.id));
     if (sel && !byId.has(sel)) sel = null;
-    settle(old.size ? 140 : 300, old.size ? 0.7 : 1);
+    // only satellites came or went: keep every real item where it is and let just the satellites settle
+    const realNow = nodes.filter(n => !n.sat), realOld = [...old.values()].filter(n => !n.sat);
+    const soft = old.size > 0 && realNow.length === realOld.length && realNow.every(n => old.has(n.id) && !old.get(n.id).sat);
+    const now = performance.now();
+    for (const n of nodes) if (old.size && !old.has(n.id) && n.sat) { n.born = now; animUntil = now + 300; }
+    if (soft) { const keep = realNow.map(n => [n, n.pinned]); keep.forEach(([n]) => { n.pinned = true; }); settle(90, 0.6); keep.forEach(([n, pn]) => { n.pinned = pn; }); }
+    else settle(old.size ? 140 : 300, old.size ? 0.7 : 1);
     if (!old.size) needFit = true;
     request();
   }
@@ -906,6 +936,7 @@ function makeGraph(host, o) {
     raf = 0;
     if (alpha > 0.004) { step(alpha); alpha *= 0.94; request(true); }
     draw();
+    if (performance.now() < animUntil) request(true);
   }
   function request(anim) { if (!raf) raf = requestAnimationFrame(animate); }
   function reheat(a) { alpha = Math.max(alpha, a); request(); }
@@ -940,57 +971,73 @@ function makeGraph(host, o) {
     }
     return best;
   }
-  function focusSet() {
-    const f = hover || sel; if (!f) return null;
-    const s = new Set([f]); (adj.get(f) || new Set()).forEach(x => s.add(x)); return s;
+  function nbSet(f) { const s = new Set([f]); (adj.get(f) || new Set()).forEach(x => s.add(x)); return s; }
+  function selSet() {   // the selected item, what touches it, its satellites and what those touch
+    if (!sel || !fadeSel || o.mini || !byId.has(sel)) return null;
+    const s = nbSet(sel);
+    for (const n of nodes) if (n.sat && s.has(n.id)) (adj.get(n.id) || new Set()).forEach(x => s.add(x));
+    return s;
   }
-  function ringOf(n, ctx2) {
-    const st = n.status;
+  function focusSet() {   // everything outside this set is faded
+    const hs = hover ? nbSet(hover) : null, ss = selSet();
+    if (hs && ss) { ss.forEach(x => hs.add(x)); return hs; }
+    return hs || ss;
+  }
+  const BADGE = { look: '↻', fix: '✕', fine: '✓', ign: '–' };
+  function ringOf(n, q, ctx2) {   // status is only ever a ring or a badge, never the fill: type owns the colour
+    const st = n.status, k = n.sat ? 0.6 : 1;
     ctx2.setLineDash([]);
-    if (n.sat) { ctx2.lineWidth = 1.2; ctx2.strokeStyle = n.status && n.status !== 'ok' ? C[STATUS_COL[n.status].slice(2)] : C['border-strong']; ctx2.stroke(); return; }
-    if (st === 'look') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.amber; ctx2.setLineDash([6, 4]); ctx2.stroke(); }
-    else if (st === 'fix') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.red; ctx2.stroke(); ctx2.beginPath(); ctx2.arc(n.x, n.y, n.r + 4.5, 0, 6.2832); ctx2.lineWidth = 1.3; ctx2.stroke(); }
-    else if (st === 'fine') { ctx2.lineWidth = 3; ctx2.strokeStyle = C.verify; ctx2.stroke(); }
-    else if (st === 'ign') { ctx2.lineWidth = 1.2; ctx2.strokeStyle = C.muted; ctx2.setLineDash([1.5, 3]); ctx2.stroke(); }
-    else { ctx2.lineWidth = 2; ctx2.strokeStyle = C['border-strong']; ctx2.stroke(); }
-    ctx2.setLineDash([]);
+    const ring = (gap, w, col, dash) => { ctx2.beginPath(); ctx2.arc(q.x, q.y, q.r + gap, 0, 6.2832); ctx2.lineWidth = w; ctx2.strokeStyle = col; ctx2.setLineDash(dash || []); ctx2.stroke(); ctx2.setLineDash([]); };
+    if (st === 'look') ring(4.5 * k + 1, 3 * k + 0.4, C.amber, [6 * k + 1, 4 * k]);
+    else if (st === 'fix') { ring(4.5 * k + 1, 3 * k + 0.4, C.red); if (!n.sat) ring(8.5, 1.2, C.red); }
+    else if (st === 'ign') ring(4, 1.2, C.muted, [1.5, 3]);
   }
   function draw() {
     if (!W) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
-    const fs = focusSet(), f = hover || sel, dimS = hover ? fs : null;
+    const dimS = focusSet(), f = hover || sel, now = performance.now();
+    const P = n => {   // satellites grow out of their parent
+      if (!n.born) return n;
+      const t = (now - n.born) / 260; if (t >= 1) { n.born = 0; return n; }
+      const e = 1 - Math.pow(1 - Math.max(0, t), 3), p = byId.get(n.parent) || n;
+      return { x: p.x + (n.x - p.x) * e, y: p.y + (n.y - p.y) * e, r: n.r * (0.35 + 0.65 * e), a: e };
+    };
     ctx.save(); ctx.translate(V.tx, V.ty); ctx.scale(V.k, V.k);
     for (const e of edges) {
-      const touch = f && (e.a === f || e.b === f);
-      ctx.beginPath(); ctx.moveTo(e.s.x, e.s.y); ctx.lineTo(e.t.x, e.t.y);
-      if (touch && !e.sat) {
+      const touch = f && (e.a === f || e.b === f), sp = P(e.s), tp = P(e.t), lit = dimS && dimS.has(e.a) && dimS.has(e.b);
+      ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(tp.x, tp.y);
+      if (e.sat && fadeSel && lit) { ctx.globalAlpha = 0.9 * (tp.a || 1); ctx.lineWidth = 1.7 / V.k; ctx.strokeStyle = C.up; ctx.setLineDash([]); }
+      else if (touch && !e.sat) {
         ctx.globalAlpha = 1; ctx.lineWidth = 2 / V.k;
         if (e.a === f) { ctx.strokeStyle = C.up; ctx.setLineDash([]); } else { ctx.strokeStyle = C['down-stroke']; ctx.setLineDash([6 / V.k, 4 / V.k]); }
-      } else { ctx.globalAlpha = dimS ? (dimS.has(e.a) && dimS.has(e.b) ? 0.4 : 0.07) : (e.sat ? 0.3 : 0.4); ctx.lineWidth = 1 / V.k; ctx.strokeStyle = C['border-strong']; ctx.setLineDash(e.sat ? [3 / V.k, 3 / V.k] : []); }
+      } else { ctx.globalAlpha = dimS ? (lit ? 0.4 : 0.06) : (e.sat ? 0.3 : 0.4); ctx.lineWidth = 1 / V.k; ctx.strokeStyle = C['border-strong']; ctx.setLineDash(e.sat ? [3 / V.k, 3 / V.k] : []); }
       ctx.stroke();
     }
     ctx.setLineDash([]); ctx.globalAlpha = 1;
     for (const n of nodes) {
+      const q = P(n);
       let a = 1;
       if (dimS && !dimS.has(n.id)) a = 0.15; else if (!dimS && o.dimOk && n.status === 'ok' && !n.sat) a = 0.35;
-      ctx.globalAlpha = a;
-      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 6.2832); ctx.fillStyle = n.tint || C.sunken; ctx.fill();
-      ringOf(n, ctx);
-      if (sel === n.id) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r + (n.status === 'fix' ? 8 : 5), 0, 6.2832); ctx.lineWidth = 3; ctx.strokeStyle = C.ink; ctx.stroke(); }
-      if (kfocus === n.id) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 8, 0, 6.2832); ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]); }
-      if (!n.sat && n.glyph) {
-        ctx.fillStyle = C.ink; ctx.font = '600 ' + Math.round(Math.max(10, Math.min(n.r * 0.85, 26))) + 'px ' + C.mono; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(n.glyph, n.x, n.y + 1);
+      ctx.globalAlpha = a * (q.a || 1);
+      ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, 6.2832); ctx.fillStyle = n.tint || C.sunken; ctx.fill();
+      ctx.lineWidth = n.sat ? 1.8 : 2.2; ctx.strokeStyle = n.col || C['border-strong']; ctx.setLineDash(n.dash ? [4, 3] : []); ctx.stroke(); ctx.setLineDash([]);
+      ringOf(n, q, ctx);
+      const emph = emphNid && (n.nid === emphNid || n.id === emphNid);
+      if (sel === n.id || emph) { ctx.beginPath(); ctx.arc(q.x, q.y, q.r + (n.status === 'fix' || n.status === 'look' ? 9 : 5) * (n.sat ? 0.8 : 1), 0, 6.2832); ctx.lineWidth = emph && n.sat ? 2.6 : 3; ctx.strokeStyle = C.ink; ctx.stroke(); }
+      if (kfocus === n.id) { ctx.beginPath(); ctx.arc(q.x, q.y, q.r + 8, 0, 6.2832); ctx.lineWidth = 2; ctx.strokeStyle = C.ink; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]); }
+      if (n.glyph && (!n.sat || q.r >= 9)) {
+        ctx.fillStyle = C.ink; ctx.font = '600 ' + Math.round(n.sat ? 10 : Math.max(10, Math.min(q.r * 0.85, 26))) + 'px ' + C.mono; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(n.glyph, q.x, q.y + 1);
       }
       if (!n.sat && n.status && n.status !== 'ok') {
-        const bx = n.x + n.r * 0.72, by = n.y - n.r * 0.72, br = Math.max(8, Math.min(11, n.r * 0.45));
-        ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fillStyle = C.surface; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = C[STATUS_COL[n.status].slice(2)]; ctx.stroke();
-        ctx.fillStyle = C[STATUS_COL[n.status].slice(2)]; ctx.font = '700 ' + Math.round(br * 1.1) + 'px ' + C.font; ctx.fillText(ST[n.status].glyph, bx, by + 0.5);
+        const bx = q.x + q.r * 0.72, by = q.y - q.r * 0.72, br = Math.max(8, Math.min(11, q.r * 0.45)), sc = C[STATUS_COL[n.status].slice(2)];
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fillStyle = C.surface; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = sc; ctx.stroke();
+        ctx.fillStyle = sc; ctx.font = '700 ' + Math.round(br * 1.1) + 'px ' + C.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(BADGE[n.status] || '', bx, by + 0.5);
       }
-      if (n.pinned && !n.sat) { ctx.beginPath(); ctx.arc(n.x - n.r * 0.72, n.y - n.r * 0.72, 3, 0, 6.2832); ctx.fillStyle = C.ink; ctx.fill(); }
+      if (n.pinned && !n.sat) { ctx.beginPath(); ctx.arc(q.x - q.r * 0.72, q.y - q.r * 0.72, 3, 0, 6.2832); ctx.fillStyle = C.ink; ctx.fill(); }
     }
     ctx.restore(); ctx.globalAlpha = 1;
-    drawLabels(fs, dimS);
+    drawLabels(dimS || (sel && !o.mini ? nbSet(sel) : null), dimS);
   }
   function drawLabels(fs, dimS) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -999,7 +1046,7 @@ function makeGraph(host, o) {
     const real = nodes.filter(n => !n.sat);
     for (const n of real) {
       let pr = 9;
-      if (hover === n.id || sel === n.id) pr = 0;
+      if (hover === n.id || sel === n.id || (emphNid && n.id === emphNid)) pr = 0;
       else if (fs && fs.has(n.id)) pr = 1;
       else if (dimS) continue;
       else if (n.status !== 'ok') pr = 2;
@@ -1009,7 +1056,11 @@ function makeGraph(host, o) {
       if (o.mini && pr > 1 && pr !== 3) continue;
       cand.push({ n, pr });
     }
-    if (hover) { const hn = byId.get(hover); if (hn && hn.sat) cand.push({ n: hn, pr: 0 }); }
+    const have = new Set(cand.map(c => c.n.id));
+    for (const n of nodes) if (n.sat && !have.has(n.id)) {
+      const em = emphNid && n.nid === emphNid;
+      if (hover === n.id || em) cand.push({ n, pr: 0 }); else if (fadeSel && dimS && dimS.has(n.id) && !n.born) cand.push({ n, pr: 1 });
+    }
     cand.sort((a, b) => a.pr - b.pr || b.n.imp - a.n.imp);
     const hits = (r, self) => {
       if (r.x < 2 || r.y < 2 || r.x + r.w > W - 2 || r.y + r.h > H - 2) return true;
@@ -1018,20 +1069,22 @@ function makeGraph(host, o) {
       return false;
     };
     for (const { n, pr } of cand) {
-      const full = trunc(n.sat ? n.label : (n.short || n.title), o.mini ? 18 : 26), variants = [full];
-      if (!n.sat && full.includes(' · ')) variants.push(full.split(' · ')[0]);
+      const full = trunc(n.sat ? n.label : (n.short || n.title), o.mini ? 18 : 26), variants = [[full, 1]];
+      if (!n.sat && full.includes(' · ')) variants.push([full.split(' · ')[0], 1]);
+      if (!n.sat && n.status !== 'ok' && pr <= 2 && !o.mini) { variants.push([full, 0]); if (full.includes(' · ')) variants.push([full.split(' · ')[0], 0]); }
       let title = full, w = 0, hh = 0, pos2 = null;
-      for (const v of variants) {
+      for (const [v, withS] of variants) {
         title = v;
-        const px = o.mini ? 11 : (n.r < 20 ? 12 : 13), font = (pr === 0 ? '600 ' : '') + px + 'px ' + C.font;
-        const flag = !n.sat && n.status !== 'ok' && !o.mini && pr <= 2;
+        const px = o.mini || n.sat ? 11 : (n.r < 20 ? 12 : 13), font = (pr === 0 ? '600 ' : '') + px + 'px ' + C.font;
+        const flag = withS && !n.sat && n.status !== 'ok' && !o.mini && pr <= 2;
         const sline = flag ? ST[n.status].glyph + ' ' + ST[n.status].say : null;
         w = Math.max(tw(v, font), sline ? tw(sline, '11px ' + C.font) : 0); hh = px + 3 + (sline ? 14 : 0);
         const sx = n.x * V.k + V.tx, sy = n.y * V.k + V.ty, rr = n.r * V.k;
         const tries = [[sx - w / 2, sy + rr + 3], [sx + rr + 10, sy - hh / 2], [sx - rr - 10 - w, sy - hh / 2], [sx - w / 2, sy - rr - 3 - hh]];
+        if (fadeSel && sel === n.id) tries.unshift(tries.pop());   // satellites fan outwards, so keep the item's own label on the inner side
         for (const t of tries) { const r = { x: t[0], y: t[1], w, h: hh }; if (!hits(r, n.id)) { pos2 = r; break; } }
         if (pos2) { n._px = px; n._font = font; n._sline = sline; break; }
-        if (v === variants[variants.length - 1] && pr <= 2) { pos2 = { x: Math.max(2, Math.min(W - w - 2, tries[0][0])), y: Math.min(tries[0][1], H - hh - 2), w, h: hh }; n._px = px; n._font = font; n._sline = sline; }
+        if (v === variants[variants.length - 1][0] && withS === variants[variants.length - 1][1] && pr <= 2) { pos2 = { x: Math.max(2, Math.min(W - w - 2, tries[0][0])), y: Math.min(tries[0][1], H - hh - 2), w, h: hh }; n._px = px; n._font = font; n._sline = sline; }
       }
       if (!pos2) continue;
       const fpx = n._px, font = n._font, sline = n._sline;
@@ -1083,7 +1136,7 @@ function makeGraph(host, o) {
     } else if (d.type === 'node') { pos.set(d.n.id, { x: d.n.x, y: d.n.y }); if (o.onPin) o.onPin(pos); }
   };
   window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
-  cv.addEventListener('dblclick', ev => { const p = evPos(ev), n = hit(p.x, p.y); if (!n) return; if (n.pinned && !n.sat) { n.pinned = false; pos.delete(n.id); if (o.onPin) o.onPin(pos); reheat(0.3); } else if (o.onExpand && !n.sat) o.onExpand(n.id); });
+  cv.addEventListener('dblclick', ev => { const p = evPos(ev), n = hit(p.x, p.y); if (n && o.onOpen) o.onOpen(n); });
   cv.addEventListener('wheel', ev => { if (o.mini) return; ev.preventDefault(); const p = evPos(ev); zoomAt(ev.deltaY < 0 ? 1.12 : 1 / 1.12, p.x, p.y); }, { passive: false });
   cv.addEventListener('keydown', ev => {
     if (o.mini) return;
@@ -1113,7 +1166,19 @@ function makeGraph(host, o) {
   return {
     setData, fit: () => { fit(); }, resize, redraw: request,
     zoomBy: f => zoomAt(f, W / 2, H / 2),
-    setSelected(id) { sel = id; request(); },
+    setSelected(id, fade) { sel = id; fadeSel = !!fade && !!id; request(); },
+    setEmph(nid) { emphNid = nid || null; request(); },
+    reveal(id) {   // nudge the view so the item and its satellites are on screen
+      const n = byId.get(id); if (!n || !W) return;
+      let x0 = n.x - n.r, x1 = n.x + n.r, y0 = n.y - n.r, y1 = n.y + n.r;
+      for (const m of nodes) if (m.sat) { x0 = Math.min(x0, m.x - m.r - 40); x1 = Math.max(x1, m.x + m.r + 40); y0 = Math.min(y0, m.y - m.r - 22); y1 = Math.max(y1, m.y + m.r + 22); }
+      const pad = 16, bot = H - 96; let dx = 0, dy = 0;
+      const sx0 = x0 * V.k + V.tx, sx1 = x1 * V.k + V.tx, sy0 = y0 * V.k + V.ty, sy1 = y1 * V.k + V.ty;
+      if (sx0 < pad) dx = pad - sx0; else if (sx1 > W - pad) dx = W - pad - sx1;
+      if (sy0 < pad) dy = pad - sy0; else if (sy1 > bot) dy = bot - sy1;
+      if (sx1 - sx0 > W - 2 * pad) dx = (W - (sx0 + sx1)) / 2;
+      if (dx || dy) { V.tx += dx; V.ty += dy; request(); }
+    },
     rearrange() { pos.clear(); nodes.forEach(n => { n.pinned = false; }); if (o.onPin) o.onPin(pos); nodes.forEach(n => { n.x *= 0.3; n.y *= 0.3; }); settle(300, 1); fit(); },
     focusOn(id) { const n = byId.get(id); if (n && W) { V.tx = W / 2 - n.x * V.k; V.ty = H / 2 - n.y * V.k; sel = id; request(); } },
     visible: () => nodes.filter(n => !n.sat).map(n => n.id),
@@ -1364,7 +1429,7 @@ function evidenceRow(nid) {
   const f = nodeFlag(nid), al = IX.alarm.get(nid), open = !!S.openEv[nid];
   const row = h('div', { class: 'evrow', 'data-ev': nid },
     h('button', { class: 'evhead', 'aria-expanded': String(open), onclick: () => { S.openEv[nid] = !S.openEv[nid]; renderPage(true); } },
-      h('span', { class: 'caret' }, open ? '▾' : '▸'), mono(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n)), n.kind === 'run' ? h('span', { class: 'muted' }, ' run') : null,
+      h('span', { class: 'caret' }, open ? '▾' : '▸'), tdot(typeOfFile(n.kind)), mono(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n)), n.kind === 'run' ? h('span', { class: 'muted' }, ' run') : null,
       f ? chip(f) : null, h('span', { class: 'muted note' }, nodeNote(nid))),
     h('button', { class: 'linkbtn sm', onclick: () => copyText(pathOf(n)) }, 'Copy path'));
   if (open) {
@@ -1381,7 +1446,7 @@ function pageItem(it) {
   const root = doc();
   const st = ST[it.status];
   root.append(h('div', { class: 'ititle' },
-    h('h1', { class: 'ptitle' }, it.title),
+    h('h1', { class: 'ptitle' }, tdot(typeOfItem(it)), it.title),
     h('div', { class: 'imeta' }, h('span', { class: 'muted' }, kindLabel(it)), chip(it.status), it.finds.length ? plainChip('!', plural(it.finds.length, 'check')) : null,
       h('span', { class: 'grow' }), h('button', { class: 'btn', onclick: () => { S.gf.mode = 'around'; S.sel = it.id; openTab('graph'); } }, 'Open graph around this item'))));
   // why it needs attention
@@ -1424,7 +1489,7 @@ function pageItem(it) {
     }
     if (it.sharedUse.length) evBody.push(h('div', { class: 'evgroup' }, h('div', { class: 'evg' }, 'Shared with other items'), it.sharedUse.map(sid => {
       const s = M.byId.get(sid); const others = s.users.filter(u => u !== it.id).map(u => lead(M.byId.get(u)));
-      return h('div', { class: 'evrow' }, h('button', { class: 'evhead', onclick: () => openItem(sid) }, h('span', { class: 'caret' }, '↗'), mono(s.title), h('span', { class: 'muted note' }, 'also used by ' + (others.join(', ') || 'nothing else'))));
+      return h('div', { class: 'evrow' }, h('button', { class: 'evhead', onclick: () => openItem(sid) }, h('span', { class: 'caret' }, '↗'), tdot(typeOfItem(s)), mono(s.title), h('span', { class: 'muted note' }, 'also used by ' + (others.join(', ') || 'nothing else'))));
     })));
   }
   if (!evBody.length) {
@@ -1595,7 +1660,7 @@ function graphSpec(opts) {
   let allowed = null;
   if (opts.local) allowed = neighboursOf(opts.local, opts.depth);
   else if (gf.mode === 'around' && S.sel && M.byId.has(S.sel)) allowed = neighboursOf(S.sel, gf.depth);
-  const mkNode = (it, scale) => ({ id: it.id, item: it, r: Math.max(opts.local ? 9 : 12, it.r * scale), kind: it.kind, status: it.status, imp: it.imp, title: it.title, short: it.short, tint: css(KIND_TINT[it.kind] || '--sunken'), glyph: KIND_GLYPH[it.kind] || '' });
+  const mkNode = (it, scale) => { const ty = typeOfItem(it), c = tcol(ty); return { id: it.id, item: it, type: ty, r: Math.max(opts.local ? 9 : 12, it.r * scale), kind: it.kind, status: it.status, imp: it.imp, title: it.title, short: it.short, tint: c.t, col: c.s, dash: c.dash, glyph: it.shared ? TYPES[ty].glyph : (PAPER_GLYPH[it.kind] || TYPES[ty].glyph) }; };
   for (const it of M.items) {
     if (allowed ? !allowed.has(it.id) : !show(it)) continue;
     nodes.push(mkNode(it, opts.local ? 0.62 : 1)); ids.add(it.id);
@@ -1603,27 +1668,52 @@ function graphSpec(opts) {
   for (const e of M.iedges) if (ids.has(e.a) && ids.has(e.b)) edges.push({ a: e.a, b: e.b, rel: e.rel });
   if (!opts.local) {
     const cats = { code: gf.code, run: gf.runs, result: gf.results, asset: gf.results, data: gf.results, doc: gf.results, config: gf.settings };
-    const expand = it => gf.files || gf.expanded.includes(it.id);
+    const satFor = (nid, parent) => {
+      const n = IX.node.get(nid), si = M.byId.get(nid), ty = typeOfFile(n.kind), c = tcol(ty);
+      return { id: 'sat:' + nid + '@' + parent, sat: true, parent, r: 11, kind: 'file', type: ty, status: (si && si.shared ? si.status : nodeFlag(nid)) || 'ok', imp: 0, label: n.kind === 'run' ? n.name.replace(/^run\s+/, '') : basename(pathOf(n)), title: pathOf(n), nid, tint: c.t, col: c.s, dash: c.dash, glyph: TYPES[ty].glyph };
+    };
+    const evItem = S.ev.item && ids.has(S.ev.item) ? M.byId.get(S.ev.item) : null;
+    const made = new Map();   // file node id -> satellite id, for the opened item
+    const addSat = (nid, parent) => { const sat = satFor(nid, parent); nodes.push(sat); edges.push({ a: parent, b: sat.id, sat: true }); return sat; };
     for (const it of M.items) {
-      if (!ids.has(it.id) || it.ref || it.shared || !expand(it)) continue;
-      for (const e of it.ev) {
-        const n = IX.node.get(e.id); if (!n || !cats[n.kind]) continue;
-        const sid = 'sat:' + e.id + '@' + it.id;
-        nodes.push({ id: sid, sat: true, parent: it.id, r: 6, kind: 'file', status: nodeFlag(e.id) || 'ok', imp: 0, label: n.kind === 'run' ? n.name : basename(pathOf(n)), title: pathOf(n), nid: e.id, tint: css(n.kind === 'code' || n.kind === 'config' || n.kind === 'run' ? '--layer-code-t' : '--layer-result-t') });
-        edges.push({ a: it.id, b: sid, sat: true });
+      if (!ids.has(it.id) || it.ref) continue;
+      const open = it === evItem;
+      if (!(gf.files || open) || (it.shared && !open)) continue;
+      let owned = it.shared ? evDeps(it.id).map(d => d.id) : it.ev.map(e => e.id).concat(open ? it.sharedUse.filter(sid => !ids.has(sid)) : []);
+      let more = 0;
+      if (open && owned.length > MAXSAT) {   // too many to read on a canvas: things to look at first, then results/runs/settings, then scripts; the sidebar lists them all
+        const must = new Set([S.ev.row].concat(S.ev.trail || [])), rank = id => { const f = nodeFlag(id); return (must.has(id) ? -2 : 0) + (f === 'look' || f === 'fix' ? -1 : 0) + (IX.node.get(id).kind === 'code' ? 0.5 : 0); };
+        const sorted = owned.map((id, i) => [id, rank(id), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+        owned = sorted.slice(0, MAXSAT).map(x => x[0]); more = sorted.length - MAXSAT;
+      }
+      if (more) { const mid = 'sat:more@' + it.id; nodes.push({ id: mid, sat: true, more: true, parent: it.id, r: 11, kind: 'file', type: 'code', status: 'ok', imp: 0, label: '+' + more + ' more', title: more + ' more files behind this item', nid: null, tint: css('--sunken'), col: css('--border-strong'), glyph: '…' }); edges.push({ a: it.id, b: mid, sat: true }); }
+      for (const nid of owned) { const n = IX.node.get(nid); if (!n || (!open && !cats[n.kind])) continue; const sat = addSat(nid, it.id); if (open) made.set(nid, sat.id); }
+    }
+    if (evItem) for (const t of S.ev.trail || []) {   // a satellite is open too: show what it rests on
+      if (!made.has(t)) break;
+      const fs = made.get(t);
+      for (const d of evDeps(t)) {
+        if (made.has(d.id)) { if (made.get(d.id) !== fs) edges.push({ a: fs, b: made.get(d.id), sat: true }); continue; }
+        const sat = satFor(d.id, fs); nodes.push(sat); edges.push({ a: fs, b: sat.id, sat: true }); made.set(d.id, sat.id);
       }
     }
     if (gf.unused && !allowed) {
-      for (const n of M.unused.slice(0, 60)) nodes.push({ id: 'sat:u:' + n.id, sat: true, parent: null, r: 6, kind: 'file', status: 'ok', imp: 0, label: basename(pathOf(n)), title: pathOf(n), nid: n.id, tint: css('--sunken') });
+      for (const n of M.unused.slice(0, 60)) nodes.push({ id: 'sat:u:' + n.id, sat: true, parent: null, r: 8, kind: 'file', type: typeOfFile(n.kind), status: 'ok', imp: 0, label: basename(pathOf(n)), title: pathOf(n), nid: n.id, tint: css('--sunken'), col: css('--border-strong'), glyph: '' });
     }
   }
   return { nodes, edges };
 }
+function evDeps(nid) {   // files and runs this file rests on
+  const out = [], seen = new Set();
+  for (const e of IX.pout.get(nid) || []) { const n = IX.node.get(e.to); if (n && FILEK.has(n.kind) && !seen.has(n.id)) { seen.add(n.id); out.push({ id: n.id, kind: e.kind }); } }
+  return out;
+}
 function itemTip(n) {
-  if (n.sat) return h('div', null, h('b', { class: 'mono' }, n.title), h('div', { class: 'muted' }, n.nid && (IX.node.get(n.nid) ? FILE_WORD[IX.node.get(n.nid).kind] || 'A file' : 'A file') + ' behind an item'));
+  if (n.more) return h('div', null, h('b', null, n.title), h('div', { class: 'muted' }, 'Click to open the item and see them all.'));
+  if (n.sat) return h('div', null, h('b', { class: 'mono' }, n.title), h('div', { class: 'muted' }, (n.nid && IX.node.get(n.nid) ? FILE_WORD[IX.node.get(n.nid).kind] || 'A file' : 'A file') + ' · ' + ST[n.status].say), h('div', { class: 'muted' }, 'Click to see what it rests on. Double-click to open it.'));
   const it = n.item;
   return h('div', null, h('div', { class: 'tt' }, it.title), h('div', { class: 'muted' }, kindLabel(it)), h('div', { class: 'ttr' }, chip(it.status)), h('div', { class: 'muted' }, plural(it.links, 'connection')),
-    !it.ref && !it.shared && it.ev.length ? h('div', { class: 'muted' }, 'Double-click to show the files behind it.') : null);
+    !it.ref && !it.shared && it.ev.length ? h('div', { class: 'muted' }, 'Click to see its supporting evidence. Double-click to open it.') : null);
 }
 function ensureGraph() {
   if (GR.el) return;
@@ -1631,10 +1721,10 @@ function ensureGraph() {
   GR.pos = new Map(lsGet(UIKEY + '.pos', []).map(p => [p[0], { x: p[1], y: p[2] }]));
   GR.g = makeGraph(GR.host, {
     pos: GR.pos, dimOk: false, tooltip: itemTip,
-    onClick: (id, ev) => { if (!id) { S.sel = null; renderRight(); return; } S.sel = id; openItem(id, true); },
-    onHover: id => { S.hoverItem = id; clearTimeout(GR.ht); GR.ht = setTimeout(renderRight, 70); },
-    onExpand: id => { const a = S.gf.expanded; const i = a.indexOf(id); if (i >= 0) a.splice(i, 1); else a.push(id); persistUI(); GR.sig = ''; syncGraph(); },
-    onClickSat: n => { if (n.nid) openNode(n.nid); },
+    onClick: id => { if (id) evOpen(id); else evClose(); },
+    onHover: id => { if (S.ev.item) return; S.hoverItem = id; clearTimeout(GR.ht); GR.ht = setTimeout(renderRight, 70); },
+    onClickSat: n => { if (n.more) openItem(n.parent); else evSat(n); },
+    onOpen: n => { if (n.sat) { if (n.nid) openNode(n.nid); } else openItem(n.id); },
     onPin: p => lsSet(UIKEY + '.pos', [...p].map(([k, v]) => [k, Math.round(v.x), Math.round(v.y)])),
   });
   GR.el = h('div', { class: 'gview' });
@@ -1644,7 +1734,8 @@ function syncGraph() {
   const spec = graphSpec(), sig = JSON.stringify([spec.nodes.map(n => n.id), spec.edges.length, S.gf.mode, S.gf.depth, S.gf.mode === 'around' ? S.sel : '']);
   GR.g.dimOnly(S.gf.onlyChanged);
   if (sig !== GR.sig) { GR.sig = sig; GR.g.setData(spec); } else GR.g.patch(spec.nodes);
-  GR.g.setSelected(S.sel);
+  GR.g.setSelected(S.ev.item || S.sel, !!S.ev.item);
+  GR.g.setEmph(S.ev.row);
 }
 function pageGraph() {
   ensureGraph();
@@ -1660,9 +1751,11 @@ function pageGraph() {
     h('button', { class: 'btn', 'aria-label': 'Zoom out', onclick: () => GR.g.zoomBy(1 / 1.25) }, '−'), h('button', { class: 'btn', 'aria-label': 'Zoom in', onclick: () => GR.g.zoomBy(1.25) }, '+'),
     h('button', { class: 'btn', onclick: () => GR.g.fit() }, 'Fit'));
   const legend = h('div', { class: 'glegend' },
-    h('div', null, Object.values(ST).map(s => h('span', { class: 'lg ' + s.cls }, s.glyph + ' ' + s.word))),
-    h('div', { class: 'muted' }, 'Circle size = how many things connect to it. Double-click an item to see the files behind it.'),
-    S.sel ? h('div', null, h('span', { class: 'lg up' }, '▲ Rests on (blue, solid)'), h('span', { class: 'lg down' }, '▼ Supports (orange, dashed)')) : null);
+    h('div', { class: 'lgrow' }, h('span', { class: 'lgh' }, 'What it is'), TYPE_ORDER.map(t => h('span', { class: 'lg' }, h('span', { class: 'sw t-' + t }), TYPES[t].word))),
+    h('div', { class: 'lgrow' }, h('span', { class: 'lgh' }, 'Status'),
+      h('span', { class: 'lg look' }, h('span', { class: 'rs look' }), '↻ Needs a second look'), h('span', { class: 'lg fix' }, h('span', { class: 'rs fix' }), '✕ Needs fixing'),
+      h('span', { class: 'lg fine' }, '✓ Looks fine'), h('span', { class: 'lg ok' }, 'No ring = up to date')),
+    h('div', { class: 'muted' }, 'Click an item to see the evidence it rests on (blue lines). Double-click to open it. Circle size = how many things connect to it.'));
   const wrap = h('div', { class: 'gpage' }, tb);
   if (S.listView) wrap.append(graphList());
   else {
@@ -1671,6 +1764,133 @@ function pageGraph() {
     if (!M.items.filter(i => !i.ref).length) GR.el.append(h('div', { class: 'gmsg' }, 'There is nothing to draw yet. Lemmata draws your paper\'s figures, tables and sections once it has read a paper or a README.'));
   }
   return wrap;
+}
+/* ---------- click an item: show its supporting evidence ---------- */
+function evSync(reveal) {
+  GR.sig = ''; syncGraph();
+  if (reveal && GR.g && S.ev.item) GR.g.reveal(S.ev.item);
+  renderRight();
+}
+function evOpen(id) {
+  if (S.gf.mode !== 'around') S.sel = id;
+  S.ev = { item: id, file: null, row: null, trail: [] };
+  evSync(true);
+}
+function evClose() {
+  if (!S.ev.item && !S.sel) return;
+  if (S.gf.mode !== 'around') S.sel = null;
+  S.ev = { item: null, file: null, row: null, trail: [] };
+  evSync();
+}
+function evSat(n) {
+  if (!n.nid || !S.ev.item) return;
+  const pn = String(n.parent || '').startsWith('sat:') ? String(n.parent).slice(4, String(n.parent).indexOf('@')) : null;
+  const i = pn ? S.ev.trail.indexOf(pn) : -1;
+  S.ev.trail = (i >= 0 ? S.ev.trail.slice(0, i + 1) : []).concat(n.nid);
+  S.ev.file = n.nid; S.ev.row = n.nid;
+  evSync(true);
+}
+const MAXSAT = 14;
+const EV_GROUP = { result: ['results', 'Results'], code: ['code', 'Code'], run: ['runs', 'Runs'], setting: ['settings', 'Settings and data'] };
+function whyLine(nid, si) {
+  const n = IX.node.get(nid); if (!n) return '';
+  const outs = IX.pout.get(nid) || [], ins = IX.pin.get(nid) || [], parts = [];
+  const bareName = id => { const m = IX.node.get(id); return m ? (m.kind === 'run' ? m.name.replace(/^run\s+/, '') : basename(pathOf(m))) : id; };
+  const OUTP = { produced_by: 'made by', generated_by: 'made by', traces_to: 'built from', executes: 'runs', reads: 'reads', imports: 'imports', value_match: 'linked by you to', includes: 'shows' };
+  const INP = { executes: 'run by', reads: 'read by', imports: 'imported by', produced_by: 'makes', generated_by: 'makes', includes: 'shown in', traces_to: 'feeds', value_match: 'linked by you to' };
+  for (const e of outs.slice(0, 3)) {
+    const t = IX.node.get(e.to); if (!t || PAPER.has(t.kind)) continue;
+    if ((e.kind === 'produced_by' || e.kind === 'generated_by') && t.kind === 'run') {
+      const ex = (IX.pout.get(t.id) || []).find(x => x.kind === 'executes');
+      parts.push('made by ' + (ex ? bareName(ex.to) + ' on run ' : 'run ') + bareName(t.id));
+    } else parts.push((OUTP[e.kind] || 'uses') + ' ' + (t.kind === 'run' ? 'run ' : '') + bareName(t.id));
+    if (parts.length >= 3) break;
+  }
+  for (let i = parts.length - 1; i >= 0; i--) if (parts.some(q => q.startsWith(parts[i] + ' on run '))) parts.splice(i, 1);
+  parts.splice(2);
+  if (!parts.length) for (const e of ins) {
+    const f = IX.node.get(e.from); if (!f) continue;
+    parts.push((INP[e.kind] || 'used by') + ' ' + (PAPER.has(f.kind) ? (M.byId.get(M.paperId.get(f.id)) || { short: f.name }).short : (f.kind === 'run' ? 'run ' : '') + bareName(f.id)));
+    if (parts.length >= 1) break;
+  }
+  let t = parts.join('; ');
+  if (si && si.users && si.users.length) t = (t ? t + '; ' : '') + 'also behind ' + si.users.map(u => M.byId.get(u).short).slice(0, 2).join(' and ') + (si.users.length > 2 ? ' and ' + (si.users.length - 2) + ' more' : '');
+  if (nodeFlag(nid) === 'look' || nodeFlag(nid) === 'fix') { const note = nodeNote(nid); if (note && note !== 'not changed') t += (t ? '; ' : '') + note; }
+  return t ? trunc(t.charAt(0).toUpperCase() + t.slice(1), 120) : 'Behind this item';
+}
+function evEntries(ownerId) {
+  const g = { papers: [], results: [], code: [], runs: [], settings: [] };
+  const it = M.byId.get(ownerId), fileOwner = !it || it.shared;
+  const pushFile = nid => {
+    const n = IX.node.get(nid); if (!n) return;
+    const si = M.byId.get(nid), sh = si && si.shared ? si : null, ty = typeOfFile(n.kind);
+    g[EV_GROUP[ty][0]].push({ id: nid, type: ty, name: n.kind === 'run' ? n.name.replace(/^run\s+/, '') : basename(pathOf(n)), full: pathOf(n), status: (sh ? sh.status : nodeFlag(nid)) || 'ok', why: whyLine(nid, sh), run: n.kind === 'run' });
+  };
+  if (!fileOwner) {
+    for (const e of it.ev) pushFile(e.id);
+    for (const sid of it.sharedUse) pushFile(sid);
+    const m = new Map();
+    for (const x of M.nbOut.get(it.id) || []) { const o = M.byId.get(x.id); if (!o || o.ref || o.shared) continue; const e = m.get(x.id) || { o, rels: [] }; const w = REL_OUT[x.rel]; if (!e.rels.includes(w)) e.rels.push(w); m.set(x.id, e); }
+    for (const { o, rels } of m.values()) g.papers.push({ id: o.id, item: o, type: typeOfItem(o), name: o.short || o.title, full: o.title, status: o.status, why: 'This item ' + rels.join(' and ') + ' it' });
+  } else {
+    for (const d of evDeps(ownerId)) pushFile(d.id);
+    const owner = M.byId.get(ownerId);
+    const users = owner && owner.shared ? owner.users.map(u => M.byId.get(u)) : [M.byId.get(S.ev.item)];
+    for (const o of users) if (o) g.papers.push({ id: o.id, item: o, type: typeOfItem(o), name: o.short || o.title, full: o.title, status: o.status, why: 'This file is part of the evidence for it' });
+  }
+  return g;
+}
+function evPreview(id) {
+  const box = h('div', { class: 'epre' });
+  const o = M.byId.get(id), n = IX.node.get(id);
+  if (o && !o.shared) {
+    box.append(h('div', { class: 'epre-h' }, tdot(typeOfItem(o)), h('b', null, o.title)), h('div', { class: 'muted' }, kindLabel(o) + ' · ' + ST[o.status].say));
+    return box;
+  }
+  if (!n) return box;
+  box.append(h('div', { class: 'epre-h' }, tdot(typeOfFile(n.kind)), h('b', { class: 'mono' }, n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n))));
+  const body = h('div', null, h('div', { class: 'muted' }, 'Loading…')); box.append(body);
+  const al = IX.alarm.get(id), ch = al && al.find(a => a.role === 'changed');
+  const head = () => {
+    if (n.kind === 'run' && (n.attrs || {}).command) return clear(body).append(h('div', { class: 'cap' }, 'Command'), h('div', { class: 'code' }, h('div', { class: 'ln' }, h('span', { class: 'n' }, '$'), n.attrs.command)));
+    if (!(n.loc && n.loc.path)) return clear(body).append(h('div', { class: 'muted' }, 'No preview for this.'));
+    getLines(n.repo, n.loc.path, 1, 14).then(r => { clear(body).append(h('div', { class: 'cap' }, 'Start of the file'), codeBlock(r.lines, r.start, [], { label: 'Start of the file' })); })
+      .catch(() => { clear(body).append(h('div', { class: 'muted' }, 'No preview for this kind of file.')); });
+  };
+  if (ch) ensureAnalysis(ch.group.id, id).then(an => {
+    const df = !an.failed && an.diffs.find(d => d.node_id === id && !d.binary);
+    if (df) clear(body).append(h('div', { class: 'cap' }, 'What changed'), diffBlock(df.unified)); else head();
+  }); else head();
+  return box;
+}
+function renderEvidenceSide(box, it) {
+  const fileId = S.ev.file && IX.node.has(S.ev.file) ? S.ev.file : null;
+  const fn = fileId ? IX.node.get(fileId) : null, fsh = fileId ? M.byId.get(fileId) : null;
+  const ownerId = fileId || it.id;
+  const st = fileId ? ((fsh && fsh.shared ? fsh.status : nodeFlag(fileId)) || 'ok') : it.status;
+  const title = fileId ? (fn.kind === 'run' ? 'Run ' + fn.name.replace(/^run\s+/, '') : pathOf(fn)) : it.title;
+  box.append(h('div', { class: 'rtitle' },
+    h('div', { class: 'esub' }, 'Supporting evidence'),
+    h('div', { class: 'rt-line' }, tdot(fileId ? typeOfFile(fn.kind) : typeOfItem(it)), h('div', { class: 'serif rt' }, title)), chip(st),
+    h('div', { class: 'btnrow' },
+      h('button', { class: 'btn sm', onclick: () => { if (fileId) openNode(fileId); else openItem(it.id); } }, 'Open full page'),
+      fileId ? h('button', { class: 'btn sm', onclick: () => { S.ev.file = null; S.ev.trail = []; S.ev.row = null; evSync(); } }, 'Back to ' + trunc(it.short || it.title, 22)) : null,
+      h('button', { class: 'btn sm', onclick: () => evClose() }, 'Close'))));
+  if (it.ref) { box.append(h('div', { class: 'rempty' }, 'This is a reference. Open its page to see where it is cited.')); return; }
+  if (S.ev.row) box.append(h('div', { class: 'rpad' }, evPreview(S.ev.row),
+    S.ev.row !== ownerId && IX.node.has(S.ev.row) ? h('div', { class: 'btnrow' }, h('button', { class: 'btn sm', onclick: () => openNode(S.ev.row) }, 'Open this file'), h('button', { class: 'btn sm', onclick: () => copyText(pathOf(IX.node.get(S.ev.row))) }, 'Copy path')) : null));
+  const g = evEntries(ownerId), groups = [['papers', 'Paper items it rests on'], ['results', 'Results'], ['code', 'Code'], ['runs', 'Runs'], ['settings', 'Settings and data']];
+  let any = false;
+  for (const [k, label] of groups) {
+    const list = g[k]; if (!list.length) continue; any = true;
+    const lab = fileId && k === 'papers' ? 'Paper items it supports' : label;
+    box.append(h('section', { class: 'egrp' }, h('div', { class: 'eh' }, lab, h('span', { class: 'rc' }, list.length)),
+      list.map(e => h('button', { class: 'erow' + (S.ev.row === e.id ? ' on' : ''), title: e.full, 'aria-pressed': String(S.ev.row === e.id),
+        onclick: () => { S.ev.row = e.id; if (GR.g) GR.g.setEmph(e.id); renderRight(); } },
+        tdot(e.type), h('span', { class: 'ename' + (e.item ? '' : ' mono') }, e.name), h('span', { class: 'est ' + e.status }, ST[e.status].glyph + ' ' + ST[e.status].word), h('span', { class: 'ewhy' }, e.why)))));
+  }
+  if (!any) box.append(h('div', { class: 'rempty' }, fileId ? 'Nothing else behind this file.' : 'Nothing behind this item yet. If it comes from a result file or script, add a note in the LaTeX source like % source: results/table2.csv.'));
+  box.append(h('div', { class: 'rempty small' }, 'Click an empty spot or press Esc to close. Double-click an item to open its page.'));
 }
 function afterGraphAttach() { if (S.listView || !GR.g) return; syncGraph(); GR.g.resize(); }
 function gFind(q, enter) {
@@ -1705,7 +1925,7 @@ function graphList() {
 /* ======================================================================
    7. SHELL: ribbon, explorer, tabs, right sidebar, status bar, palette, intro
    ====================================================================== */
-Object.assign(S, { outline: [], openCard: {}, openEv: {}, hoverItem: null, ckFilter: 'all', focusFinding: null, showExample: false, listSort: 'imp' });
+Object.assign(S, { outline: [], openCard: {}, openEv: {}, hoverItem: null, ckFilter: 'all', focusFinding: null, showExample: false, listSort: 'imp', ev: { item: null, file: null, row: null, trail: [] } });
 function persistUI() {
   lsSet(UIKEY, { tabs: S.tabs.map(t => ({ k: t.k, id: t.id })), active: S.active, leftOpen: S.leftOpen, rightOpen: S.rightOpen, leftW: S.leftW, rightW: S.rightW, gf: S.gf, treeOpen: S.treeOpen });
 }
@@ -1828,6 +2048,7 @@ const sgl = st => h('span', { class: 'sg ' + st, 'aria-hidden': 'true' }, ST[st]
 function treeRow(depth, o) {
   const row = h('div', { class: 'trow' + (o.active ? ' active' : '') + (o.cls ? ' ' + o.cls : ''), style: { paddingLeft: (8 + depth * 14) + 'px' }, role: 'treeitem', 'aria-expanded': o.open == null ? null : String(o.open), title: o.tooltip || null },
     o.caret ? h('button', { class: 'caret', 'aria-label': o.open ? 'Collapse' : 'Expand', onclick: ev => { ev.stopPropagation(); o.toggle(); } }, o.open ? '▾' : '▸') : h('span', { class: 'caret ph' }),
+    o.type ? tdot(o.type) : null,
     o.status ? sgl(o.status) : null,
     h('button', { class: 'tlabel' + (o.serif ? ' serif' : ''), onclick: ev => o.click(ev) }, h('span', { class: 'tt1' }, o.title), o.sub ? h('span', { class: 'tsub' }, o.sub) : null),
     o.roll ? h('span', { class: 'roll', title: o.roll + ' items need a second look' }, '↻ ' + o.roll) : null,
@@ -1853,7 +2074,7 @@ function paperRows(parent, depth, out, visited) {
     const sub = (M.nbOut.get(c.id) || []).some(x => x.rel === 'contains');
     const open = S.treeOpen['p:' + c.id] != null ? S.treeOpen['p:' + c.id] : true;
     if (S.onlyLook && c.status !== 'look' && c.status !== 'fix' && !rollUp(c)) continue;
-    out.push(treeRow(depth, { title: c.short, serif: c.kind === 'section', status: c.status, caret: sub, open, toggle: () => { S.treeOpen['p:' + c.id] = !open; renderLeft(); }, click: ev => openItem(c.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', c.id), roll: sub && !open ? rollUp(c) || null : null, tooltip: ST[c.status].word + ' · ' + c.title }));
+    out.push(treeRow(depth, { type: typeOfItem(c), title: c.short, serif: c.kind === 'section', status: c.status, caret: sub, open, toggle: () => { S.treeOpen['p:' + c.id] = !open; renderLeft(); }, click: ev => openItem(c.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', c.id), roll: sub && !open ? rollUp(c) || null : null, tooltip: ST[c.status].word + ' · ' + c.title }));
     if (sub && open) paperRows(c, depth + 1, out, visited);
   }
 }
@@ -1865,14 +2086,14 @@ function paperSection() {
   const body = h('div', { class: 'tree', role: 'tree' });
   if (M.noPaper) {
     body.append(h('div', { class: 'lempty' }, 'No paper connected yet.', h('div', null, h('button', { class: 'linkbtn', onclick: ev => projectMenu($('#rb-menu')) }, 'Connect your paper'))));
-    for (const it of M.items.filter(i => i.readme).sort((a, b) => cmpNum(a.title, b.title))) body.append(treeRow(0, { title: it.short, status: it.status, click: ev => openItem(it.id), active: activeIs('item', it.id), right: it.kindWord }));
+    for (const it of M.items.filter(i => i.readme).sort((a, b) => cmpNum(a.title, b.title))) body.append(treeRow(0, { type: typeOfItem(it), title: it.short, status: it.status, click: ev => openItem(it.id), active: activeIs('item', it.id), right: it.kindWord }));
   } else {
     const th = real.find(i => i.kind === 'thesis'); const visited = new Set();
-    if (th) body.append(treeRow(0, { title: 'Main claim', status: th.status, click: ev => openItem(th.id), active: activeIs('item', th.id) }));
+    if (th) body.append(treeRow(0, { type: 'thesis', title: 'Main claim', status: th.status, click: ev => openItem(th.id), active: activeIs('item', th.id) }));
     const rqs = real.filter(i => i.kind === 'rq').sort((a, b) => cmpNum(a.node.name, b.node.name));
     if (rqs.length) {
       const o = S.treeOpen.rqs != null ? S.treeOpen.rqs : true; body.append(treeRow(0, { title: 'Research questions', caret: true, open: o, toggle: () => { S.treeOpen.rqs = !o; renderLeft(); }, click: () => { S.treeOpen.rqs = !o; renderLeft(); }, roll: !o ? rqs.filter(r => r.status === 'look' || r.status === 'fix').length || null : null }));
-      if (o) rqs.forEach(r => body.append(treeRow(1, { title: r.title, status: r.status, click: ev => openItem(r.id), active: activeIs('item', r.id) })));
+      if (o) rqs.forEach(r => body.append(treeRow(1, { type: 'question', title: r.title, status: r.status, click: ev => openItem(r.id), active: activeIs('item', r.id) })));
     }
     const tops = real.filter(i => i.kind === 'section' && (!M.parent.get(i.id) || (M.byId.get(M.parent.get(i.id)) || {}).kind === 'thesis')).sort(itemSort);
     let appDiv = false;
@@ -1881,12 +2102,12 @@ function paperSection() {
       const sub = (M.nbOut.get(s.id) || []).some(x => x.rel === 'contains'), o = S.treeOpen['p:' + s.id] != null ? S.treeOpen['p:' + s.id] : true;
       if (S.onlyLook && s.status !== 'look' && s.status !== 'fix' && !rollUp(s)) continue;
       const rows = [];
-      rows.push(treeRow(0, { title: s.short, serif: true, status: s.status, caret: sub, open: o, toggle: () => { S.treeOpen['p:' + s.id] = !o; renderLeft(); }, click: ev => openItem(s.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', s.id), roll: sub && !o ? rollUp(s) || null : null, tooltip: ST[s.status].word + ' · ' + s.title }));
+      rows.push(treeRow(0, { type: 'section', title: s.short, serif: true, status: s.status, caret: sub, open: o, toggle: () => { S.treeOpen['p:' + s.id] = !o; renderLeft(); }, click: ev => openItem(s.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', s.id), roll: sub && !o ? rollUp(s) || null : null, tooltip: ST[s.status].word + ' · ' + s.title }));
       visited.add(s.id); if (sub && o) paperRows(s, 1, rows, visited);
       rows.forEach(r => body.append(r));
     }
     const orphans = real.filter(i => ['figure', 'table', 'equation'].includes(i.kind) && !M.parent.get(i.id)).sort(itemSort);
-    if (orphans.length) { body.append(h('div', { class: 'ldiv' }, 'Other items')); orphans.forEach(c => body.append(treeRow(0, { title: c.short, status: c.status, click: ev => openItem(c.id), active: activeIs('item', c.id) }))); }
+    if (orphans.length) { body.append(h('div', { class: 'ldiv' }, 'Other items')); orphans.forEach(c => body.append(treeRow(0, { type: 'paper', title: c.short, status: c.status, click: ev => openItem(c.id), active: activeIs('item', c.id) }))); }
     body.append(h('label', { class: 'lfoot' }, h('input', { type: 'checkbox', checked: S.onlyLook ? '' : null, onchange: ev => { S.onlyLook = ev.target.checked; renderLeft(); } }), ' Only things to look at'));
   }
   out.push(body); return out;
@@ -1902,7 +2123,7 @@ function experimentsSection() {
   for (const r of runs) { const ex = (IX.pout.get(r.id) || []).find(e => e.kind === 'executes'); const key = ex ? pathOf(IX.node.get(ex.to) || { name: ex.to }) : 'Other runs'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); }
   for (const [k, rs] of groups) {
     body.append(treeRow(0, { title: k === 'Other runs' ? k : 'Experiment: ' + basename(k), cls: 'grp', click: () => { }, tooltip: k }));
-    for (const r of rs) { const it = itemFor(r.id); body.append(treeRow(1, { title: r.name.replace(/^run\s+/, '') + (startOf(r) ? ' · ' + startOf(r) : ''), status: it ? it.status : null, click: () => openNode(r.id), tooltip: ((r.attrs || {}).command || '') + (startOf(r) ? ' — started ' + startOf(r) : '') })); }
+    for (const r of rs) { const it = itemFor(r.id); body.append(treeRow(1, { type: 'run', title: r.name.replace(/^run\s+/, '') + (startOf(r) ? ' · ' + startOf(r) : ''), status: it ? it.status : null, click: () => openNode(r.id), tooltip: ((r.attrs || {}).command || '') + (startOf(r) ? ' — started ' + startOf(r) : '') })); }
   }
   out.push(body); return out;
 }
@@ -1928,7 +2149,7 @@ function codeSection() {
       body.append(treeRow(depth, { title: name + '/', caret: true, open: o, toggle: () => { S.treeOpen[key] = !o; renderLeft(); }, click: () => { S.treeOpen[key] = !o; renderLeft(); }, cls: 'folder' }));
       if (o) draw(sub, depth + 1, prefix + name + '/');
     }
-    for (const f of d.files.sort((a, b) => (a.name < b.name ? -1 : 1))) body.append(treeRow(depth, { title: basename(pathOf(f)), sub: usedByText(f.id), click: () => openNode(f.id), active: activeIs('item', (itemFor(f.id) || {}).id) || activeIs('node', f.id), tooltip: pathOf(f) }));
+    for (const f of d.files.sort((a, b) => (a.name < b.name ? -1 : 1))) body.append(treeRow(depth, { type: typeOfFile(f.kind), title: basename(pathOf(f)), sub: usedByText(f.id), click: () => openNode(f.id), active: activeIs('item', (itemFor(f.id) || {}).id) || activeIs('node', f.id), tooltip: pathOf(f) }));
   };
   draw(root, 0, '');
   if (M.readmeOnly.length) { body.append(h('div', { class: 'ldiv' }, 'Listed in README, not found in the paper')); M.readmeOnly.forEach(n => body.append(treeRow(0, { title: n.name, click: () => openTab('node', n.id, { replace: true }) }))); }
@@ -2005,24 +2226,26 @@ function acc(title, count, body, key) {
   const open = S.treeOpen['r:' + key] !== false;
   return h('section', { class: 'racc' }, h('button', { class: 'rh', 'aria-expanded': String(open), onclick: () => { S.treeOpen['r:' + key] = !open; renderRight(); } }, h('span', { class: 'caret' }, open ? '▾' : '▸'), title, count != null ? h('span', { class: 'rc' }, count) : null), open ? h('div', { class: 'rb' }, body) : null);
 }
-function rrow(label, rel, st, onclick, hov) {
-  return h('button', { class: 'rrow', onclick, onmouseenter: hov ? () => { if (RG.g) RG.g.hl(hov); } : null }, st ? sgl(st) : h('span', { class: 'sg ph' }), h('span', { class: 'rl' }, label), h('span', { class: 'rrel' }, rel));
+function rrow(label, rel, st, onclick, hov, type) {
+  return h('button', { class: 'rrow', onclick, onmouseenter: hov ? () => { if (RG.g) RG.g.hl(hov); } : null }, type ? tdot(type) : null, st ? sgl(st) : h('span', { class: 'sg ph' }), h('span', { class: 'rl' }, label), h('span', { class: 'rrel' }, rel));
 }
 function renderRight() {
   const box = clear($('#right'));
   if (RG.g) { RG.g.destroy(); RG.g = null; }
+  const tb = S.tabs[S.active];
+  if (tb && tb.k === 'graph' && S.ev.item && M.byId.has(S.ev.item)) { renderEvidenceSide(box, M.byId.get(S.ev.item)); return; }
   const it = focusItem();
   if (!it) { box.append(h('div', { class: 'rempty' }, 'Open an item to see what it rests on and what rests on it.')); return; }
   box.append(h('div', { class: 'rtitle' }, h('div', { class: 'serif rt' }, it.title), chip(it.status)));
   const merge = (list, rels) => { const m = new Map(); for (const x of list) { if (M.byId.get(x.id).ref && !S.gf.refs) continue; const e = m.get(x.id) || { id: x.id, rels: [] }; const w = rels[x.rel]; if (!e.rels.includes(w)) e.rels.push(w); m.set(x.id, e); } return [...m.values()]; };
   const outs = merge(M.nbOut.get(it.id) || [], REL_OUT), ins = merge(M.nbIn.get(it.id) || [], REL_IN);
   const rest = [];
-  if (!it.shared) for (const e of it.ev.slice(0, 7)) { const n = IX.node.get(e.id); if (!n) continue; rest.push(rrow(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n), EV_REL[n.kind] || '', nodeFlag(e.id), () => openNode(e.id))); }
+  if (!it.shared) for (const e of it.ev.slice(0, 7)) { const n = IX.node.get(e.id); if (!n) continue; rest.push(rrow(n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n), EV_REL[n.kind] || '', nodeFlag(e.id), () => openNode(e.id), null, typeOfFile(n.kind))); }
   if (!it.shared && it.ev.length > 7) rest.push(h('div', { class: 'muted rmore' }, 'and ' + (it.ev.length - 7) + ' more behind this item'));
-  outs.slice(0, 10).forEach(x => { const o = M.byId.get(x.id); rest.push(rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id)); });
+  outs.slice(0, 10).forEach(x => { const o = M.byId.get(x.id); rest.push(rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id, typeOfItem(o))); });
   if (outs.length > 10) rest.push(h('div', { class: 'muted rmore' }, 'and ' + (outs.length - 10) + ' more'));
   box.append(acc('Rests on', rest.length, rest.length ? rest : h('div', { class: 'muted' }, 'Nothing. This item stands on its own.'), 'rests'));
-  const sup = ins.slice(0, 12).map(x => { const o = M.byId.get(x.id); return rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id); });
+  const sup = ins.slice(0, 12).map(x => { const o = M.byId.get(x.id); return rrow(o.short || o.title, x.rels.join(' · '), o.status !== 'ok' ? o.status : null, () => openItem(o.id), o.id, typeOfItem(o)); });
   box.append(acc('Supports', ins.length, sup.length ? sup : h('div', { class: 'muted' }, 'Nothing else rests on this yet.'), 'supports'));
   const lg = h('div', { class: 'lghost' });
   box.append(acc('Local graph', null, [lg, h('div', { class: 'lgctl' }, h('button', { class: 'btn sm', 'aria-label': 'Fewer steps', disabled: S.localDepth <= 1, onclick: () => { S.localDepth--; renderRight(); } }, '−'), h('span', null, 'Depth ' + S.localDepth), h('button', { class: 'btn sm', 'aria-label': 'More steps', disabled: S.localDepth >= 3, onclick: () => { S.localDepth++; renderRight(); } }, '+'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn', onclick: () => { S.gf.mode = 'around'; S.sel = it.id; openTab('graph'); } }, 'Open in Graph tab'))], 'local'));
@@ -2151,6 +2374,7 @@ document.addEventListener('keydown', ev => {
   }
   if (ev.altKey || typing(ev.target) || document.querySelector('.scrim')) return;
   const t = S.tabs[S.active], recent = Date.now() - gSeq < 900;
+  if (k === 'Escape' && t && t.k === 'graph' && S.ev.item) { evClose(); return; }
   if (k === '/' && t && t.k === 'graph') { ev.preventDefault(); const f = $('#gfind'); if (f) f.focus(); }
   else if (k === '?') intro(true);
   else if (k === 'g') { if (recent) { gSeq = 0; openTab('graph'); } else gSeq = Date.now(); }
