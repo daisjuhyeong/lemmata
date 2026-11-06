@@ -175,12 +175,17 @@ class App:
         def esc_script(s):
             return s.replace("</script", "<\\/script")
 
-        data = json.dumps(snap, ensure_ascii=False).replace("</", "<\\/")
+        data = (json.dumps(snap, ensure_ascii=False).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+                .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
         html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % css.replace("</style", "<\\/style"))
         html = html.replace('<script src="vendor/cytoscape.min.js"></script>', "<script>\n%s\n</script>" % esc_script(vend))
         html = html.replace('<script src="app.js"></script>',
                             '<script type="application/json" id="lemmata-snapshot">%s</script>\n<script>\n%s\n</script>' % (data, esc_script(js)))
         return html, snap["project"].get("name", "project")
+
+
+CSP = ("default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+       "frame-ancestors 'none'; base-uri 'none'")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -201,6 +206,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if "Content-Security-Policy" not in (extra or {}):
+            self.send_header("Content-Security-Policy", CSP)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()

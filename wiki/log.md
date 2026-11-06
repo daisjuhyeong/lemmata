@@ -46,3 +46,4 @@ date | agent | operation | files touched | note
 2026-11-06 | cto | build | ADR-005, wiki/architecture/overview.md, docs/SETUP-two-macs.md | no-Overleaf architecture, system overview, setup with paper repo
 2026-11-06 | web-eng-b | build | web/hub/*, mock_hub.py, vscode/* (0.1.1), desktop default URL, hub config --overleaf | hub pages without Overleaf, extension paper-repo matching
 2026-11-06 | web-eng-a | build | web/{index.html,app.js,app.css}, s06 screenshots | Obsidian-style project UI, hubControls, deduped sidebar
+2026-11-06 | qa | lint | wiki/sprints/S06/qa-S06.md | S06 QA: ship with caveats. 126 OK, vscode 27+9, golden pass; no XSS (single+hub CSP); subdir/repo/branch validation + token hardening pass; Overleaf off by default; D1 export blank on '<!--<script', D2 inconsistent counts

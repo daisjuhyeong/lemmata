@@ -102,9 +102,24 @@ class ServerTest(unittest.TestCase):
         self.assertIn('id="lemmata-snapshot"', html)
         self.assertNotRegex(html, r'<script[^>]+src=|<link[^>]+href="(?!data:)')
         m = re.search(r'<script type="application/json" id="lemmata-snapshot">(.*?)</script>', html, re.S)
-        snap = json.loads(m.group(1).replace("<\\/", "</"))
+        self.assertNotRegex(m.group(1), r"[<>&\u2028\u2029]")  # D1: nothing in the embedded JSON can open a tag or comment
+        snap = json.loads(m.group(1))
         for k in ("project", "graph", "events", "findings", "alarms", "checkpoints", "triage", "exported_at"):
             self.assertIn(k, snap)
+
+    def test_csp_header_single_project(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", "/", headers={"Host": "127.0.0.1:%d" % self.port})
+        r = c.getresponse(); r.read(); c.close()
+        self.assertIn("default-src 'self'", r.getheader("Content-Security-Policy") or "")
+
+    def test_todo_changes_rule(self):
+        from lemmata.hub.projects import todo_changes
+        al = {"groups": [{"changed": [{"node_id": "a"}], "downstream": [{"node_id": "b"}]}, {"changed": [{"node_id": "c"}], "downstream": []}]}
+        self.assertEqual(todo_changes(al, {}), 2)
+        self.assertEqual(todo_changes(al, {"node:c": {"effective_state": "reviewed"}}), 1)
+        done = {"node:a": {"effective_state": "ignored"}, "node:b": {"effective_state": "reviewed"}, "node:c": {"effective_state": "needs_fixing"}}
+        self.assertEqual(todo_changes(al, done), 0)
 
     def test_file_route_stays_inside_repo(self):
         self.assertEqual(self.j("GET", "/api/file?repo=paper&path=main.tex&start=1&end=3")[0], 200)

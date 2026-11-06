@@ -217,7 +217,9 @@ function diffBlock(unified) {
   if (rows.length && rows[rows.length - 1] === '') rows.pop();
   return h('div', { class: 'code', tabindex: '0', role: 'region', 'aria-label': 'What changed in this file' }, rows.map(t => {
     let c = 'ln', sign = ' ', body = t;
-    if (t.startsWith('@@') || t.startsWith('---') || t.startsWith('+++')) c += ' hunk';
+    if (t.startsWith('---') || t.startsWith('+++')) return null;
+    if (t.startsWith('@@')) return h('div', { class: 'ln hunk' }, h('span', { class: 'n' }, ''), '⋯');
+    if (false) c += ' hunk';
     else if (t.startsWith('+')) { c += ' add'; sign = '+'; body = t.slice(1); }
     else if (t.startsWith('-')) { c += ' del'; sign = '−'; body = t.slice(1); }
     else body = t.slice(1);
@@ -276,7 +278,7 @@ function connectPaperRepo() {
       if (!/^[\w.-]+\/[\w.-]+$/.test(r)) { err.textContent = 'Type the repository as owner/name.'; err.classList.remove('hidden'); return; }
       const body = { kind: 'github', repo: r }; if (sub.value.trim()) body.subdir = sub.value.trim().replace(/^\/+|\/+$/g, '');
       err.classList.add('hidden');
-      try { await hubJson('POST', '/api/hub/projects/' + encodeURIComponent(PID) + '/paper-source', body); close(); await loadAll(); await loadHubInfo(); toast('Paper now comes from GitHub. Lemmata checked it.'); }
+      try { await hubJson('POST', '/api/hub/projects/' + encodeURIComponent(PID) + '/paper-source', body); close(); await loadAll(); await loadHubInfo(); toast('Paper now comes from GitHub. Lemmata read it.'); }
       catch (e) { err.textContent = HUB_PLAIN[e.code] || e.message; err.classList.remove('hidden'); }
     } }], { width: 480 });
 }
@@ -291,7 +293,7 @@ async function loadHubInfo() {
   if (S.project) { renderStatus(); renderShellExtras(); }
 }
 async function hubSync() {
-  setBusy('Checking your files…');
+  setBusy('Reading your files…');
   try {
     const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/sync', null, 'application/json');
     await loadAll();
@@ -308,7 +310,7 @@ async function hubUpload(ev) {
   try {
     const r = await hubPost('/api/hub/projects/' + encodeURIComponent(PID) + '/paper', f, 'application/zip');
     await loadAll();
-    toast('Paper uploaded (version ' + r.version + '). Lemmata checked it again.');
+    toast('Paper uploaded (version ' + r.version + '). Lemmata read it again.');
     await loadHubInfo();
   } catch (e) { toast('Upload failed. ' + (HUB_PLAIN[e.code] || e.message)); }
   setBusy(null);
@@ -337,8 +339,8 @@ async function syncNow() {
   if (READONLY) return;
   const hc = hubControls();
   if (hc.sync) return hc.sync();
-  setBusy('Checking your files…');
-  try { await apiPost('/api/scan', {}); await loadAll(); toast('Checked your files again.'); }
+  setBusy('Reading your files…');
+  try { await apiPost('/api/scan', {}); await loadAll(); toast('Read your files again.'); }
   catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close', primary: true }]) }); }
   setBusy(null);
 }
@@ -556,6 +558,7 @@ function computeStatuses() {
     it.status = flags.includes('fix') ? 'fix' : flags.includes('look') ? 'look' : flags.includes('fine') ? 'fine' : flags.includes('ign') ? 'ign' : 'ok';
   }
   M.looked = M.items.filter(i => !i.ref && (i.status === 'look' || i.status === 'fix')).length;
+  if (M.cards) M.todo = M.cards.filter(c => c.targets.some(t => effState(t.type, t.id).state === 'unreviewed')).length;
 }
 function itemTargets(it) {
   const out = [];
@@ -643,26 +646,26 @@ function causeInfo(g) {
   let pieces;
   if (c.kind === 'run') pieces = ['A run finished: ', mono((c.subject || '').replace(/^run\s+/, '').split(':')[0] || c.event_id)];
   else if (c.kind === 'worktree') pieces = ['You have changes in ' + rw + ' that are not saved to git yet'];
-  else if (c.kind === 'snapshot') pieces = ['Your ' + rw + ' files differ from when you last checked'];
-  else if (c.kind === 'diverged') pieces = ['The history of your ' + rw + ' was rewritten since you last checked, so everything there is listed here.'];
+  else if (c.kind === 'snapshot') pieces = ['Your ' + rw + ' files differ from when you last looked'];
+  else if (c.kind === 'diverged') pieces = ['The history of your ' + rw + ' was rewritten since you last looked, so everything there is listed here.'];
   else if (files.length === 0 && paper.length) {
     if (paper.length === 1) { const it = M.byId.get(M.paperId.get(paper[0].n.id)); pieces = ['You edited ', it ? it.title : paper[0].n.name, ' in your paper (', mono(pathOf(paper[0].n)), ')']; }
-    else pieces = ['You edited ' + paper.length + ' places in your paper'];
+    else pieces = ['You edited ' + plural(paper.length, 'place') + ' in your paper'];
   } else if (files.length === 1 && !paper.length) {
     const f = files[0], p = pathOf(f.n);
     if (f.x.change === 'added') pieces = ['You added ', mono(p)];
     else if (f.n.kind === 'config') {
       const an = S.an[analysisKey(g.id, f.n.id)], kc = keyChanges(an);
       if (kc && kc.length === 1 && kc[0].old != null && kc[0].now != null) pieces = ['You changed ', mono(p), ' (' + kc[0].key + ' ' + kc[0].old + ' → ' + kc[0].now + ')'];
-      else if (kc && kc.length > 1) pieces = ['You changed ' + kc.length + ' settings in ', mono(p)];
+      else if (kc && kc.length > 1) pieces = ['You changed ' + plural(kc.length, 'setting') + ' in ', mono(p)];
       else pieces = ['You changed ', mono(p)];
     } else if (f.n.kind === 'code') pieces = ['You edited ', mono(p)];
     else pieces = ['Your file ', mono(p), ' changed'];
   } else if (files.length + paper.length > 0) {
     const names = files.slice(0, 2).map(o => basename(pathOf(o.n)));
     const more = files.length - names.length;
-    pieces = files.length ? ['You edited ' + files.length + ' files in ' + rw + ' (' + names.join(', ') + (more > 0 ? ' and ' + more + ' more' : '') + ')'] : ['You edited ' + paper.length + ' places in your paper'];
-    if (files.length && paper.length) pieces.push(' and ' + paper.length + ' places in your paper');
+    pieces = files.length ? ['You edited ' + plural(files.length, 'file') + ' in ' + rw + ' (' + names.join(', ') + (more > 0 ? ' and ' + more + ' more' : '') + ')'] : ['You edited ' + plural(paper.length, 'place') + ' in your paper'];
+    if (files.length && paper.length) pieces.push(' and ' + plural(paper.length, 'place') + ' in your paper');
   } else if (rem.length) pieces = ['You removed ', mono(rem[0].path || rem[0].name || rem[0].node_id)];
   else pieces = ['You changed ', mono((c.files || [])[0] || 'a file')];
   return { pieces, time: relTime(c.time), abs: absTime(c.time), short: c.kind === 'commit' ? c.short : null, subject: c.subject };
@@ -707,6 +710,7 @@ function buildCards() {
     const targets = nodes.map(n => ({ type: 'node', id: n.id }));
     M.cards.push({ g, id: g.id, time: g.cause.time, nodes, items: list, itemsDown: things.map(t => t.it), ev, targets, count: things.length + ev.length });
   }
+  M.todo = M.cards.filter(c => c.targets.some(t => effState(t.type, t.id).state === 'unreviewed')).length;
   M.cards.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
 }
 function cardState(c) {
@@ -758,7 +762,7 @@ async function createCheckpoint(note) {
     const [cps, ev, pr, tri] = await Promise.all([apiGet('/api/checkpoints'), apiGet('/api/events'), apiGet('/api/project'), apiGet('/api/triage')]);
     S.checkpoints = cps; S.events = ev; S.project = pr; S.triage = tri;
     rebuildIndex(); renderAll();
-    toast('Done. Last checked: ' + lastChecked(r.checkpoint.created_at) + '.');
+    toast('Done. Last looked at: ' + lastChecked(r.checkpoint.created_at) + '.');
   } catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.'); }
 }
 function markAllDialog() {
@@ -778,7 +782,7 @@ async function decideLink(edgeId, decision, doneMsg) {
 
 /* "Why?" block: the chain of what rests on what, in plain words, then the diff */
 const CHAIN_PHRASE = { reads: 'reads', produced_by: 'is produced by', traces_to: 'is built from', includes: 'shows', generated_by: 'is made by', executes: 'runs', imports: 'imports', value_match: 'was linked by you to' };
-const cap1 = s => s.charAt(0).toUpperCase() + s.slice(1);
+const cap1 = s => (/^[^\s]*[\/.]/.test(s) ? s : s.charAt(0).toUpperCase() + s.slice(1));
 function whyBlock(g, nodeId) {
   const box = h('div', { class: 'why-box' }, h('div', { class: 'muted' }, 'Loading the reason…'));
   ensureAnalysis(g.id, nodeId).then(an => {
@@ -790,13 +794,13 @@ function whyBlock(g, nodeId) {
       const parts = eds[i].split('|'), from = parts[0], kind = parts[1], to = parts[2];
       const d = (g.downstream || []).find(x => x.node_id === nodes[i + 1]);
       let extra = null;
-      if (d && d.output_identical === true) extra = 'It still has exactly the content it had when you last checked, so it may not have been regenerated yet.';
+      if (d && d.output_identical === true) extra = 'It still has exactly the content it had when you last looked, so it may not have been regenerated yet.';
       if (d && d.output_identical === false) extra = 'It was regenerated and its content now differs.';
       steps.push(h('li', null, h('span', { class: 'sw' }, cap1(nameOf(from)) + ' ' + (CHAIN_PHRASE[kind] || 'depends on') + ' ' + nameOf(to) + '.'), extra ? h('div', { class: 'muted' }, extra) : null));
     }
     box.append(h('ol', { class: 'chain' }, steps));
     for (const df of an.diffs || []) {
-      box.append(h('div', { class: 'diff-title' }, 'What changed in ', mono(df.path), ' since you last checked'));
+      box.append(h('div', { class: 'diff-title' }, 'What changed in ', mono(df.path), ' since you last looked'));
       box.append(df.binary ? h('div', { class: 'muted' }, 'This is not a text file, so there is nothing to show line by line.') : diffBlock(df.unified));
       if (df.truncated) box.append(h('div', { class: 'muted' }, 'Only the first part of the change is shown.'));
     }
@@ -883,7 +887,7 @@ function makeGraph(host, o) {
         const d = Math.sqrt(d2), sA = 120 + 12 * A.r, sB = 120 + 12 * B.r, dd = Math.max(d2, 900);
         if (!A.pinned) { A.vx -= dx * sB * a / dd; A.vy -= dy * sB * a / dd; }
         if (!B.pinned) { B.vx += dx * sA * a / dd; B.vy += dy * sA * a / dd; }
-        const sep = A.r + B.r + 8;
+        const sep = A.r + B.r + 16;
         if (d < sep) {
           const p = (sep - d) / d * 0.5 * 0.9;
           if (!A.pinned) { A.x -= dx * p; A.y -= dy * p; }
@@ -986,9 +990,9 @@ function makeGraph(host, o) {
       if (n.pinned && !n.sat) { ctx.beginPath(); ctx.arc(n.x - n.r * 0.72, n.y - n.r * 0.72, 3, 0, 6.2832); ctx.fillStyle = C.ink; ctx.fill(); }
     }
     ctx.restore(); ctx.globalAlpha = 1;
-    drawLabels(fs);
+    drawLabels(fs, dimS);
   }
-  function drawLabels(fs) {
+  function drawLabels(fs, dimS) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     const placed = [], circles = nodes.map(n => ({ id: n.id, x: n.x * V.k + V.tx, y: n.y * V.k + V.ty, r: n.r * V.k }));
     const cand = [];
@@ -997,10 +1001,10 @@ function makeGraph(host, o) {
       let pr = 9;
       if (hover === n.id || sel === n.id) pr = 0;
       else if (fs && fs.has(n.id)) pr = 1;
-      else if (fs) continue;
+      else if (dimS) continue;
       else if (n.status !== 'ok') pr = 2;
       else if (labelTop.has(n.id)) pr = 3;
-      else if (n.r * V.k >= 14) pr = 5;
+      else if (n.r * V.k >= 9) pr = 5;
       else continue;
       if (o.mini && pr > 1 && pr !== 3) continue;
       cand.push({ n, pr });
@@ -1014,22 +1018,29 @@ function makeGraph(host, o) {
       return false;
     };
     for (const { n, pr } of cand) {
-      const px = o.mini ? 11 : (n.r < 20 ? 12 : 13), font = (pr === 0 ? '600 ' : '') + px + 'px ' + C.font;
-      const title = trunc(n.sat ? n.label : (n.short || n.title), o.mini ? 18 : 26);
-      const flag = !n.sat && n.status !== 'ok' && !o.mini && pr <= 2;
-      const sline = flag ? ST[n.status].glyph + ' ' + ST[n.status].say : null;
-      const w1 = tw(title, font), w2 = sline ? tw(sline, '11px ' + C.font) : 0, w = Math.max(w1, w2), hh = px + 3 + (sline ? 14 : 0);
-      const sx = n.x * V.k + V.tx, sy = n.y * V.k + V.ty, rr = n.r * V.k;
-      const tries = [[sx - w / 2, sy + rr + 3], [sx - w / 2, sy - rr - 3 - hh], [sx + rr + 10, sy - hh / 2], [sx - rr - 10 - w, sy - hh / 2]];
-      let pos2 = null;
-      for (const t of tries) { const r = { x: t[0], y: t[1], w, h: hh }; if (!hits(r, n.id)) { pos2 = r; break; } if (pr > 2) { /* low priority: only first free spot */ } }
-      if (!pos2) { if (pr > 2) continue; pos2 = { x: tries[0][0], y: Math.min(tries[0][1], H - hh - 2), w, h: hh }; pos2.x = Math.max(2, Math.min(W - w - 2, pos2.x)); }
+      const full = trunc(n.sat ? n.label : (n.short || n.title), o.mini ? 18 : 26), variants = [full];
+      if (!n.sat && full.includes(' · ')) variants.push(full.split(' · ')[0]);
+      let title = full, w = 0, hh = 0, pos2 = null;
+      for (const v of variants) {
+        title = v;
+        const px = o.mini ? 11 : (n.r < 20 ? 12 : 13), font = (pr === 0 ? '600 ' : '') + px + 'px ' + C.font;
+        const flag = !n.sat && n.status !== 'ok' && !o.mini && pr <= 2;
+        const sline = flag ? ST[n.status].glyph + ' ' + ST[n.status].say : null;
+        w = Math.max(tw(v, font), sline ? tw(sline, '11px ' + C.font) : 0); hh = px + 3 + (sline ? 14 : 0);
+        const sx = n.x * V.k + V.tx, sy = n.y * V.k + V.ty, rr = n.r * V.k;
+        const tries = [[sx - w / 2, sy + rr + 3], [sx + rr + 10, sy - hh / 2], [sx - rr - 10 - w, sy - hh / 2], [sx - w / 2, sy - rr - 3 - hh]];
+        for (const t of tries) { const r = { x: t[0], y: t[1], w, h: hh }; if (!hits(r, n.id)) { pos2 = r; break; } }
+        if (pos2) { n._px = px; n._font = font; n._sline = sline; break; }
+        if (v === variants[variants.length - 1] && pr <= 2) { pos2 = { x: Math.max(2, Math.min(W - w - 2, tries[0][0])), y: Math.min(tries[0][1], H - hh - 2), w, h: hh }; n._px = px; n._font = font; n._sline = sline; }
+      }
+      if (!pos2) continue;
+      const fpx = n._px, font = n._font, sline = n._sline;
       placed.push(pos2);
       ctx.globalAlpha = 1; ctx.lineJoin = 'round';
       const cx = pos2.x + w / 2;
       ctx.textAlign = 'center';
       ctx.font = font; ctx.lineWidth = 3; ctx.strokeStyle = C.paper; ctx.strokeText(title, cx, pos2.y); ctx.fillStyle = C.ink; ctx.fillText(title, cx, pos2.y);
-      if (sline) { ctx.font = '600 11px ' + C.font; ctx.strokeText(sline, cx, pos2.y + px + 3); ctx.fillStyle = C[STATUS_COL[n.status].slice(2)]; ctx.fillText(sline, cx, pos2.y + px + 3); }
+      if (sline) { ctx.font = '600 11px ' + C.font; ctx.strokeText(sline, cx, pos2.y + fpx + 3); ctx.fillStyle = C[STATUS_COL[n.status].slice(2)]; ctx.fillText(sline, cx, pos2.y + fpx + 3); }
     }
     ctx.textAlign = 'left';
   }
@@ -1178,7 +1189,7 @@ function pageChanges() {
     return root;
   }
   const full = (S.checkpoints && S.checkpoints.checkpoints || []).find(c => c.id === cp.id) || cp;
-  root.append(h('div', { class: 'subline' }, h('span', null, 'Last checked: ' + lastChecked(cp.created_at)), cp.note ? h('span', { class: 'muted' }, ' · note "' + cp.note + '"') : null,
+  root.append(h('div', { class: 'subline' }, h('span', null, 'Last looked at: ' + lastChecked(cp.created_at)), cp.note ? h('span', { class: 'muted' }, ' · note "' + cp.note + '"') : null,
     h('button', { class: 'btn', disabled: READONLY, title: READONLY ? 'Read-only snapshot' : null, onclick: markAllDialog }, 'Mark everything as looked at')));
   const cards = M.cards, nChecks = (S.findings && S.findings.findings || []).length;
   if (!cards.length) {
@@ -1188,7 +1199,7 @@ function pageChanges() {
   }
   root.append(h('div', { class: 'summary' },
     h('button', { class: 'linkbtn', onclick: () => $('.card') && $('.card').scrollIntoView({ block: 'start' }) }, plural(cards.length, 'change')), ' · ',
-    h('button', { class: 'linkbtn', onclick: () => { S.chFilter = 'look'; renderPage(true); } }, plural(M.looked, 'item') + (M.looked === 1 ? ' may' : ' may') + ' need a second look'), ' · ',
+    h('button', { class: 'linkbtn', onclick: () => { S.chFilter = 'look'; renderPage(true); } }, plural(M.todo, 'thing') + ' still to look at'), ' · ',
     h('button', { class: 'linkbtn', onclick: () => openTab('checks') }, plural(nChecks, 'check') + ' about your paper')));
   const counts = { all: cards.length, look: 0, fix: 0, fine: 0, ign: 0 };
   cards.forEach(c => { const k = cardState(c).key; counts[k === 'partial' ? 'look' : k]++; });
@@ -1266,8 +1277,8 @@ function eventPieces(ev) {
   const rw = repoWord(ev.repo);
   if (ev.kind === 'run') return ['A run finished: ', mono(ev.id.split('/').pop())];
   if (ev.kind === 'worktree') return ['You have changes in ' + rw + ' that are not saved to git yet'];
-  if (ev.kind === 'snapshot') return ['Your ' + rw + ' files differ from when you last checked'];
-  if (ev.kind === 'diverged') return ['The history of your ' + rw + ' was rewritten since you last checked'];
+  if (ev.kind === 'snapshot') return ['Your ' + rw + ' files differ from when you last looked'];
+  if (ev.kind === 'diverged') return ['The history of your ' + rw + ' was rewritten since you last looked'];
   const fs = ev.files || [];
   if (fs.length === 1) {
     const f = fs[0], n = IX.node.get('file:' + ev.repo + '/' + f.path);
@@ -1360,7 +1371,7 @@ function evidenceRow(nid) {
     const body = h('div', { class: 'evbody' });
     const ch = al && al.find(a => a.role === 'changed');
     if (ch) { body.append(h('div', { class: 'muted' }, 'Loading what changed…')); ensureAnalysis(ch.group.id, nid).then(an => { clear(body); if (an.failed) body.append(h('div', { class: 'muted' }, 'The change could not be loaded. ' + an.failed)); else for (const df of an.diffs.filter(d => d.node_id === nid)) body.append(df.binary ? h('div', { class: 'muted' }, 'Not a text file.') : diffBlock(df.unified)); }); }
-    else body.append(h('div', { class: 'muted' }, al ? 'This file has not changed itself. It may need a second look because something it rests on changed.' : 'Not changed since last checked.'));
+    else body.append(h('div', { class: 'muted' }, al ? 'This file has not changed itself. It may need a second look because something it rests on changed.' : 'Not changed since you last looked.'));
     row.append(body);
   }
   return row;
@@ -1384,7 +1395,7 @@ function pageItem(it) {
       if (g0) {
         const ev0 = it.ev.map(e => e.id).filter(id => (IX.alarm.get(id) || []).some(a => a.role === 'downstream' && a.entry.output_identical === true))[0];
         sentence = h('span', null, 'Something this item rests on changed ' + relTime(g0.cause.time) + ': ' + lcFirst(textOf(causeInfo(g0).pieces)) + '. ' + (ev0 ? cap1(nameOf(ev0)) + ' has not been regenerated yet.' : ''));
-      } else sentence = h('span', null, 'One of the checks about this item needs a look. See "Checks about this item" below.');
+      } else { const fnd = it.finds.find(f => f.severity === 'warning' && effState('finding', f.id).state === 'unreviewed') || it.finds[0]; sentence = h('span', null, 'A check found something here. ', fnd ? h('button', { class: 'linkbtn', onclick: () => { S.focusFinding = fnd.id; openTab('checks'); } }, 'See the check') : null); }
     } else if (it.status === 'fix') {
       const e = targets.map(t => triageEntry(t.type, t.id)).find(x => x && x.state === 'needs_fixing');
       sentence = h('span', null, 'You marked this as needing a fix' + (e ? ' on ' + dmon(e.updated_at) : '') + '.' + (noteOf(targets) ? ' Your note: “' + noteOf(targets) + '”' : ''));
@@ -1560,7 +1571,7 @@ function pageHistory() {
   let lastDay = null;
   for (const r of all) {
     const iso = r.ev ? r.ev.time : r.mark ? r.mark.created_at : r.rule.created_at;
-    if (r.rule) { root.append(h('div', { class: 'cprule' }, h('span', null, 'Last checked: ' + absTime(cp.created_at)))); continue; }
+    if (r.rule) { root.append(h('div', { class: 'cprule' }, h('span', null, 'Last looked at: ' + absTime(cp.created_at)))); continue; }
     const day = dayHeader(iso);
     if (day !== lastDay) { root.append(h('div', { class: 'dayhead' }, day === 'Today' || day === 'Yesterday' ? day : dmon(iso) + (dayDiff(iso) > 300 ? ' ' + iso.slice(0, 4) : ''))); lastDay = day; }
     if (r.mark) root.append(h('div', { class: 'evline' }, h('span', { class: 'eg', 'aria-hidden': 'true' }, '⚑'), h('div', { class: 'evtx' }, 'You marked everything as looked at', r.mark.note ? h('span', { class: 'muted' }, ' · “' + r.mark.note + '”') : null, h('span', { class: 'muted' }, ' · ' + absTime(r.mark.created_at)))));
@@ -1938,7 +1949,7 @@ function searchResults() {
 function renderLeft() {
   const box = clear($('#lefttree'));
   if (S.query.trim()) { box.append(searchResults()); return; }
-  const nCards = M.cards.filter(c => { const k = cardState(c).key; return k === 'look' || k === 'partial'; }).length;
+  const nCards = M.todo;
   const nChecks = ((S.findings && S.findings.findings) || []).length;
   box.append(navRow('Changes', '◔', () => openTab('changes'), nCards || null, activeIs('changes')), paperSection(), experimentsSection(), codeSection(),
     navRow('Checks', '!', () => openTab('checks'), nChecks || null, activeIs('checks')), navRow('History', '⚑', () => openTab('history'), null, activeIs('history')));
@@ -2034,13 +2045,13 @@ function renderStatus() {
   const cp = S.alarms && S.alarms.checkpoint, hc = hubControls();
   const nChecks = ((S.findings && S.findings.findings) || []).length;
   bar.append(
-    h('button', { class: 'sbtn', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last checked: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
-    h('button', { class: 'sbtn', onclick: () => openTab('changes') }, plural(M.looked || 0, 'thing') + ' to look at'),
+    h('button', { class: 'sbtn', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
+    h('button', { class: 'sbtn', onclick: () => openTab('changes') }, plural(M.todo || 0, 'thing') + ' to look at'),
     h('button', { class: 'sbtn', onclick: () => openTab('checks') }, plural(nChecks, 'check')),
     h('span', { class: 'grow' }),
     BUSY ? h('span', { class: 'sbusy', role: 'status' }, BUSY) : null,
     !BUSY && hc.status ? h('span', { class: 'sbtn static' }, hc.status) : null,
-    !BUSY && S.project && !hc.status ? h('span', { class: 'sbtn static' }, 'Checked ' + agoText(S.project.scanned_at)) : null,
+    !BUSY && S.project && !hc.status ? h('span', { class: 'sbtn static' }, 'Files read ' + agoText(S.project.scanned_at)) : null,
     READONLY ? null : h('button', { class: 'sbtn', disabled: !!BUSY, onclick: () => syncNow() }, 'Sync now'));
 }
 

@@ -57,6 +57,16 @@ def safe_flags(scope_url=None):
     return out
 
 
+def todo_changes(alarms, entries):
+    """Rule shared with the UI: 'things to look at' = changes (alarm groups) in which at least one affected node is still not looked at."""
+    n = 0
+    for g in alarms.get("groups", []):
+        ids = [c["node_id"] for c in g["changed"]] + [d["node_id"] for d in g["downstream"]]
+        if any((entries.get("node:" + i) or {}).get("effective_state", "unreviewed") == "unreviewed" for i in ids):
+            n += 1
+    return n
+
+
 class ProjectError(Exception):
     def __init__(self, status, code, message):
         super().__init__(message)
@@ -324,6 +334,7 @@ class Manager:
         with a.lock:
             st = a.engine.project()
             al = a.engine.alarms()
+            ents = a.engine.triage().get("entries", {})
         paper = self.root(pid) / "paper"
         sub = self.paper_source(m).get("subdir")
         try:
@@ -332,7 +343,7 @@ class Manager:
             versions = 0
         return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
                 "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"),
-                "counts": {"recheck": al.get("summary", {}).get("flagged_nodes", 0), "findings": st["counts"]["findings"]}}
+                "counts": {"recheck": todo_changes(al, ents), "findings": st["counts"]["findings"]}}
 
     @staticmethod
     def paper_source(m):

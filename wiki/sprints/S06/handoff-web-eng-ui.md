@@ -32,3 +32,10 @@ Fresh sample and the real repo (code-only); all views, no console errors. Golden
 - Right sidebar merges rows per item with joined relations ("contains it · refers to it").
 - hubControls() driven against a real hub + fake GitHub: `app/tests/shots_s06_hubmode.py` (pair, create with own paper repo, status "Paper: GitHub repo ✓ synced just now", Connect paper repo… to folder `paper/` of the code repo, bad repo shows plain error, new paper commit + Sync now gives a Changes card). Screenshots `s06-hubmode-*.png`. Nothing broke. After switching source the card reads "history of your paper was rewritten" (engine's diverged event), accurate but may surprise.
 - `shots_s05.py` deleted.
+
+## QA fixes (D1-D8)
+- **D1** `server.py export_html`: embedded snapshot JSON escapes `&`, `<`, `>`, U+2028/2029 as `\uXXXX` (not only `</`). Test in `test_server.py` asserts none of these characters appear raw.
+- **D2 rule (one number everywhere)**: "things to look at" = number of changes (alarm groups) in which at least one affected file or item is still not looked at (triage state unreviewed, or changed again after a mark). Same value in the Changes badge, the status bar, the summary line ("N things still to look at") and the hub projects list (`hub/projects.py todo_changes`, test `test_todo_changes_rule`). Items flagged only by checks now read "A check found something here. See the check" (link to the Checks tab).
+- **D3** single-project server sends a CSP (`default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'`); UI unaffected, test added.
+- **D4** labels: kept for the always-set after a selection; a short form ("Figure 2") is used when the long one does not fit, with below/right/left/above placement and wider circle spacing. Re-shot at 1280x800 (`s06-sample-graph-1280.png`): every item named.
+- **D5-D8** paths keep their case; raw diff headers hidden (a "⋯" marks a gap); "1 file", "1 place", "1 setting"; the mark is "Last looked at" everywhere, scans read "Files read 2 min ago", "checks" only means findings.
