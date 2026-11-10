@@ -364,6 +364,23 @@ def draft(G, alarms=None, findings=None):
                     c.setdefault("issues", []).append("%s has no complete proof yet." % st["label"])
         for score, nid in suggest(c["text"], have):
             c["support"].append(_support_for_node(ctx, nid, "evidence", "suggested", score))
+    # "[thm:bound]" -> "Theorem 1", "[tab:rank]" -> "Table 1": the names a reader would use
+    names = {}
+    for b in blocks:
+        if b["label"] and b["kind"] != "proof":
+            names[b["label"]] = "%s %d" % (FORMAL.get(b["kind"]) or PREMISE[b["kind"]], b["number"])
+    for lab, nid in label_node.items():
+        names.setdefault(lab, G.nodes[nid]["name"])
+
+    def pretty(t):
+        t = re.sub(r"\[([^\]\s]+)\]", lambda m: names.get(m.group(1), m.group(0)), t or "")
+        t = re.sub(r"\b(Theorem|Lemma|Proposition|Corollary|Assumption|Definition|Table|Section|Appendix|Claim)s?\s+(?=\1 \d)", "", t)   # "Theorem Theorem 1"
+        return re.sub(r"\bFig(?:ure|\.)\s+(?=Fig\. \d)", "", t)
+    for c in claims:
+        c["text"] = pretty(c["text"])
+        for s_ in c["support"]:
+            s_["detail"] = pretty(s_.get("detail"))
+        c["issues"] = [i for i in c.get("issues", [])]
     for c in claims:
         c.setdefault("issues", [])
         loc = c.get("loc") or {}

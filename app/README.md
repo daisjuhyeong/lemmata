@@ -28,6 +28,11 @@ lemmata open ~/work/alarm-analyzer-eval                                      # c
 ```
 The tool only reads your repos (read-only git) and writes inside `.lemmata/` in the project folder, which ignores itself in git.
 
+## Research views (S07)
+Inside a project: **Claims** (core message, claims, and the proof, table, result file and script behind each), **Timeline** (commits grouped into steps and decisions), **Experiments** (result files and whether they are out of date), **Tasks** (feedback turned into linked tasks, weekly digest) and **Ask** (rule-based lookup). All of it is computed with rules; no AI model is called. API: `/api/claims`, `/api/timeline`, `/api/ledger`, `/api/tasks`, `/api/digest`, `/api/ask`.
+
+To let other people sign in with their own GitHub on a public address, see `docs/PUBLIC-SITE.md`.
+
 ## Changing the name
 "Lemmata" / `lemmata` is a working name. When the real name is chosen, one command renames the package, CLI, hub folder, UI and wiki:
 ```
@@ -37,7 +42,7 @@ python3 app/scripts/rename.py --slug newname --display "Newname"
 
 ## Tests
 ```
-PYTHONPATH=app/src python3 -m unittest discover -s app/tests -p "test_*.py"   # 33 tests
+PYTHONPATH=app/src python3 -m unittest discover -s app/tests -p "test_*.py"   # 134 tests
 python3 app/tests/fixtures/build_fixtures.py    # regenerate tests/fixtures/api/*.json
 ```
 

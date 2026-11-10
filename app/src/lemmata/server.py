@@ -111,6 +111,13 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
+        for name in ("claims", "timeline", "ledger", "tasks"):   # research views (absent on fixture data)
+            fn = getattr(e, name, None)
+            if fn is not None:
+                try:
+                    snap[name] = fn()
+                except Exception:
+                    pass
         n = 0
         for g in alarms.get("groups", []):
             ids = [c["node_id"] for c in g["changed"]] + [d["node_id"] for d in g["downstream"]]
@@ -179,6 +186,8 @@ class App:
                 .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
         html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % css.replace("</style", "<\\/style"))
         html = html.replace('<script src="vendor/cytoscape.min.js"></script>', "<script>\n%s\n</script>" % esc_script(vend))
+        rjs = (WEB / "research.js").read_text(encoding="utf-8")
+        html = html.replace('<script src="research.js"></script>', "<script>\n%s\n</script>" % esc_script(rjs))
         html = html.replace('<script src="app.js"></script>',
                             '<script type="application/json" id="lemmata-snapshot">%s</script>\n<script>\n%s\n</script>' % (data, esc_script(js)))
         return html, snap["project"].get("name", "project")

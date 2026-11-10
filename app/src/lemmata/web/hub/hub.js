@@ -1,5 +1,5 @@
-/* Lemmata hub pages: pair, sign in with GitHub, projects, new project. Plain JS, no build, no CDN.
-   Contract: wiki/sprints/S04/S04-brief.md. */
+/* Lemmata hub pages: landing and tutorial (public site), pair (private hub), sign in with GitHub, projects, new project,
+   account. Plain JS, no build, no CDN. Contracts: wiki/sprints/S04/S04-brief.md, wiki/sprints/S07/S07-brief.md. */
 'use strict';
 (function () {
   const root = document.getElementById('root'), who = document.getElementById('who');
@@ -36,7 +36,27 @@
   }
 
   /* ---------- state ---------- */
-  const S = { status: null, view: 'home', gh: null, flow: null, pollTimer: null, error: null };
+  const S = { status: null, view: 'home', gh: null, flow: null, pollTimer: null, error: null, flowKind: 'github', privateRepos: true };
+  const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } };
+  const isPublic = () => S.status && S.status.mode === 'public';
+  function track(event, extra) {   // usage events for the start-view comparison; never blocks the page
+    if (!S.status || !S.status.authenticated) return;
+    api('POST', '/api/hub/events', Object.assign({ event }, extra || {})).catch(() => { });
+  }
+  /* The four ways Lemmata can help. One is assigned as the start view when an account is created (round-robin, so the
+     groups stay the same size); the person can change it at any time, and that choice is the more interesting signal. */
+  const VIEWS = [
+    { k: 'claims', glyph: '◆', name: 'Claim map', one: 'Is every statement backed up?',
+      what: 'Your core message at the top, each claim under it, and what backs it: a proof, an assumption, a table traced to a result file and the script that made it. Green, amber or red per claim.' },
+    { k: 'inbox', glyph: '↻', name: 'Recheck inbox', one: 'What do I need to look at again?',
+      what: 'After each change in the code or the paper, a short list of the tables, figures and sections that may no longer match, with the reason.' },
+    { k: 'timeline', glyph: '⚑', name: 'Research timeline', one: 'How did this work get here?',
+      what: 'The commit history grouped into readable steps and decisions, so you (or a new lab member) can get on and off the project.' },
+    { k: 'ask', glyph: '?', name: 'Ask Lemmata', one: 'Let me just ask.',
+      what: 'A question box over the project: what supports this claim, what breaks if I change this file, which results are out of date. Answers link to the evidence.' },
+  ];
+  const viewOf = k => VIEWS.find(v => v.k === k) || VIEWS[0];
 
   function pairedOf(st) { return st.authenticated !== undefined ? !!st.authenticated : (st.paired !== undefined ? !!st.paired : !!st.session); }
   function ghUser(st) {
@@ -54,8 +74,13 @@
   }
   function route() {
     stopPoll();
+    document.body.classList.remove('wide');
     renderWho();
-    if (!pairedOf(S.status)) return viewPair();
+    if (!pairedOf(S.status)) return isPublic() ? viewLanding() : viewPair();
+    const u = ghUser(S.status);
+    if (u && S.view === 'home' && !lsGet('lemmata.welcomed.' + u.login, false)) S.view = 'welcome';
+    if (S.view === 'welcome') return viewWelcome();
+    if (S.view === 'account') return viewAccount();
     if (S.view === 'new') return viewNew();
     return viewHome();
   }
@@ -63,7 +88,9 @@
     clear(who);
     const u = pairedOf(S.status) && ghUser(S.status);
     if (!u) return;
-    who.append(...[u.avatar_url ? h('img', { src: u.avatar_url, alt: '', onerror: ev => ev.target.remove() }) : null, h('span', null, h('b', null, u.login)),
+    who.append(...[h('button', { class: 'linkbtn', onclick: () => { S.view = 'welcome'; route(); } }, 'How it works'),
+      u.avatar_url ? h('img', { src: u.avatar_url, alt: '', onerror: ev => ev.target.remove() }) : null,
+      h('button', { class: 'linkbtn', id: 'account', onclick: () => { S.view = 'account'; route(); } }, h('b', null, u.login)),
       h('button', { class: 'btn sm', onclick: signOut }, 'Sign out')].filter(Boolean));
   }
   function showFatal(e) {
@@ -114,17 +141,29 @@
 
   /* ---------- GitHub sign-in (device flow) ---------- */
   function stopPoll() { clearTimeout(S.pollTimer); S.pollTimer = null; S.polling = false; }
-  function signInCard(box, err) {
+  /* kind: 'github' = connect GitHub inside a session (private hub, or reconnect on the public site);
+           'login'  = sign in to the public site (no session yet). onDone runs after GitHub approves. */
+  function signInCard(box, err, opts) {
+    opts = opts || S.flowOpts || {};
+    S.flowOpts = opts;
     clear(box);
     if (S.flow) return flowCard(box);
-    box.append(h('div', { class: 'card' },
-      h('h2', null, 'Sign in with GitHub'),
-      h('p', null, 'Signing in lets Lemmata see your GitHub repositories, so you can pick your code and your paper from a list.'),
+    const priv = h('input', { type: 'radio', name: 'scope', id: 'scope-private', checked: S.privateRepos, onchange: () => { S.privateRepos = true; } });
+    const pubOnly = h('input', { type: 'radio', name: 'scope', id: 'scope-public', checked: !S.privateRepos, onchange: () => { S.privateRepos = false; } });
+    box.append(h('div', { class: 'card', id: 'signin-card' },
+      h('h2', null, opts.title || 'Sign in with GitHub'),
+      h('p', null, opts.text || 'Signing in lets Lemmata see your GitHub repositories, so you can pick your code and your paper from a list.'),
+      opts.reconnect ? null : h('div', { class: 'scopes' },
+        h('label', null, priv, h('span', null, h('b', null, 'Private and public repositories'), h('br'),
+          h('span', { class: 'muted small' }, 'GitHub will ask for access to your repositories. Lemmata only ever reads them; it never pushes, opens issues or changes settings.'))),
+        h('label', null, pubOnly, h('span', null, h('b', null, 'Public repositories only'), h('br'),
+          h('span', { class: 'muted small' }, 'GitHub is asked only who you are. Choose this to try Lemmata on open-source work without granting repository access.')))),
       errBox(err),
-      h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'gh-start', onclick: () => startFlow(box) }, 'Sign in with GitHub'))));
+      h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'gh-start', onclick: () => startFlow(box) }, opts.button || 'Sign in with GitHub'))));
   }
   async function startFlow(box) {
-    try { S.flow = await api('POST', '/api/hub/github/start', {}); }
+    const o = S.flowOpts || {};
+    try { S.flow = await api('POST', o.kind === 'login' ? '/api/hub/login/start' : '/api/hub/github/start', { private_repos: !!S.privateRepos }); }
     catch (e) { return signInCard(box, e.code === 'no_client_id' || e.status === 412 ? 'GitHub sign-in is not set up on the server yet. Run lemmata hub config --github-client-id <id> on the Mac mini.' : e.message); }
     S.flow.t0 = Date.now();
     flowCard(box);
@@ -134,12 +173,12 @@
     clear(box);
     const f = S.flow;
     const copyBtn = h('button', { class: 'btn', id: 'gh-copy', onclick: async () => { await copyText(f.user_code); copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500); } }, 'Copy');
-    const card = h('div', { class: 'card', 'aria-live': 'polite' }, h('h2', null, 'Sign in with GitHub'));
+    const card = h('div', { class: 'card', 'aria-live': 'polite' }, h('h2', null, (S.flowOpts && S.flowOpts.title) || 'Sign in with GitHub'));
     if (end) {
       card.append(errBox(end), h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'gh-retry', onclick: () => { S.flow = null; startFlow(box); } }, 'Retry')));
     } else {
       card.append(
-        h('p', null, 'Open GitHub, then enter this code:'),
+        h('p', null, 'Open GitHub in a new tab, enter this code there and approve. This page continues on its own.'),
         h('div', { class: 'usercode', id: 'usercode' }, f.user_code),
         h('div', { class: 'row' }, copyBtn,
           h('a', { class: 'btn primary', id: 'gh-open', href: f.verification_uri, target: '_blank', rel: 'noopener noreferrer' }, 'Open GitHub ↗')),
@@ -160,9 +199,14 @@
       if (!S.flow) return;
       if (Date.now() - S.flow.t0 > (S.flow.expires_in || 900) * 1000) return flowCard(box, 'The code expired before it was used.');
       let r;
-      try { r = await api('GET', '/api/hub/github/poll'); }
-      catch (e) { if (e.network) return schedulePoll(box); return flowCard(box, e.code === 'not_owner' ? 'This server belongs to another GitHub account.' : e.message); }
-      if (r.state === 'ok') { S.flow = null; S.status = await api('GET', '/api/hub/status'); return route(); }
+      const o = S.flowOpts || {};
+      try { r = await api('GET', o.kind === 'login' ? '/api/hub/login/poll?flow=' + encodeURIComponent(S.flow.flow) : '/api/hub/github/poll'); }
+      catch (e) { if (e.network || e.status === 429) return schedulePoll(box); return flowCard(box, e.code === 'not_owner' ? 'This server belongs to another GitHub account.' : e.message); }
+      if (r.state === 'ok') {
+        S.flow = null; S.flowOpts = null; S.status = await api('GET', '/api/hub/status');
+        if (o.onDone) return o.onDone();
+        return route();
+      }
       if (r.state === 'denied') return flowCard(box, 'GitHub sign-in was denied.');
       if (r.state === 'expired') return flowCard(box, 'The code expired before it was used.');
       if (r.state === 'error') return flowCard(box, r.message || 'GitHub reported an error.');
@@ -171,7 +215,7 @@
   }
   async function signOut() {
     try { await api('POST', '/api/hub/github/logout', {}); } catch (e) { /* show fresh status either way */ }
-    S.flow = null;
+    S.flow = null; S.flowOpts = null;
     try { S.status = await api('GET', '/api/hub/status'); } catch (e) { return showFatal(e); }
     S.view = 'home'; route();
   }
@@ -205,7 +249,8 @@
     const signin = h('div', { id: 'signin' });
     const list = h('div', { id: 'plist' }, h('p', { class: 'muted' }, 'Loading…'));
     root.append(head);
-    if (!user) { root.append(signin); signInCard(signin); }
+    if (!user) { root.append(signin); signInCard(signin, null, { kind: 'github' }); }
+    else if (S.status.github_needs_reauth) { root.append(signin); reconnectCard(signin, () => { S.view = 'home'; route(); }); }
     root.append(list);
     try {
       const r = await api('GET', '/api/hub/projects');
@@ -216,9 +261,22 @@
       }
       for (const p of r.projects) list.append(projRow(p));
     } catch (e) {
-      if (e.status === 401) { S.status = await api('GET', '/api/hub/status').catch(() => S.status); return viewPair(); }
+      if (e.status === 401) { S.status = await api('GET', '/api/hub/status').catch(() => S.status); return route(); }
       clear(list).append(errBox(e.message));
     }
+  }
+  /* GitHub stopped accepting the saved sign-in (revoked, or expired by an organisation). The Lemmata session is fine:
+     reconnect in place, no sign-out, nothing else is lost. */
+  function reconnectCard(box, onDone) {
+    const u = ghUser(S.status) || {};
+    signInCard(box, null, { kind: 'github', reconnect: true, onDone, title: 'Reconnect GitHub', button: 'Reconnect GitHub',
+      text: 'GitHub no longer accepts the sign-in Lemmata saved for ' + (u.login || 'you') + ', so your projects cannot sync. This happens when access was revoked on GitHub or an organisation expired it. Reconnecting takes a few seconds; you stay signed in here and your projects are untouched.' });
+  }
+  function claimChips(cl) {
+    if (!cl || !cl.total) return null;
+    return [cl.unsupported ? h('span', { class: 'chip bad' }, '✕ ' + plural(cl.unsupported, 'claim') + ' not backed up') : null,
+      cl.partial ? h('span', { class: 'chip recheck' }, '◐ ' + cl.partial + ' partly') : null,
+      h('span', { class: 'chip ok' }, '✓ ' + cl.supported + ' of ' + cl.total + ' claims supported')];
   }
   function projRow(p) {
     const c = p.counts || { recheck: 0, findings: 0 };
@@ -232,29 +290,31 @@
           h('span', null, 'Last synced ' + ago(p.last_sync))),
         h('div', { class: 'meta' },
           c.recheck ? h('span', { class: 'chip recheck' }, '↻ ' + plural(c.recheck, 'thing') + ' to look at') : h('span', { class: 'chip ok' }, '✓ Nothing to look at'),
-          c.findings ? h('span', { class: 'chip bad' }, plural(c.findings, 'check') + ' about your paper') : null),
+          c.findings ? h('span', { class: 'chip bad' }, plural(c.findings, 'check') + ' about your paper') : null, claimChips(c.claims)),
         h('label', { class: 'meta opt' },
           h('input', { type: 'checkbox', checked: !!p.online_refs, 'aria-label': 'Check references online',
             onchange: async ev => { const box = ev.target; box.disabled = true; try { await api('PATCH', '/api/hub/projects/' + encodeURIComponent(p.id), { online_refs: box.checked }); } catch (e) { box.checked = !box.checked; alert(e.message); } box.disabled = false; } }),
           ' Look up my references online (sends their titles and DOIs to OpenAlex and Crossref)')),
-      h('a', { class: 'btn', href: '/p/' + encodeURIComponent(p.id) + '/', 'aria-label': 'Open ' + p.name }, 'Open'));
+      h('a', { class: 'btn', href: '/p/' + encodeURIComponent(p.id) + '/', 'aria-label': 'Open ' + p.name, onclick: () => track('project_opened', { project: p.id }) }, 'Open'));
   }
 
   /* ---------- new project ---------- */
   function repoPicker(id, label, onPick) {
     const list = h('ul', { class: 'repos', id, 'aria-label': label });
     const search = h('input', { type: 'search', id: id + '-q', placeholder: 'Search your repositories', 'aria-label': 'Search: ' + label, autocomplete: 'off' });
-    const box = h('div', null, search, list, h('div', { class: 'errslot' }));
+    const refresh = h('button', { class: 'linkbtn small', onclick: () => load(search.value.trim(), true) }, 'Refresh the list from GitHub');
+    const box = h('div', null, search, list, h('div', { class: 'errslot' }), h('div', { class: 'muted small' }, 'Missing a repository? ', refresh));
     let timer = null, seq = 0, picked = null;
-    const errs = box.lastChild;
-    async function load(q) {
+    const errs = box.querySelector('.errslot');
+    async function load(q, fresh) {
       const my = ++seq;
       clear(list).append(h('li', { class: 'muted pad' }, 'Loading repositories…'));
       try {
-        const r = await api('GET', '/api/hub/github/repos?q=' + encodeURIComponent(q || ''));
+        const r = await api('GET', '/api/hub/github/repos?q=' + encodeURIComponent(q || '') + (fresh ? '&refresh=1' : ''));
         if (my !== seq) return;
         clear(list); clear(errs);
-        if (!r.repos.length) list.append(h('li', { class: 'muted pad' }, q ? 'No repository matches “' + q + '”.' : 'No repositories found.'));
+        if (!r.repos.length) list.append(h('li', { class: 'muted pad' }, q ? 'No repository matches “' + q + '”. Type part of its name, not a link.' :
+          (S.status.user && S.status.user.private_repos === false ? 'No public repositories found. You signed in for public repositories only; sign out and choose private access to see the rest.' : 'No repositories found.')));
         for (const rp of r.repos) {
           const b = h('button', { 'aria-pressed': String(!!picked && picked.full_name === rp.full_name), onclick: () => {
             picked = rp; onPick(rp);
@@ -266,10 +326,26 @@
         }
       } catch (e) {
         if (my !== seq) return;
-        clear(list); clear(errs).append(errBox(e.status === 401 || e.status === 403 ? 'GitHub is not connected. Sign in from the Projects page.' : e.message));
+        clear(list); clear(errs);
+        if (e.code === 'github_token_invalid' || e.code === 'not_signed_in') {
+          // reconnect right here: the half-filled form stays, and the list reloads when GitHub approves
+          S.status.github_needs_reauth = true;
+          S.reauthWaiters = S.reauthWaiters || [];
+          S.reauthWaiters.push(() => { clear(errs); load(search.value.trim(), true); });
+          if (document.getElementById('signin-card')) errs.append(h('div', { class: 'muted small' }, 'Waiting for GitHub to be reconnected (above).'));
+          else {   // one card for the whole page, however many lists are waiting on it
+            const slot = h('div'); errs.append(slot);
+            reconnectCard(slot, () => { const w = S.reauthWaiters || []; S.reauthWaiters = []; S.status.github_needs_reauth = false; w.forEach(f => f()); });
+          }
+        } else if (e.status === 401) errs.append(errBox('Your Lemmata session ended. Reload the page and sign in again.'));
+        else errs.append(errBox(e.message), h('button', { class: 'btn sm', onclick: () => load(search.value.trim(), true) }, 'Try again'));
       }
     }
-    search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => load(search.value.trim()), 250); });
+    search.addEventListener('input', () => {
+      const m = search.value.match(/github\.com\/([^\/\s]+\/[^\/\s#?]+)/i);   // a pasted GitHub link becomes owner/name
+      if (m) search.value = m[1].replace(/\.git$/, '');
+      clearTimeout(timer); timer = setTimeout(() => load(search.value.trim()), 250);
+    });
     return { box, load, search, get picked() { return picked; } };
   }
   function viewNew() {
@@ -384,12 +460,12 @@
       tabs, repoBox, folderBox, zipBox, errs,
       h('div', { class: 'acts' }, createBtn));
     repoBox.append(
-      h('p', { class: 'muted' }, 'Your LaTeX paper in its own GitHub repo, written and compiled in VS Code. Pick it below. See the setup guide (docs/SETUP-two-macs.md) for how to set that up.'),
+      h('p', { class: 'muted' }, 'Your LaTeX paper in its own GitHub repo. Pick it below. Lemmata reads the .tex files as they are on GitHub; it does not compile them.'),
       paper.box);
     folderBox.append(
       h('p', { class: 'muted' }, 'Your paper sits in a folder inside the code repo you picked in step 1. Type that folder’s name.'),
       h('label', { class: 'field' }, h('span', null, 'Folder name'), sub));
-    zipBox.append(h('p', { class: 'muted' }, 'A one-time copy of your paper folder. Lemmata will not see later edits until you upload a new zip, so a GitHub repo is better when you can.'), drop, fileIn);
+    zipBox.append(h('p', { class: 'muted' }, 'For a paper that lives in Overleaf: in Overleaf choose Menu → Download → Source and drop that zip here. It is a snapshot. Lemmata reads the claims, proofs, tables and figures from it, but will not see later edits until you upload a new zip.'), drop, fileIn);
     paintMode();
     root.append(form, progress);
     code.load(''); paper.load('');
@@ -408,6 +484,135 @@
       x.onerror = () => reject(new Error('Cannot reach the Lemmata server.'));
       x.send(file);
     });
+  }
+
+  /* ---------- landing (public site, not signed in) ---------- */
+  function howSteps() {
+    const steps = [
+      ['1', 'Connect', 'Sign in with GitHub and pick the repository with your code, and your paper if it is on GitHub (or upload the LaTeX source as a zip).'],
+      ['2', 'Lemmata reads', 'It reads the LaTeX and the repository and links them: claim → theorem and proof, claim → table → result file → script → settings. Nothing is run and nothing is changed.'],
+      ['3', 'You confirm', 'Lemmata drafts the claims and what backs them. You accept, edit or reject each one. Only what you confirm counts.'],
+      ['4', 'It keeps watch', 'When a commit changes something a claim rests on, Lemmata says which claims, tables and sections to recheck, and why.'],
+    ];
+    return h('ol', { class: 'how' }, steps.map(([n, t, d]) => h('li', null, h('span', { class: 'n' }, n), h('div', null, h('b', null, t), h('br'), h('span', { class: 'muted' }, d)))));
+  }
+  function waysGrid(sel, onPick) {
+    return h('div', { class: 'ways', role: onPick ? 'radiogroup' : null }, VIEWS.map(v => {
+      const body = [h('div', { class: 'wg' }, v.glyph), h('div', { class: 'wn' }, v.name), h('div', { class: 'wq' }, '“' + v.one + '”'), h('div', { class: 'muted small' }, v.what)];
+      if (!onPick) return h('div', { class: 'way' }, body);
+      return h('button', { class: 'way' + (sel === v.k ? ' on' : ''), role: 'radio', 'aria-checked': String(sel === v.k), id: 'way-' + v.k, onclick: () => onPick(v.k) }, body,
+        sel === v.k ? h('div', { class: 'chip ok', style: 'margin-top:8px' }, '✓ Opens first') : null);
+    }));
+  }
+  function privacyList() {
+    return h('ul', { class: 'plain' },
+      h('li', null, h('b', null, 'Read-only. '), 'Lemmata copies the repositories you pick and reads them. It never pushes, never runs your code and never compiles your paper.'),
+      h('li', null, h('b', null, 'Yours only. '), 'Nobody else who signs in here can see your projects. The copies are stored on the research server that runs this site; delete a project or your whole account at any time from Account.'),
+      h('li', null, h('b', null, 'No AI model reads your work here. '), 'The links and checks are computed with rules. If you want an AI to reason over them, connect your own Claude Code to Lemmata; it then runs on your plan, on your machine.'),
+      h('li', null, h('b', null, 'What is counted. '), 'Which view you open and whether you confirm claims or add feedback, as anonymous counts, to learn which way of helping works. Never file names, text or code.'));
+  }
+  function viewLanding() {
+    clear(root);
+    document.body.classList.add('wide');
+    const signin = h('div', { id: 'signin' });
+    root.append(
+      h('div', { class: 'hero' },
+        h('h1', null, 'Know what your paper claims, and whether your repository still backs it up.'),
+        h('p', { class: 'lede' }, 'Lemmata reads your LaTeX and your GitHub repository together. It lays out the core message, the claims under it, and the proof, experiment and result file behind each one, then tells you what to recheck when something changes.'),
+        h('p', { class: 'muted' }, 'Use AI, don’t depend on it: Lemmata shows you the evidence and where it is missing. You decide what is true.')),
+      signin,
+      h('h3', null, 'How it works'), howSteps(),
+      h('h3', null, 'Four ways it can help'), waysGrid(),
+      h('h3', null, 'Before you sign in'), privacyList(),
+      h('p', { class: 'muted small', style: 'margin-top:24px' }, S.status.signup === 'invite' ? 'This site is invite-only for now. If GitHub sign-in is refused, ask the person who sent you the link to add your GitHub name.' : ''));
+    signInCard(signin, null, { kind: 'login', title: 'Start with GitHub', button: 'Sign in with GitHub',
+      text: 'No separate account or password. Choose how much Lemmata may see:' });
+  }
+
+  /* ---------- welcome: tutorial + choose how Lemmata should help ---------- */
+  function viewWelcome() {
+    clear(root);
+    document.body.classList.add('wide');
+    const u = ghUser(S.status) || {};
+    const first = !lsGet('lemmata.welcomed.' + u.login, false);
+    let sel = S.status.start_view || 'claims';
+    const assigned = S.status.variant;
+    if (first) track('tutorial_shown', { view: sel });
+    const grid = h('div');
+    const paint = () => clear(grid).append(waysGrid(sel, async k => {
+      if (k === sel) return;
+      sel = k; paint();
+      try { await api('POST', '/api/hub/prefs', { view: k }); S.status.start_view = k; } catch (e) { /* the choice still applies in this browser */ }
+    }));
+    paint();
+    const done = (skipped) => {
+      lsSet('lemmata.welcomed.' + u.login, true);
+      if (first) track(skipped ? 'tutorial_skipped' : 'tutorial_done', { view: sel });
+      S.view = 'home'; route();
+    };
+    root.append(
+      h('div', { class: 'row' }, h('h1', { class: 'grow' }, first ? 'Welcome, ' + (u.name || u.login || '') + '.' : 'How Lemmata works'),
+        h('button', { class: 'linkbtn', id: 'skip', onclick: () => done(true) }, first ? 'Skip' : 'Back to projects')),
+      h('p', { class: 'lede' }, 'A research project is a chain: a message, the claims that carry it, and the proofs, experiments and files that carry the claims. Lemmata keeps that chain in view while the code and the paper keep changing.'),
+      h('h3', null, 'What happens'), howSteps(),
+      h('h3', null, 'An example'),
+      h('div', { class: 'card example' },
+        h('div', { class: 'ex-claim' }, h('span', { class: 'chip recheck' }, '↻ Recheck'), ' ', h('b', null, 'Contribution 2. '), '“Our delay-aware metric changes the ranking of the detectors.”'),
+        h('div', { class: 'ex-chain mono' }, 'Table 3  ←  results/ranking.csv  ←  evaluate.py  ←  config.yaml'),
+        h('div', { class: 'muted small' }, 'evaluate.py was changed on 8 Nov (“switch metric to delay-aware F1”), after results/ranking.csv was last written. The table may show old numbers. Rerun, or mark it as fine.')),
+      h('h3', null, 'How should Lemmata help you first?'),
+      h('p', { class: 'muted' }, 'All four are always available inside a project. Pick the one a project should open on.' +
+        (assigned ? ' We started you on ' + viewOf(assigned).name + '; we are comparing which starting point is most useful, so change it if another fits you better.' : '')),
+      grid,
+      h('div', { class: 'acts' }, h('button', { class: 'btn primary', id: 'welcome-go', onclick: () => done(false) }, first ? 'Connect my first project' : 'Done')));
+  }
+
+  /* ---------- account ---------- */
+  async function viewAccount() {
+    clear(root);
+    const u = ghUser(S.status) || {};
+    const tokBox = h('div', null, h('p', { class: 'muted' }, 'Loading…')), abBox = h('div');
+    let sel = S.status.start_view || 'claims';
+    const grid = h('div');
+    const paint = () => clear(grid).append(waysGrid(sel, async k => { sel = k; paint(); try { await api('POST', '/api/hub/prefs', { view: k }); S.status.start_view = k; } catch (e) { alert(e.message); } }));
+    paint();
+    async function paintTokens(shown) {
+      let r;
+      try { r = await api('GET', '/api/hub/tokens'); } catch (e) { clear(tokBox).append(errBox(e.message)); return; }
+      const name = h('input', { type: 'text', value: 'Claude Code', 'aria-label': 'Token name', style: 'max-width:240px' });
+      clear(tokBox).append(
+        shown ? h('div', { class: 'notice' }, h('b', null, 'Copy this now. It is shown once.'),
+          h('pre', { class: 'cmdblock', id: 'mcp-cmd' }, 'claude mcp add --scope user --transport http lemmata ' + shown.mcp_url + ' --header "Authorization: Bearer ' + shown.token + '"'),
+          h('div', { class: 'muted small' }, 'Run it in a terminal. Then ask Claude Code, for example: “Use lemmata: which of my claims are not supported, and what would I need to add?” Keep --scope user so the token is never written into a repository.')) : null,
+        r.tokens.length ? h('ul', { class: 'plain' }, r.tokens.map(t => h('li', null, h('b', null, t.name), ' ', h('span', { class: 'muted small' }, 'made ' + ago(t.created) + (t.last_used ? ', last used ' + ago(t.last_used) : ', never used')), ' ',
+          h('button', { class: 'linkbtn small', onclick: async () => { try { await api('DELETE', '/api/hub/tokens/' + t.device_id); } catch (e) { alert(e.message); } paintTokens(); } }, 'Remove')))) : null,
+        h('div', { class: 'row' }, name, h('button', { class: 'btn', id: 'new-token', onclick: async () => { try { paintTokens(await api('POST', '/api/hub/tokens', { name: name.value.trim() || 'Claude Code' })); } catch (e) { alert(e.message); } } }, 'Create a token')));
+    }
+    root.append(
+      h('div', { class: 'crumb' }, h('button', { class: 'linkbtn', onclick: () => { S.view = 'home'; route(); } }, '← Projects')),
+      h('h1', null, 'Account'),
+      h('p', null, 'Signed in as ', h('b', null, u.login), u.private_repos === false ? ' (public repositories only).' : ' (private and public repositories).',
+        S.status.is_admin ? ' You own this Lemmata server.' : ''),
+      h('h3', null, 'A project opens on'), grid,
+      h('h3', null, 'Your own Claude Code or VS Code'),
+      h('p', { class: 'muted' }, 'Lemmata does not call an AI model. To have one reason over your claims and evidence, connect your own Claude Code over MCP with a personal token.'), tokBox,
+      S.status.is_admin ? [h('h3', null, 'Start-view comparison (owner only)'), abBox] : null,
+      S.status.is_admin ? null : [h('h3', null, 'Delete'), h('p', { class: 'muted' }, 'Removes your projects and their copies from the server, the saved GitHub sign-in and every session.'),
+        h('button', { class: 'btn', id: 'delete-account', onclick: async () => {
+          if (!confirm('Delete your Lemmata account, all your projects here and the saved GitHub sign-in? Your GitHub repositories are not touched.')) return;
+          try { await api('DELETE', '/api/hub/account'); } catch (e) { return alert(e.message); }
+          S.status = await api('GET', '/api/hub/status'); S.view = 'home'; route();
+        } }, 'Delete my account')]);
+    paintTokens();
+    if (S.status.is_admin) {
+      try {
+        const r = await api('GET', '/api/hub/admin/ab');
+        const cols = [['users', 'People'], ['created_project', 'Made a project'], ['confirmed_a_claim', 'Confirmed a claim'], ['added_feedback', 'Added feedback'], ['asked', 'Asked'], ['switched_view', 'Changed start view'], ['came_back_another_day', 'Came back'], ['useful_yes', '👍'], ['useful_no', '👎']];
+        abBox.append(h('table', { class: 'tbl' }, h('thead', null, h('tr', null, h('th', null, 'Started on'), cols.map(c => h('th', null, c[1])))),
+          h('tbody', null, r.variants.map(v => h('tr', null, h('td', null, viewOf(v.variant).name), cols.map(c => h('td', { class: 'mono' }, String(v[c[0]]))))))),
+          h('p', { class: 'muted small' }, r.accounts + ' accounts. ' + r.note));
+      } catch (e) { abBox.append(errBox(e.message)); }
+    }
   }
 
   boot();

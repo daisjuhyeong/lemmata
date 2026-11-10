@@ -105,7 +105,7 @@ const T = {
   checkChip: { main_appendix_mismatch: ['≠', 'Differs'], reference_unmatched: ['?', 'Could not be matched'], untraced_number: ['∅', 'Not traced'] },
   notRun: { 'no paper repo': 'no paper connected', 'no paper': 'no paper connected', 'no \\appendix found': 'no appendix found' },
   intro: [
-    ['Lemmata keeps track of your paper and your code.', 'It reads your paper and the code and results behind it, and remembers how they fit together.'],
+    ['Lemmata keeps track of what your paper claims and what backs it.', 'It reads your paper and the code and results behind it. Claims shows the core message, each claim under it, and the proof, table, result file and script behind each one.'],
     ['When something changes, it tells you what it affects.', 'Change a setting or a script and Lemmata lists the tables, figures and sections that may no longer match. You don\'t have to watch it. Open it when you need it.'],
     ['You decide what is fine.', 'For each change, choose Looks fine, Needs fixing or Ignore. When you are happy, press "Mark everything as looked at" and Lemmata counts from there.'],
   ],
@@ -1934,9 +1934,9 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'claims', 'timeline', 'experiments', 'tasks', 'ask'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
-  if (!S.tabs.length) { S.tabs = [{ k: 'changes' }, { k: 'graph' }]; S.active = 0; }
+  if (!S.tabs.length) { S.tabs = [{ k: 'claims' }, { k: 'changes' }, { k: 'graph' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
   if (innerWidth < 1280 && !u) S.rightOpen = false;
 }
@@ -1949,12 +1949,13 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History';
+    case 'claims': case 'timeline': case 'experiments': case 'tasks': case 'ask': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
   return '';
 }
-const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }' };
+const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?' };
 function openTab(k, id, opts) {
   opts = opts || {};
   const key = tabKey({ k, id });
@@ -2002,9 +2003,9 @@ function buildShell() {
   const rb = (id, glyph, label, fn, cls) => h('button', { class: 'rbtn ' + (cls || ''), id, 'aria-label': label, title: label, onclick: fn }, glyph);
   app.append(
     h('nav', { id: 'ribbon', 'aria-label': 'Main' },
-      rb('rb-changes', '◔', 'Changes', () => openTab('changes')), rb('rb-search', '⌕', 'Search (Ctrl+O)', () => quickSwitcher()), rb('rb-graph', '◉', 'Graph', () => openTab('graph')), rb('rb-cmd', '⌘', 'Command palette (Ctrl+P)', () => palette()),
+      rb('rb-claims', '◆', 'Claims', () => openTab('claims')), rb('rb-changes', '◔', 'Changes', () => openTab('changes')), rb('rb-ask', '?', 'Ask', () => openTab('ask')), rb('rb-search', '⌕', 'Search (Ctrl+O)', () => quickSwitcher()), rb('rb-graph', '◉', 'Graph', () => openTab('graph')), rb('rb-cmd', '⌘', 'Command palette (Ctrl+P)', () => palette()),
       h('span', { class: 'grow' }),
-      rb('rb-sync', '⟳', 'Sync now', () => syncNow()), rb('rb-help', '?', 'How Lemmata works', () => intro(true)), rb('rb-menu', '⋯', 'Project menu', ev => projectMenu(ev.currentTarget))),
+      rb('rb-sync', '⟳', 'Sync now', () => syncNow()), rb('rb-help', 'ⓘ', 'How Lemmata works', () => intro(true)), rb('rb-menu', '⋯', 'Project menu', ev => projectMenu(ev.currentTarget))),
     h('aside', { id: 'left', 'aria-label': 'Explorer' },
       h('div', { class: 'lsearch' }, h('input', { type: 'search', id: 'lsearch', placeholder: 'Search items, files and checks', 'aria-label': 'Search items, files and checks', oninput: ev => { S.query = ev.target.value; renderLeft(); } })),
       h('div', { id: 'lefttree' })),
@@ -2172,7 +2173,7 @@ function renderLeft() {
   if (S.query.trim()) { box.append(searchResults()); return; }
   const nCards = M.todo;
   const nChecks = ((S.findings && S.findings.findings) || []).length;
-  box.append(navRow('Changes', '◔', () => openTab('changes'), nCards || null, activeIs('changes')), paperSection(), experimentsSection(), codeSection(),
+  box.append(rxNavRows(), h('div', { class: 'ldiv' }, 'Project'), navRow('Changes', '◔', () => openTab('changes'), nCards || null, activeIs('changes')), paperSection(), experimentsSection(), codeSection(),
     navRow('Checks', '!', () => openTab('checks'), nChecks || null, activeIs('checks')), navRow('History', '⚑', () => openTab('history'), null, activeIs('history')));
 }
 
@@ -2204,6 +2205,7 @@ function renderPage(keepScroll) {
   else if (t.k === 'node') el = pageEvidence(t.id);
   else if (t.k === 'checks') el = pageChecks();
   else if (t.k === 'history') el = pageHistory();
+  else if (RX_PAGES[t.k]) el = RX_PAGES[t.k]();
   pg.append(el);
   if (t.k === 'graph') afterGraphAttach();
   if (keepScroll) pg.scrollTop = st;
@@ -2324,6 +2326,7 @@ function currentItemCmd(state) {
 function palette() {
   const it = S.tabs[S.active] && S.tabs[S.active].k === 'item' ? M.byId.get(S.tabs[S.active].id) : null;
   const cmds = [
+    { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
     { label: 'Go to Changes', run: () => openTab('changes') }, { label: 'Go to Graph', run: () => openTab('graph') }, { label: 'Go to Checks', run: () => openTab('checks') }, { label: 'Go to History', run: () => openTab('history') },
     { label: 'Open item…', hint: 'Ctrl+O', run: () => quickSwitcher() },
     { label: 'Mark everything as looked at', run: () => markAllDialog(), disabled: READONLY, reason: 'Read-only snapshot' },
@@ -2403,6 +2406,7 @@ async function loadAll() {
     S.loading = false; S.error = e.message; if (!S.graph) S.graph = { nodes: [], edges: [] };
   }
   rebuildIndex(); pruneTabs();
+  rxLoad().then(() => { renderLeft(); const t = S.tabs[S.active]; if (t && RX_PAGES[t.k]) renderPage(true); });
   if (!S.hadGf && !S.gfAuto) { S.gfAuto = true; if (M.items.filter(i => i.shared).length > 12) { S.gf.shared = false; GR.sig = ''; } }
   const first = !S.rendered; S.rendered = true;
   renderAll(); renderShellExtras();
@@ -2436,7 +2440,9 @@ function boot() {
   renderAll();
   detectHub().then(loadAll).then(() => {
     if (!READONLY) { setInterval(autoRefreshTick, 5000); document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); }); }
-    intro(false);
+    if (HUB_ON) { lsSet('lemmata.seen_intro', true); rxStartView().then(rxUsefulBar); }   // the hub's own tutorial already explained Lemmata
+    else intro(false);
   });
 }
-boot();
+/* research.js is loaded after this file, so start once the whole document (both scripts) has been read. */
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

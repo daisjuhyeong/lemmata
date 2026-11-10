@@ -99,15 +99,18 @@ def _hostname(hostport):
     return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
 
 
+PUBLIC_SCHEMES = ["https://"]  # browser tests add "http://" to reach a loopback hub; production accepts https only
+
+
 def public_host(url):
-    """Host of an https public URL ('https://host' or 'https://host:port'), else None. Only https is accepted."""
+    """Host of a public URL ('https://host' or 'https://host:port'), else None. Only https is accepted."""
     u = (url or "").strip().lower().rstrip("/")
-    if not u.startswith("https://"):
-        return None
-    rest = u[len("https://"):]
-    if not rest or "/" in rest or "@" in rest or " " in rest:
-        return None
-    return rest
+    for sch in PUBLIC_SCHEMES:
+        if u.startswith(sch):
+            rest = u[len(sch):]
+            if rest and "/" not in rest and "@" not in rest and " " not in rest:
+                return rest
+    return None
 
 
 class Guard:
@@ -135,7 +138,7 @@ class Guard:
         if origin is None:
             return True
         o = origin.strip().lower()
-        if self.public and o == "https://" + self.public:
+        if self.public and any(o == sch + self.public for sch in PUBLIC_SCHEMES):
             return True
         if not o.startswith("http://"):
             return False
