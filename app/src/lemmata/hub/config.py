@@ -19,6 +19,12 @@ DEFAULTS = {
     "allow_hosts": [],
     "owner": None,
     "sync_interval": 300,
+    # public site (S07). public_url unset = private hub: Tailscale only, pairing code, one owner (the S04 behaviour).
+    "public_url": None,          # e.g. https://mac-mini.tailnet-name.ts.net  (set on the Mac mini only, never over HTTP)
+    "signup": "owner",           # owner | invite | open
+    "allowed_users": [],         # GitHub logins admitted when signup = invite
+    "max_users": 50,
+    "max_projects_per_user": 5,
 }
 
 
@@ -81,6 +87,10 @@ class DataDir:
         return self.hub / "overleaf.json"
 
     @property
+    def events_path(self):
+        return self.hub / "events.jsonl"
+
+    @property
     def log_path(self):
         return self.hub / "hub.log"
 
@@ -96,6 +106,6 @@ class Config:
 
     def update(self, **kw):
         c = read_json(self.data.config_path, {}) or {}
-        c.update({k: v for k, v in kw.items() if v is not None or k == "owner"})
+        c.update({k: v for k, v in kw.items() if v is not None or k in ("owner", "public_url")})
         write_private(self.data.config_path, json.dumps(c, indent=1) + "\n")
         return self.load()

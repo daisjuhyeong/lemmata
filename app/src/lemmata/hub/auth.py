@@ -42,10 +42,15 @@ class Auth:
     def _save(self, d):
         write_private(self.data.tokens_path, json.dumps(d, indent=1) + "\n")
 
-    def new_device(self, name):
+    def new_device(self, name, user=None, kind=None):
+        """user: the GitHub login this session or token belongs to (None = the hub owner, as before S07)."""
         name = (name or "device").strip()[:60] or "device"
         token = secrets.token_urlsafe(32)  # 43 chars
         dev = {"device_id": "dev_" + secrets.token_hex(4), "name": name, "hash": _hash(token), "created": _now(), "last_used": None}
+        if user:
+            dev["user"] = user
+        if kind:
+            dev["kind"] = kind
         with self.lock:
             d = self._load()
             d["devices"].append(dev)
@@ -72,11 +77,20 @@ class Auth:
     def devices(self):
         return [{k: v for k, v in dv.items() if k != "hash"} for dv in self._load()["devices"]]
 
-    def revoke(self, device_id):
+    def revoke_user(self, user):
         with self.lock:
             d = self._load()
             n = len(d["devices"])
-            d["devices"] = [x for x in d["devices"] if x["device_id"] != device_id]
+            d["devices"] = [x for x in d["devices"] if (x.get("user") or "").lower() != user.lower()]
+            if len(d["devices"]) != n:
+                self._save(d)
+            return n - len(d["devices"])
+
+    def revoke(self, device_id, user=None):
+        with self.lock:
+            d = self._load()
+            n = len(d["devices"])
+            d["devices"] = [x for x in d["devices"] if not (x["device_id"] == device_id and (user is None or (x.get("user") or "").lower() == user.lower()))]
             if len(d["devices"]) != n:
                 self._save(d)
                 return True
@@ -123,7 +137,11 @@ class Auth:
             return False
 
 
-def cookie_header(token, max_age=60 * 60 * 24 * 365):
+def cookie_header(token, max_age=60 * 60 * 24 * 365, secure=False):
+    """SameSite=Strict on the private hub. On the public site (https) the cookie is Secure and Lax, so a link to a project
+    opened from Slack or e-mail arrives signed in; every state-changing request is still checked against the Origin."""
+    if secure:
+        return "%s=%s; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=%d" % (COOKIE, token, max_age)
     return "%s=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%d" % (COOKIE, token, max_age)
 
 

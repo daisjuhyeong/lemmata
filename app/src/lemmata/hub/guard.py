@@ -99,10 +99,28 @@ def _hostname(hostport):
     return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
 
 
+def public_host(url):
+    """Host of an https public URL ('https://host' or 'https://host:port'), else None. Only https is accepted."""
+    u = (url or "").strip().lower().rstrip("/")
+    if not u.startswith("https://"):
+        return None
+    rest = u[len("https://"):]
+    if not rest or "/" in rest or "@" in rest or " " in rest:
+        return None
+    return rest
+
+
 class Guard:
-    def __init__(self, extra_hosts=(), detect=True):
+    def __init__(self, extra_hosts=(), detect=True, public_url=None):
         ips, names = tailscale_info() if detect else (set(), set())
         self.hosts = {"localhost", "127.0.0.1", "::1"} | {i.lower() for i in ips} | names | {h.lower() for h in extra_hosts}
+        self.public = public_host(public_url)   # 'host' or 'host:port' the tunnel serves over https
+        if self.public:
+            self.hosts.add(_hostname(self.public))
+
+    def is_public(self, host_header):
+        """True when the request came in through the public URL (the tunnel), not over Tailscale or loopback."""
+        return bool(self.public) and bool(host_header) and _hostname(host_header) == _hostname(self.public)
 
     def refresh(self):
         """Re-detect Tailscale addresses/names (it may have come up after the hub started)."""
@@ -117,6 +135,8 @@ class Guard:
         if origin is None:
             return True
         o = origin.strip().lower()
+        if self.public and o == "https://" + self.public:
+            return True
         if not o.startswith("http://"):
             return False
         rest = o[len("http://"):]

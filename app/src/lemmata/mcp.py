@@ -484,6 +484,96 @@ def t_sync(ctx, args):
     return "\n".join(lines), data, "Call alarms for the full list."
 
 
+def _where(loc):
+    return " (%s:%s)" % (loc["path"], loc["line"]) if loc and loc.get("line") else ""
+
+
+def t_claims(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.claims()
+    lines = []
+    core = d.get("core")
+    if core:
+        lines.append("CORE MESSAGE [%s]%s: %s" % (core["status"], _where(core.get("loc")), _short(core["text"], 400)))
+    for c in d["claims"]:
+        if c["state"] == "rejected":
+            continue
+        lines.append("%s · %s [%s, %s%s]%s: %s" % (c["id"], c["label"], c["status"], c["state"], ", RECHECK: " + _short(c["recheck"], 80) if c["recheck"] else "",
+                                                 _where(c.get("loc")), _short(c["text"], 240)))
+        for s_ in c["support"]:
+            ch = s_.get("chain") or {}
+            files = ", ".join(x.split("/", 1)[-1] for x in (ch.get("results", []) + ch.get("code", []) + ch.get("runs", []))[:5])
+            lines.append("    %s (%s): %s%s%s%s" % (s_["relation"], s_["how"], s_["name"], _where(s_.get("loc")), " <- " + files if files else "",
+                                                  "" if s_.get("traced") or s_["how"] == "suggested" else " — not traced to a result file or script"))
+        for i in c["issues"]:
+            lines.append("    issue: " + _short(i, 200))
+    cc = d["counts"]
+    head = ("%d claims: %d supported, %d partly, %d not supported; %d to recheck; %d still drafts the researcher has not confirmed. "
+            "'suggested' support is a guess from wording and does not count until the researcher accepts it." %
+            (cc["total"], cc["supported"], cc["partial"], cc["unsupported"], cc["recheck"], cc["proposed"]))
+    return head + "\n" + "\n".join(lines), d, "Use node(project, node) for one item."
+
+
+def t_timeline(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.timeline()
+    steps = d["steps"][-40:]
+    lines = ["%s %s · %s%s: %s%s" % (s_["day"], s_["repo"], s_["title"], " (decision)" if s_["decision"] else "", _short(s_["summary"], 160),
+                                    " · touches claims: " + ", ".join(s_["affects"]) if s_["affects"] else "") for s_ in steps]
+    return "%d steps (%d decisions); showing the last %d.\n%s" % (len(d["steps"]), d["decisions"], len(steps), "\n".join(lines)), d, "Nothing to narrow."
+
+
+def t_experiments(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.ledger()
+    lines = []
+    for r in d["rows"]:
+        bits = [r["name"], r["status"].upper()]
+        if r["made"]:
+            bits.append("last written %s (%s)" % (r["made"]["time"][:10], r["made"]["short"]))
+        if r["code"] or r["settings"] or r["runs"]:
+            bits.append("made by " + ", ".join(x["name"] for x in (r["runs"] + r["code"] + r["settings"])[:4]))
+        if r["newer"]:
+            bits.append("changed since: " + ", ".join("%s on %s" % (x["name"], (x["time"] or "")[:10]) for x in r["newer"][:3]))
+        if r["used_by"]:
+            bits.append("used by " + ", ".join(x["name"] for x in r["used_by"][:4]))
+        if r["claims"]:
+            bits.append("backs " + ", ".join(x["label"] for x in r["claims"][:3]))
+        lines.append(" · ".join(bits))
+    c = d["counts"]
+    head = ("%d result files: %d out of date (the code or settings behind them changed later), %d current, %d with no known source; %d not used "
+            "in the paper." % (len(d["rows"]), c["stale"], c["current"], c["unknown"], c["unused"]))
+    return head + "\n" + "\n".join(lines), d, "Use node(project, node) for one file."
+
+
+def t_tasks(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.tasks()
+    lines = []
+    for t in d["tasks"]:
+        if t["state"] != "open" and not args.get("all"):
+            continue
+        lines.append("%s [%s] %s%s%s%s" % (t["id"], t["state"], _short(t["text"], 200), " · from: %s" % t["source"] if t.get("source") else "",
+                                         " · points at: " + ", ".join(x["name"] for x in t["targets"]) if t["targets"] else "",
+                                         " · also recheck: " + ", ".join(x["name"] for x in t["also_check"][:6]) if t.get("also_check") else ""))
+    return "%d open, %d done.\n%s" % (d["counts"]["open"], d["counts"]["done"], "\n".join(lines) or "No open tasks."), d, "Nothing to narrow."
+
+
+def t_add_feedback(ctx, args):
+    pid, eng = _project(ctx, args)
+    text = _need_str(args, "text")
+    source = args.get("source")
+    if source is not None and not isinstance(source, str):
+        raise _Fail("Argument 'source' must be text.")
+    with ctx.write_lock:
+        before = {t["id"] for t in eng.tasks()["tasks"]}
+        d = eng.add_feedback(text, source)
+    new = [t for t in d["tasks"] if t["id"] not in before]
+    lines = ["%s %s%s" % (t["id"], _short(t["text"], 160), " -> " + ", ".join(x["name"] for x in t["targets"]) if t["targets"] else " -> (no item matched; link it in the app)")
+             for t in new]
+    return "Added %d task(s).\n%s" % (len(new), "\n".join(lines)), {"added": new}, "Nothing to narrow."
+
+
 _PROJECT_PROP = {"type": "string", "description": "Project id, project name, or GitHub repo name (see list_projects)."}
 
 
@@ -552,6 +642,30 @@ TOOLS = [
                     "findings). Does not modify the repo's remote. Call it before alarms when the user just pushed.",
      "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True}},
+    {"name": "claims", "fn": t_claims, "title": "Claims and their support",
+     "description": "The paper's core message and the claims under it (contributions, research questions, theorems, lemmas), each with what "
+                    "backs it: proofs, assumptions and lemmas it uses, and tables or figures traced to result files, scripts and runs. Status is "
+                    "supported / partial / unsupported, with a RECHECK note when something behind the claim changed. Start here when asked "
+                    "what the work is about, whether a statement is backed up, or where it could be extended.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "timeline", "fn": t_timeline, "title": "How the research went",
+     "description": "Commit history grouped into readable steps (changed settings, new results, changed the metric, fixes...), with the steps "
+                    "that look like decisions marked and the claims each step touches.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "experiments", "fn": t_experiments, "title": "Experiment ledger",
+     "description": "One line per result file: what produced it (script, settings, run), when it was last written, which paper items and "
+                    "claims rely on it, and whether it is out of date because the code or settings behind it changed afterwards.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "tasks", "fn": t_tasks, "title": "Tasks from feedback",
+     "description": "Open tasks made from advisor or reviewer feedback, with the paper items and files each one points at and what else to "
+                    "recheck when it is done. Pass all=true to include finished tasks.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "all": {"type": "boolean", "description": "Include finished tasks."}}, ["project"]), "annotations": dict(_RO)},
+    {"name": "add_feedback", "fn": t_add_feedback, "title": "Turn feedback into tasks",
+     "description": "Store feedback text (meeting notes, review comments) as tasks, one per bullet or sentence, linked to the tables, "
+                    "figures, sections, theorems and files it names. Use the user's own words; do not invent feedback.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "text": {"type": "string", "description": "The feedback, one point per line or bullet."}, "source": {"type": "string", "description": "e.g. 'Advisor meeting 10 Nov'"}},
+                            ["project", "text"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
 ]
 _BY_NAME = {t["name"]: t for t in TOOLS}
 

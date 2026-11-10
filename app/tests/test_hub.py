@@ -438,7 +438,7 @@ class HubTest(HubBase):
         s, r = self.api("GET", "/api/hub/projects")
         p = [x for x in r["projects"] if x["id"] == pid][0]
         self.assertEqual((p["code_repo"], p["branch"], p["paper_versions"]), ("alice/demo-code", "main", 0))
-        self.assertEqual(set(p["counts"]), {"recheck", "findings"})
+        self.assertEqual(set(p["counts"]), {"recheck", "findings", "claims"})
         # upload 1
         z1 = make_zip({"main.tex": TEX1, "refs.bib": ""}, top="myproject")
         s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=z1, ctype="application/zip")

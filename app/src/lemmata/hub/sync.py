@@ -12,8 +12,7 @@ class SyncLoop(threading.Thread):
 
     def run(self):
         while not self.stop_event.wait(self.interval):
-            if self.mgr.gh.token():
-                self.mgr.sync_all()
+            self.mgr.sync_all()   # each project syncs with its own owner's sign-in; projects without one are skipped
 
     def stop(self):
         self.stop_event.set()

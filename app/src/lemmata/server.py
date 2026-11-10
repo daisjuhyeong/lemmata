@@ -297,9 +297,18 @@ class Handler(BaseHTTPRequestHandler):
     def _api(self, method, path, q):
         eng = self.app.engine
         r = path[len("/api"):]
+
+        def need(name):   # research routes exist only on the real engine (not on fixture data)
+            fn = getattr(eng, name, None)
+            if fn is None:
+                def missing(*a, **k):
+                    raise ApiError(501, "not_implemented", "Not available on fixture data.")
+                return missing
+            return fn
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
-                "/checkpoints": eng.checkpoints, "/triage": eng.triage}
+                "/checkpoints": eng.checkpoints, "/triage": eng.triage,
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -310,6 +319,18 @@ class Handler(BaseHTTPRequestHandler):
                 with self.app.lock:
                     data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
                 return self._json(data)
+            if r == "/digest":
+                try:
+                    days = int(q.get("days", "7"))
+                except ValueError:
+                    raise ApiError(400, "bad_request", "days must be a number")
+                with self.app.lock:
+                    data = need("digest")(days)
+                return self._json(data)
+            if r == "/claims.md":
+                with self.app.lock:
+                    md = need("claims_markdown")()
+                return self._send(200, md.encode("utf-8"), "text/markdown; charset=utf-8", {"Content-Disposition": 'attachment; filename="claims.md"'})
             if r == "/analyze":
                 if not q.get("group") or not q.get("node"):
                     raise ApiError(400, "bad_request", "group and node are required")
@@ -339,13 +360,35 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask"):
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks")
+        if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
             raise ApiError(404, "not_found", "unknown route")
         body = self._body()
         if r == "/ask":
-            raise ApiError(501, "not_implemented", "Ask Claude why runs on your own Claude Code later; not available in this demo.")
+            with self.app.lock:
+                return self._json(need("ask")(body.get("question")))
+        if r in RESEARCH:
+            def txt(k, req=False):
+                v = body.get(k)
+                if v is None and not req:
+                    return None
+                if not isinstance(v, str):
+                    raise ApiError(400, "bad_request", "%s must be text" % k)
+                return v
+            with self.app.lock:
+                if r == "/claims":
+                    return self._json(need("set_claim")(txt("id", True), txt("state"), txt("text"), txt("note")))
+                if r == "/claims/link":
+                    return self._json(need("link_claim")(txt("id", True), txt("target", True), body.get("on", True) is not False))
+                if r == "/claims/add":
+                    return self._json(need("add_claim")(txt("text", True), txt("kind") or "claim"), 201)
+                if r == "/claims/remove":
+                    return self._json(need("remove_claim")(txt("id", True)))
+                if r == "/feedback":
+                    return self._json(need("add_feedback")(txt("text", True), txt("source")), 201)
+                return self._json(need("set_task")(txt("id", True), txt("state"), txt("note"), txt("add_target"), txt("remove_target"), txt("text")))
         if r == "/scan":
             if not self.app.lock.acquire(blocking=False):
                 raise ApiError(409, "busy", "a scan is running")

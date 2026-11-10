@@ -99,7 +99,7 @@ class McpTest(unittest.TestCase):
         st, r = self.post(rpc("tools/list"))
         tools = r["result"]["tools"]
         self.assertEqual({t["name"] for t in tools}, {"list_projects", "project_status", "alarms", "explain", "findings", "node", "search",
-                                                       "set_triage", "sync"})
+                                                       "set_triage", "sync", "claims", "timeline", "experiments", "tasks", "add_feedback"})
         for t in tools:
             self.assertGreater(len(t["description"]), 60)
             s = t["inputSchema"]

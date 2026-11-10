@@ -7,6 +7,8 @@ from pathlib import Path
 from . import alarms as alarmsmod
 from . import analyze as analyzemod
 from . import checks as checksmod
+from . import claims as claimsmod
+from . import process as processmod
 from . import graph as graphmod
 from . import history as historymod
 from . import manifest as manifestmod
@@ -120,7 +122,7 @@ class Engine:
             "counts": {"nodes": len(s["G"].nodes), "edges": len(s["G"].edges), "proposed": sum(1 for e in edges if e["status"] == "proposed"),
                        "events": len(s["events"]), "findings": len(s["findings"]["findings"]), "alarm_groups": len(s["alarms"]["groups"])},
             "checkpoint": {"id": cp["id"], "created_at": cp["created_at"], "note": cp["note"]} if cp else None,
-            "capabilities": {"paper": s["G"].paper is not None, "online_lookup": self.online, "ask_ai": False},
+            "capabilities": {"paper": s["G"].paper is not None, "online_lookup": self.online, "ask_ai": False, "research": True},
             "warnings": s["warnings"],
         }
 
@@ -222,6 +224,100 @@ class Engine:
         s["alarms"] = alarmsmod.compute(self._active_cp(), s["G"].nodes, s["G"].edge_list(), s["events"], s["replay"], now_iso())
         self.hub.write_json("alarms.json", s["alarms"])
         return {"edge": copy.deepcopy(e), "alarms": s["alarms"]}
+
+    # ------------------------------------------------------------------ claims
+    def claims(self):
+        s = self._ensure()
+        doc = claimsmod.build(s["G"], s["alarms"], s["findings"], claimsmod.load(self.hub))
+        # a result file older than the code or settings behind it makes every claim resting on it a recheck
+        stale = {r["node_id"]: r["newer"][0]["name"] for r in processmod.ledger(s["G"].nodes, s["G"].edge_list(), s["events"])["rows"]
+                 if r["status"] == "stale"}
+        if stale:
+            for c in doc["claims"]:
+                for sup in c["support"]:
+                    hit = next((x for x in (sup.get("chain") or {}).get("results", []) + [sup.get("node_id")] if x in stale), None)
+                    if hit and sup["how"] != "suggested":
+                        sup["stale"] = sup["stale"] or "%s changed after %s was made" % (stale[hit], s["G"].nodes[hit]["name"])
+                        c["recheck"] = c["recheck"] or sup["stale"]
+            live = [c for c in doc["claims"] if c["state"] != "rejected"]
+            doc["counts"]["recheck"] = sum(bool(c["recheck"]) for c in live)
+            if doc["core"]:
+                doc["core"]["recheck"] = next((c["recheck"] for c in live if c["recheck"]), None)
+        return doc
+
+    def _claim_ids(self):
+        d = self.claims()
+        return {c["id"] for c in d["claims"]} | ({"core"} if d["core"] else set())
+
+    def set_claim(self, claim_id, state=None, text=None, note=None):
+        st = claimsmod.load(self.hub)
+        claimsmod.decide(st, self._claim_ids(), claim_id, state, text, note)
+        self.hub.write_json("claims.json", st)
+        return self.claims()
+
+    def link_claim(self, claim_id, target, on=True):
+        s = self._ensure()
+        st = claimsmod.load(self.hub)
+        claimsmod.link(st, self._claim_ids(), s["G"].nodes, claim_id, target, bool(on))
+        self.hub.write_json("claims.json", st)
+        return self.claims()
+
+    def add_claim(self, text, kind="claim"):
+        st = claimsmod.load(self.hub)
+        claimsmod.add_manual(st, text, kind)
+        self.hub.write_json("claims.json", st)
+        return self.claims()
+
+    def remove_claim(self, claim_id):
+        st = claimsmod.load(self.hub)
+        claimsmod.remove_manual(st, claim_id)
+        self.hub.write_json("claims.json", st)
+        return self.claims()
+
+    def claims_markdown(self):
+        s = self._ensure()
+        return claimsmod.to_markdown(self.claims(), s["man"].get("name", self.root.name), now_iso()[:10])
+
+    # ------------------------------------------------------------------ research process
+    def _roles(self):
+        return {r["id"]: r["role"] for r in self._ensure()["repos"]}
+
+    def timeline(self):
+        s = self._ensure()
+        return processmod.timeline(s["events"], s["G"].nodes, self._roles(), self.claims())
+
+    def ledger(self):
+        s = self._ensure()
+        return processmod.ledger(s["G"].nodes, s["G"].edge_list(), s["events"], self.claims())
+
+    def tasks(self):
+        s = self._ensure()
+        return processmod.tasks_view(processmod.load_tasks(self.hub), s["G"].nodes, s["G"].edge_list())
+
+    def add_feedback(self, text, source=None):
+        s = self._ensure()
+        st = processmod.load_tasks(self.hub)
+        processmod.add_feedback(st, text, source, s["G"].nodes, s["G"].edge_list(), self.claims(), now_iso())
+        self.hub.write_json("tasks.json", st)
+        return self.tasks()
+
+    def set_task(self, task_id, state=None, note=None, add_target=None, remove_target=None, text=None):
+        s = self._ensure()
+        st = processmod.load_tasks(self.hub)
+        processmod.set_task(st, s["G"].nodes, task_id, state, note, add_target, remove_target, text, now_iso())
+        self.hub.write_json("tasks.json", st)
+        return self.tasks()
+
+    def digest(self, days=7):
+        s = self._ensure()
+        if not isinstance(days, int) or not 1 <= days <= 90:
+            raise BadRequest("days must be 1 to 90")
+        return processmod.digest(s["man"].get("name", self.root.name), self.timeline(), self.ledger(), self.claims(), self.tasks(),
+                                 s["alarms"], now_iso(), days)
+
+    def ask(self, question):
+        s = self._ensure()
+        return processmod.ask(question, s["G"].nodes, s["G"].edge_list(), self.claims(), self.timeline(), self.ledger(), self.tasks(), s["findings"])
 
     def export_bundle(self):
         s = self._ensure()

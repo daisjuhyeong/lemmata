@@ -33,7 +33,10 @@ def cmd_serve(args):
     _need_git(args)
     os.umask(0o077)  # every file the hub creates is private from the start
     hub = Hub(args.data, port=args.port, extra_hosts=args.allow_host or [])
-    if guard.funnel_active(hub.port):
+    pub = hub.cfg.load().get("public_url")
+    if pub and not guard.public_host(pub):
+        raise SystemExit("lemmata: public_url must be an https:// address without a path (got %r)." % pub)
+    if not pub and guard.funnel_active(hub.port):
         raise SystemExit("lemmata: Tailscale Funnel exposes port %d to the internet; turn it off (`tailscale funnel reset`) and start again." % hub.port)
     hosts = [args.host] if args.host else guard.bind_addresses()
     try:
@@ -48,6 +51,9 @@ def cmd_serve(args):
     print("lemmata hub: data %s" % hub.data.root, flush=True)
     print("lemmata hub: allowed hosts: %s" % ", ".join(sorted(hub.guard.hosts)), flush=True)
     print("lemmata hub: pairing code %s (valid 10 minutes; `lemmata hub pair-code` makes another)" % code, flush=True)
+    if pub:
+        print("lemmata hub: PUBLIC site at %s — sign-up: %s, up to %s accounts. Anyone admitted can sign in with GitHub; "
+              "their repositories are cloned onto this machine." % (pub, c.get("signup", "owner"), c.get("max_users", 50)), flush=True)
     if not c.get("github_client_id"):
         print("lemmata hub: no GitHub client id set (lemmata hub config --github-client-id ...)", flush=True)
     loop = start_background(hub)
@@ -180,10 +186,59 @@ def cmd_config(args):
         kw["sync_interval"] = args.sync_interval
     if args.overleaf:
         kw["overleaf_enabled"] = args.overleaf == "on"
+    if getattr(args, "public_url", None) is not None:
+        from .guard import public_host
+        if getattr(args, "public_url", None) in ("", "off", "none"):
+            kw["public_url"] = None
+            kw["signup"] = "owner"
+        elif not public_host(getattr(args, "public_url", None)):
+            raise SystemExit("lemmata: --public-url must look like https://name.example (https only, no path).")
+        else:
+            kw["public_url"] = getattr(args, "public_url", None).rstrip("/")
+            if cfg.load().get("signup", "owner") == "owner" and not getattr(args, "signup", None):
+                kw["signup"] = "invite"   # safest default once the hub is reachable from the internet
+    if getattr(args, "signup", None):
+        kw["signup"] = getattr(args, "signup", None)
+    if getattr(args, "max_users", None):
+        kw["max_users"] = getattr(args, "max_users", None)
+    if getattr(args, "invite", None) or getattr(args, "uninvite", None):
+        cur = {u.lower() for u in cfg.load().get("allowed_users") or []}
+        cur |= {u.lower().lstrip("@") for u in getattr(args, "invite", None) or []}
+        cur -= {u.lower().lstrip("@") for u in getattr(args, "uninvite", None) or []}
+        kw["allowed_users"] = sorted(cur)
     if args.allow_host:
         kw["allow_hosts"] = sorted(set(cfg.load().get("allow_hosts") or []) | set(args.allow_host))
     c = cfg.update(**kw) if kw else cfg.load()
     print(json.dumps(c, indent=1))
+    if kw:
+        import sys
+        print("Restart the hub for this to take effect (launchd: `launchctl kickstart -k gui/$(id -u)/com.lemmata.hub`, or stop and start `lemmata hub serve`).", file=sys.stderr)
+    return 0
+
+
+def cmd_users(args):
+    from .github import GitHub
+    from .projects import Manager
+    d = _data(args)
+    cfg = Config(d)
+    gh = GitHub(d, cfg)
+    mgr = Manager(d, cfg, gh)
+    for login in gh.logins():
+        u = gh.stored(login) or {}
+        print("%-24s start view: %-9s projects: %d%s" % (login, u.get("view") or u.get("variant") or "-", len(mgr.ids(login)),
+                                                        "  (GitHub sign-in needs renewing)" if u.get("needs_reauth") else ""))
+    return 0
+
+
+def cmd_ab(args):
+    from .routes import Hub
+    hub = Hub(args.data, detect_tailscale=False)
+    out = hub.ab_summary()
+    cols = ["users", "created_project", "confirmed_a_claim", "added_feedback", "asked", "switched_view", "came_back_another_day", "useful_yes", "useful_no"]
+    print("%-10s " % "start view" + " ".join("%-12s" % c[:12] for c in cols))
+    for v in out["variants"]:
+        print("%-10s " % v["variant"] + " ".join("%-12s" % v[c] for c in cols))
+    print(out["note"])
     return 0
 
 
@@ -260,4 +315,15 @@ def add_parser(sub):
     p.add_argument("--sync-interval", type=int)
     p.add_argument("--allow-host", action="append")
     p.add_argument("--overleaf", choices=["on", "off"], help="switch the dormant Overleaf feature on or off (default off)")
+    p.add_argument("--public-url", help="https address other people use (from Tailscale Funnel or a Cloudflare tunnel); 'off' makes the hub private again")
+    p.add_argument("--signup", choices=["owner", "invite", "open"], help="who may sign in on the public site (default after --public-url: invite)")
+    p.add_argument("--invite", action="append", help="GitHub login to admit when sign-up is invite (repeatable)")
+    p.add_argument("--uninvite", action="append", help="remove a GitHub login from the invite list")
+    p.add_argument("--max-users", type=int)
     p.set_defaults(fn=cmd_config)
+    p = hs.add_parser("users", help="accounts on this hub")
+    data(p)
+    p.set_defaults(fn=cmd_users)
+    p = hs.add_parser("ab", help="A/B summary of the four start views")
+    data(p)
+    p.set_defaults(fn=cmd_ab)

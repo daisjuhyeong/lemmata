@@ -33,6 +33,7 @@ PID_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 CODE_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.{1,2}$)[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 MAX_FILE = 50 * 1024 * 1024
 SUBDIR_MAX = 200
+SLACK_RE = re.compile(r"^https://hooks\.slack\.com/services/[A-Za-z0-9/_-]{10,200}$")
 MASKS = []  # absolute data paths that must never appear in an error message
 
 
@@ -296,10 +297,23 @@ class Manager:
         tmp.write_text(json.dumps(m, indent=1) + "\n", encoding="utf-8")
         os.replace(tmp, p)
 
-    def ids(self):
+    def ids(self, user=None):
+        """All project ids, or only those owned by `user` (a GitHub login)."""
         if not self.data.projects.is_dir():
             return []
-        return sorted(d.name for d in self.data.projects.iterdir() if (d / "project.json").is_file())
+        out = sorted(d.name for d in self.data.projects.iterdir() if (d / "project.json").is_file())
+        return out if user is None else [p for p in out if self.owns(p, user)]
+
+    def owner_of(self, pid):
+        """GitHub login that owns the project. Projects made before S07 have no owner field: they belong to the hub owner."""
+        return (read_json(self.data.projects / pid / "project.json", {}) or {}).get("owner") or self.cfg.load().get("owner")
+
+    def owns(self, pid, user):
+        o = self.owner_of(pid)
+        return bool(o) and bool(user) and o.lower() == user.lower()
+
+    def _token(self, pid):
+        return self.gh.token(self.owner_of(pid))
 
     def app(self, pid):
         root = self.root(pid)
@@ -335,6 +349,10 @@ class Manager:
             st = a.engine.project()
             al = a.engine.alarms()
             ents = a.engine.triage().get("entries", {})
+            try:
+                claims = a.engine.claims()["counts"]
+            except Exception:   # the claim map must never hide a project from the list
+                claims = None
         paper = self.root(pid) / "paper"
         sub = self.paper_source(m).get("subdir")
         try:
@@ -343,7 +361,8 @@ class Manager:
             versions = 0
         return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
                 "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"),
-                "counts": {"recheck": todo_changes(al, ents), "findings": st["counts"]["findings"]}}
+                "owner": m.get("owner") or self.cfg.load().get("owner"), "digest": self.digest_settings(pid),
+                "counts": {"recheck": todo_changes(al, ents), "findings": st["counts"]["findings"], "claims": claims}}
 
     @staticmethod
     def paper_source(m):
@@ -357,22 +376,22 @@ class Manager:
             return out
         return {"kind": "zip"}
 
-    def list(self):
+    def list(self, user=None):
         out = []
-        for pid in self.ids():
+        for pid in self.ids(user):
             try:
                 out.append(self.summary(pid))
             except Exception as e:  # one broken project must not hide the others
                 out.append({"id": pid, "name": pid, "error": scrub(str(e))[:200], "counts": {"recheck": 0, "findings": 0}})
         return out
 
-    def resolve(self, ref):
+    def resolve(self, ref, user=None):
         """pid, project name, GitHub repo or repo short name. An exact pid wins; an ambiguous name is a BadRequest."""
         ref_l = (ref or "").strip().lower()
-        if PID_RE.match(ref_l) and (self.data.projects / ref_l / "project.json").is_file():
+        if PID_RE.match(ref_l) and (self.data.projects / ref_l / "project.json").is_file() and (user is None or self.owns(ref_l, user)):
             return ref_l
         hits = []
-        for pid in self.ids():
+        for pid in self.ids(user):
             m = self.meta(pid)
             repo = (m.get("code_repo") or "").lower()
             if ref_l in ((m.get("name") or "").lower(), repo, repo.split("/")[-1]):
@@ -384,14 +403,18 @@ class Manager:
         return hits[0]
 
     # --- create
-    def create(self, name, repo, branch, paper_overleaf=None, paper_repo=None, paper_branch=None, paper_subdir=None):
+    def create(self, name, repo, branch, paper_overleaf=None, paper_repo=None, paper_branch=None, paper_subdir=None, user=None):
         if not isinstance(repo, str) or not CODE_REPO_RE.match(repo) or repo.endswith(".git") or ".." in repo:
             raise ProjectError(400, "bad_request", "code_repo must look like owner/name.")
         if branch is not None and not valid_branch(branch):
             raise ProjectError(400, "bad_request", "bad branch name.")
-        token = self.gh.token()
+        token = self.gh.token(user)
         if not token:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
+        c = self.cfg.load()
+        owner = user or c.get("owner")
+        if user and (c.get("owner") or "").lower() != user.lower() and len(self.ids(user)) >= int(c.get("max_projects_per_user", 5)):
+            raise ProjectError(409, "too_many_projects", "You already have %d projects here. Delete one to add another." % len(self.ids(user)))
         if name is not None and (not isinstance(name, str) or not name.strip() or len(name) > 100):
             raise ProjectError(400, "bad_request", "name must be text up to 100 characters.")
         gh_src = None
@@ -434,7 +457,9 @@ class Manager:
                 "schema": "lemmata.project/1", "name": (name or repo.split("/")[1]).strip(),
                 "repos": [self._paper_entry(gh_src.get("subdir") if gh_src else None), {"id": "code", "role": "code", "path": "code"}]},
                 indent=1) + "\n", encoding="utf-8")
-            meta = {"schema": "lemmata.hubproject/1", "id": pid, "name": (name or repo.split("/")[1]).strip(),
+            if _tree_size(root / "code") > 4 * MAX_UNPACKED:
+                raise ProjectError(413, "repo_too_large", "That repository is larger than 2 GB; Lemmata cannot take it yet.")
+            meta = {"schema": "lemmata.hubproject/1", "id": pid, "name": (name or repo.split("/")[1]).strip(), "owner": owner,
                     "code_repo": repo, "branch": branch or got, "created": now_iso(), "last_sync": now_iso(),
                     "paper_source": {"kind": "overleaf", "project_id": ol_id} if ol_id else (gh_src or {"kind": "zip"})}
             if ol_id:
@@ -659,7 +684,7 @@ class Manager:
             clone = Path(self.data.tmp) / ("pp-" + secrets.token_hex(6))
             try:
                 if kind == "github":
-                    token = self.gh.token()
+                    token = self._token(pid)
                     if not token:
                         raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
                     got = self._github_clone(src, clone, token, self.cfg.load()["github_web"].rstrip("/"))
@@ -712,7 +737,7 @@ class Manager:
         self.root(pid)
         code = self.root(pid) / "code"
         paper = self.root(pid) / "paper"
-        token = self.gh.token()
+        token = self._token(pid)
         if not token:
             raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
         with self.oplock(pid):
@@ -804,7 +829,10 @@ class Manager:
     def sync_all(self):
         for pid in self.ids():
             try:
+                if not self._token(pid):
+                    continue   # the owner signed out or was removed: leave the project as it is
                 self.sync(pid)
+                self.maybe_send_digest(pid)
             except Exception as e:
                 print("lemmata hub: sync %s failed: %s" % (pid, scrub(str(e), self.gh.token(), self.ol.token())), flush=True)
 
@@ -821,6 +849,79 @@ class Manager:
                 a.engine.scan()
         return self.summary(pid)
 
+    # --- weekly digest to Slack (the project owner pastes an incoming-webhook URL; nothing else is ever contacted)
+    def digest_settings(self, pid):
+        d = (self.meta(pid).get("digest") or {})
+        return {"enabled": bool(d.get("enabled")), "configured": bool(d.get("webhook")), "weekday": d.get("weekday", 0), "last_sent": d.get("last_sent")}
+
+    def set_digest(self, pid, webhook=None, enabled=None, weekday=None):
+        with self.oplock(pid):
+            m = self.meta(pid)
+            d = dict(m.get("digest") or {})
+            if webhook is not None:
+                if webhook == "":
+                    d.pop("webhook", None)
+                elif not isinstance(webhook, str) or not SLACK_RE.match(webhook):
+                    raise ProjectError(400, "bad_request", "That is not a Slack incoming-webhook URL (https://hooks.slack.com/services/...).")
+                else:
+                    d["webhook"] = webhook
+            if enabled is not None:
+                if not isinstance(enabled, bool):
+                    raise ProjectError(400, "bad_request", "enabled must be true or false.")
+                d["enabled"] = enabled
+            if weekday is not None:
+                if not isinstance(weekday, int) or isinstance(weekday, bool) or not 0 <= weekday <= 6:
+                    raise ProjectError(400, "bad_request", "weekday must be 0 (Monday) to 6.")
+                d["weekday"] = weekday
+            if d.get("enabled") and not d.get("webhook"):
+                raise ProjectError(400, "bad_request", "Add a Slack webhook URL first.")
+            m["digest"] = d
+            self._save_meta(pid, m)
+        return self.digest_settings(pid)
+
+    def send_digest(self, pid):
+        d = self.meta(pid).get("digest") or {}
+        if not d.get("webhook"):
+            raise ProjectError(409, "no_webhook", "Add a Slack webhook URL first.")
+        a = self.app(pid)
+        with a.lock:
+            text = a.engine.digest(7)["text"]
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(d["webhook"], data=json.dumps({"text": text}).encode("utf-8"), method="POST",
+                                     headers={"Content-Type": "application/json", "User-Agent": "lemmata-hub"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                r.read(200)
+        except urllib.error.HTTPError as e:
+            raise ProjectError(502, "slack_error", "Slack answered HTTP %d. Check the webhook URL." % e.code)
+        except (urllib.error.URLError, OSError):
+            raise ProjectError(502, "slack_unreachable", "Could not reach Slack.")
+        with self.oplock(pid):
+            m = self.meta(pid)
+            m.setdefault("digest", {})["last_sent"] = now_iso()
+            self._save_meta(pid, m)
+        return {"ok": True, "sent": True}
+
+    def maybe_send_digest(self, pid, now=None):
+        d = self.meta(pid).get("digest") or {}
+        if not d.get("enabled") or not d.get("webhook"):
+            return False
+        now = now or datetime.now().astimezone()
+        last = None
+        try:
+            last = datetime.fromisoformat(d["last_sent"]) if d.get("last_sent") else None
+        except ValueError:
+            pass
+        if now.weekday() != d.get("weekday", 0) or now.hour < 9 or (last and (now - last).total_seconds() < 6 * 86400):
+            return False
+        try:
+            self.send_digest(pid)
+            return True
+        except ProjectError as e:
+            print("lemmata hub: digest %s failed: %s" % (pid, e.message), flush=True)
+            return False
+
     # --- delete
     def delete(self, pid):
         root = self.root(pid)
@@ -834,18 +935,21 @@ class Manager:
 class HubContext:
     """The interface lemmata.mcp expects (S04 brief)."""
 
-    def __init__(self, mgr, device=None, device_id=None):
+    def __init__(self, mgr, device=None, device_id=None, user=None):
         self.mgr = mgr
+        self.user = user
         self.device = device
         self.device_id = device_id
         self.write_lock = mgr.write_lock
 
     def list_projects(self):
-        return self.mgr.list()
+        return self.mgr.list(self.user)
 
     def resolve(self, project):
-        pid = self.mgr.resolve(project)
+        pid = self.mgr.resolve(project, self.user)
         return pid, LockedEngine(self.mgr.app(pid))
 
     def sync(self, pid):
+        if self.user is not None and not self.mgr.owns(pid, self.user):
+            raise NotFound("unknown project")
         return self.mgr.sync(pid)

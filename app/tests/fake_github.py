@@ -47,6 +47,10 @@ class FakeGitHub:
         self.root = Path(self.tmp.name)
         self.user = dict(user or USER)
         self.token = TOKEN
+        self.accounts = {}   # extra token -> user (S07 multi-user tests); self.token / self.user stay the default account
+        self.issue = None    # token handed out by the next approved device flow (default: self.token)
+        self.fail = None     # None | "rate" | "forbidden" | "revoked": how /user and /user/repos answer
+        self.api_calls = 0
         self.repos = []  # /user/repos entries
         self.state = "pending"  # pending | approved | denied | expired
         self.device_requests = []
@@ -114,8 +118,27 @@ class FakeGitHub:
                 n = int(self.headers.get("Content-Length") or 0)
                 return {k: v[-1] for k, v in parse_qs(self.rfile.read(n).decode()).items()}
 
+            def _who(self):
+                a = self.headers.get("Authorization") or ""
+                tok = a[7:] if a.startswith("Bearer ") else None
+                if tok == fake.token:
+                    return fake.user
+                return fake.accounts.get(tok)
+
             def _bearer_ok(self):
-                return self.headers.get("Authorization") == "Bearer " + fake.token
+                return self._who() is not None
+
+            def _failing(self):
+                fake.api_calls += 1
+                if fake.fail == "rate":
+                    self._reply(403, {"message": "API rate limit exceeded for user"}, {"X-RateLimit-Remaining": "0", "Retry-After": "120"})
+                elif fake.fail == "forbidden":
+                    self._reply(403, {"message": "Resource protected by organization SAML enforcement"})
+                elif fake.fail == "revoked":
+                    self._reply(401, {"message": "Bad credentials"})
+                else:
+                    return False
+                return True
 
             def do_POST(self):
                 u = urlsplit(self.path)
@@ -129,7 +152,7 @@ class FakeGitHub:
                 if u.path == "/login/oauth/access_token":
                     self._form()
                     if fake.state == "approved":
-                        return self._reply(200, {"access_token": fake.token, "token_type": "bearer", "scope": "repo,read:user"})
+                        return self._reply(200, {"access_token": fake.issue or fake.token, "token_type": "bearer", "scope": "repo,read:user"})
                     if fake.state == "denied":
                         return self._reply(200, {"error": "access_denied"})
                     if fake.state == "expired":
@@ -141,22 +164,25 @@ class FakeGitHub:
 
             def do_GET(self):
                 u = urlsplit(self.path)
+                if u.path in ("/user", "/user/repos") and self._failing():
+                    return
                 if u.path == "/user":
-                    return self._reply(200, fake.user) if self._bearer_ok() else self._reply(401, {"message": "Bad credentials"})
+                    return self._reply(200, self._who()) if self._bearer_ok() else self._reply(401, {"message": "Bad credentials"})
                 if u.path == "/user/repos":
                     if not self._bearer_ok():
                         return self._reply(401, {"message": "Bad credentials"})
                     q = parse_qs(u.query)
                     page, per = int(q.get("page", ["1"])[0]), int(q.get("per_page", ["30"])[0])
-                    return self._reply(200, fake.repos[(page - 1) * per: page * per])
+                    mine = [r for r in fake.repos if r["full_name"].split("/")[0] == self._who()["login"] or not r["private"]]
+                    return self._reply(200, mine[(page - 1) * per: page * per])
                 if ".git/" in u.path:
                     return self._git()
                 self._reply(404, {"message": "Not Found"})
 
             def _git(self):
                 u = urlsplit(self.path)
-                want = "Basic " + base64.b64encode(("x-access-token:%s" % fake.token).encode()).decode()
-                ok = self.headers.get("Authorization") == want
+                ok = any(self.headers.get("Authorization") == "Basic " + base64.b64encode(("x-access-token:%s" % t).encode()).decode()
+                         for t in [fake.token] + list(fake.accounts))
                 fake.git_requests.append((u.path, ok))
                 if not ok:
                     fake.unauth_git += 1

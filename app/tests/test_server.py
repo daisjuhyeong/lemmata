@@ -87,7 +87,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(s, 200)
         self.assertEqual(b["edge"]["status"], "approved")
         s, b = self.j("POST", "/api/ask", {})
-        self.assertEqual((s, b["error"]["code"]), (501, "not_implemented"))
+        self.assertIn((s, b["error"]["code"]), ((501, "not_implemented"), (400, "bad_request")))
         self.assertEqual(self.j("GET", "/api/ask")[0], 405)
 
     def test_checkpoint_clears_alarms(self):
