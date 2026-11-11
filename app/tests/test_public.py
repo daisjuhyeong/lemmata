@@ -164,6 +164,14 @@ class PublicTest(unittest.TestCase):
         self.assertEqual(t["tasks"][1]["claims"][0]["id"], "stmt:thm:a")
         s, t, _ = self.req("POST", base + "/tasks", {"id": "t1", "state": "done"}, cookie=self.bob)
         self.assertEqual(t["counts"], {"open": 1, "done": 1})
+        s, t, _ = self.req("GET", base + "/tree", cookie=self.bob)
+        ids = {n["id"]: n for n in t["nodes"]}
+        self.assertEqual(ids["core"]["title"], "We show a bound and test it.")
+        self.assertEqual((ids["contrib:1"]["parent"], ids["stmt:thm:a"]["parent"]), ("core", "contrib:1"))
+        self.assertEqual(ids["tex:tab:acc"]["band"], 1)
+        self.assertTrue(any(e["from"] == "contrib:2" and e["to"] == "tex:tab:acc" and e["how"] == "manual" for e in t["edges"]))
+        self.assertTrue(any(n["band"] == 2 for n in t["nodes"] if n["layer"] == "root"))
+        self.assertFalse(any(n["kind"] == "missing" for n in t["nodes"]))
         for route in ("/timeline", "/ledger", "/digest"):
             self.assertEqual(self.req("GET", base + route, cookie=self.bob)[0], 200, route)
         s, a, _ = self.req("POST", base + "/ask", {"question": "which claims are unsupported?"}, cookie=self.bob)

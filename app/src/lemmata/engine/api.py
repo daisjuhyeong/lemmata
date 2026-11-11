@@ -245,6 +245,67 @@ class Engine:
                 doc["core"]["recheck"] = next((c["recheck"] for c in live if c["recheck"]), None)
         return doc
 
+    def _born(self):
+        """-> born(node_id, loc): when a file first appeared in the history, or when a line of the paper was last written
+        (git blame). None when unknown (no git history, e.g. a paper uploaded as a zip)."""
+        s = self._ensure()
+        cache = getattr(self, "_born_cache", None)
+        if cache is None or cache[0] is not s["G"]:
+            first = {}
+            for ev in s["events"]:
+                if ev.get("kind") != "commit" or not ev.get("time"):
+                    continue
+                for f in ev.get("files", []):
+                    first.setdefault("file:%s/%s" % (ev["repo"], f["path"]), ev["time"])
+                    if f["path"].startswith("runs/") and f["path"].endswith(".json"):
+                        first.setdefault("run:%s/%s" % (ev["repo"], f["path"][5:-5]), ev["time"])
+            cache = (s["G"], first, {})
+            self._born_cache = cache
+        _, first, blame = cache
+        paper = next((i for i in s["infos"].values() if i["role"] == "paper"), None)
+
+        def lines_of(path):
+            if path not in blame:
+                out = {}
+                if paper and paper.get("vcs") == "git" and len(blame) < 40:
+                    p = treemod.run_git(paper["abs_path"], ["blame", "--line-porcelain", "-w", "--", path], check=False)
+                    if p.returncode == 0:
+                        no, t, tz = 0, None, "+0000"
+                        for ln in p.stdout.decode("utf-8", "replace").split("\n"):
+                            if ln.startswith("author-time "):
+                                t = int(ln[12:])
+                            elif ln.startswith("author-tz "):
+                                tz = ln[10:].strip()
+                            elif ln.startswith("\t"):
+                                no += 1
+                                if t is not None:
+                                    from datetime import datetime, timedelta, timezone
+                                    off = (1 if tz[0] != "-" else -1) * timedelta(hours=int(tz[1:3]), minutes=int(tz[3:5]))
+                                    out[no] = datetime.fromtimestamp(t, timezone(off)).isoformat()
+                blame[path] = out
+            return blame[path]
+
+        def born(nid, loc):
+            if nid and nid in first:
+                return first[nid]
+            if loc and loc.get("path") and loc.get("line"):
+                ls = lines_of(loc["path"])
+                ts = [ls[i] for i in range(loc["line"], (loc.get("end_line") or loc["line"]) + 1) if i in ls]
+                return min(ts, key=lambda x: processmod._t(x)) if ts else None
+            return None
+        return born
+
+    def tree(self):
+        s = self._ensure()
+        t = claimsmod.tree(self.claims(), s["G"], self._born())
+        tl = self.timeline()
+        t["marks"] = [{"time": st["end"], "title": st["title"], "summary": st["summary"], "decision": st["decision"], "id": st["id"]}
+                      for st in tl["steps"] if st.get("end")]
+        if t["marks"]:
+            ts = sorted([m["time"] for m in t["marks"]] + ([t["span"]["start"], t["span"]["end"]] if t["span"] else []), key=processmod._t)
+            t["span"] = {"start": ts[0], "end": ts[-1]}
+        return t
+
     def _claim_ids(self):
         d = self.claims()
         return {c["id"] for c in d["claims"]} | ({"core"} if d["core"] else set())

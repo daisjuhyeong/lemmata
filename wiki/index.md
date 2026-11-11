@@ -18,6 +18,7 @@ last_reviewed: 2026-11-02
   - S05 Overleaf + VS Code: [brief](sprints/S05/S05-brief.md) · handoffs: [pipeline-eng](sprints/S05/handoff-pipeline-eng.md), [web-eng](sprints/S05/handoff-web-eng.md)
   - S06 no Overleaf + Obsidian UI: [brief](sprints/S06/S06-brief.md) · handoffs: [pipeline-eng](sprints/S06/handoff-pipeline-eng.md), [web UI](sprints/S06/handoff-web-eng-ui.md), [web hub](sprints/S06/handoff-web-eng-hub.md)
   - S07 public site + claim map: [brief](sprints/S07/S07-brief.md) · setup: `docs/PUBLIC-SITE.md`
+  - S08 research tree: [brief](sprints/S08/S08-brief.md)
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

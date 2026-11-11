@@ -49,6 +49,47 @@ def detex(s):
     return s
 
 
+TITLE_RE = re.compile(r"\\title(?:\[[^\]]*\])?\{((?:[^{}]|\{[^{}]*\})*)\}")
+ABBR_RE = re.compile(r"\b(e\.g|i\.e|et al|cf|vs|Fig|Figs|Eq|Eqs|Sec|Tab|resp|w\.r\.t|a\.k\.a|etc)\.\s")
+AIM_RE = re.compile(r"\b(?:in this (?:paper|work|survey|study|article|review)|this (?:paper|work|survey|study|article|review) "
+                    r"(?:\w+ )?(?:present|propos|introduc|show|provid|review|survey|stud|investigat|develop|argu|address|offer|examin)\w*|"
+                    r"we (?:\w+ )?(?:propose|present|introduce|show|demonstrate|prove|develop|provide|argue|find|establish|derive|"
+                    r"survey|review|study|investigate|identify|formali[sz]e|design|address|revisit)|our (?:main |key )?"
+                    r"(?:contribution|finding|result|analysis|survey|method|approach|framework)s?\b|to this end|here,? we)", re.I)
+BACKGROUND_RE = re.compile(r"^(?:however|recently|although|while|despite|traditionally|in recent years|nowadays|existing|previous|prior|"
+                           r"most|many|current)\b|\b(?:has|have) (?:been|become|attracted|received|shown|emerged)\b|\bremains? (?:a|an|"
+                           r"un|open|challeng)", re.I)
+
+
+def sentences(text):
+    t = ABBR_RE.sub(lambda m: m.group(0).replace(". ", ".\x00"), text or "")
+    out = [x.replace("\x00", " ").strip() for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\"“(])", t)]
+    return [x for x in out if len(x) > 20]
+
+
+def pick_core(abstract, title="", contrib_words=()):
+    """The sentence of the abstract that states what the paper does. Rules only: cue phrases ("we propose", "in this
+    survey"), minus background cues, plus overlap with the contribution list. A suggestion; the researcher can reword it."""
+    sents = sentences(abstract)
+    if not sents:
+        return title or (abstract or "")[:300]
+    best, best_score = None, 0.0
+    for i, st in enumerate(sents):
+        sc = 3.0 * bool(AIM_RE.search(st)) - 2.0 * bool(BACKGROUND_RE.search(st))
+        if contrib_words:
+            w = words(st)
+            sc += 2.0 * len(w & set(contrib_words)) / (len(w) or 1)
+        sc -= 0.5 * len(NUM_RE.findall(st)) / 3.0
+        sc -= 0.01 * i          # ties go to the earlier sentence
+        if i == 0:
+            sc -= 0.5           # first sentences are usually background
+        if sc > best_score:
+            best, best_score = st, sc
+    if best is None or best_score < 1.0:
+        return title or sents[-1]
+    return best
+
+
 def words(s):
     return {w for w in re.findall(r"[a-z][a-z0-9-]{2,}", detex(s).lower()) if w not in STOP}
 
@@ -265,11 +306,17 @@ def draft(G, alarms=None, findings=None):
         out.sort(reverse=True)
         return out[:3]
 
-    # --- core message (abstract)
+    # --- core message: one sentence picked from the abstract (the researcher can reword it); the whole abstract is kept too
     th = G.nodes.get("thesis")
     if th:
-        claims.append({"id": "core", "kind": "core", "label": "Core message", "text": th["attrs"].get("text", "")[:1200], "loc": th["loc"],
-                       "support": [], "children": []})
+        tu = next((u for u in P.units if u["kind"] == "thesis"), None)
+        full = detex(" ".join(l.code for l in P.lines[tu["begin"]:tu["end"] + 1])) if tu else th["attrs"].get("text", "")
+        title = next((detex(m.group(1)) for l in P.lines for m in [TITLE_RE.search(l.code)] if m), "")
+        contrib_words = set()
+        for it in _contribution_items(P):
+            contrib_words |= words(it["text"])
+        claims.append({"id": "core", "kind": "core", "label": "Core message", "text": pick_core(full, title, contrib_words)[:600],
+                       "abstract": full[:4000], "title": title[:300], "loc": th["loc"], "support": [], "children": []})
 
     # --- contributions
     for k, it in enumerate(_contribution_items(P), 1):
@@ -455,6 +502,118 @@ def build(G, alarms, findings, store):
               "unsupported": sum(c["status"] == "unsupported" for c in live), "recheck": sum(bool(c["recheck"]) for c in live),
               "proposed": sum(c["state"] == "proposed" for c in live), "confirmed": sum(c["state"] == "confirmed" for c in live)}
     return {"schema": SCHEMA, "has_paper": G.paper is not None, "core": core, "claims": rest, "counts": counts}
+
+
+# ------------------------------------------------------------------ tree (crown = what the paper says, roots = what backs it)
+BAND = {"proof": 1, "assumption": 1, "definition": 1, "condition": 1, "hypothesis": 1, "table": 1, "figure": 1, "section": 1, "equation": 1,
+        "item": 1, "result": 2, "asset": 2, "data": 2, "code": 3, "config": 3, "run": 4}
+SHORT = {"contribution": "C", "question": "Q", "theorem": "Thm", "lemma": "Lem", "proposition": "Prop", "corollary": "Cor", "claim": "C",
+         "assumption": "A", "definition": "Def", "condition": "Cond", "hypothesis": "H"}
+
+
+def _short(c):
+    m = re.search(r"(\d+)", c["label"])
+    if c.get("manual"):
+        return "+" + c["id"].split(":")[1]
+    if c["kind"] == "question":
+        return c["label"][:6]
+    return "%s%s%s" % (SHORT.get(c["kind"], "C"), "" if len(SHORT.get(c["kind"], "C")) == 1 else " ", m.group(1) if m else "")
+
+
+def tree(doc, G, born=None):
+    """Nodes and edges for the research tree. born(node_id | loc) -> ISO time or None."""
+    born = born or (lambda *_: None)
+    nodes, edges, seen = [], [], {}
+    core = doc.get("core")
+    live = [c for c in doc["claims"] if c["state"] != "rejected"]
+    by_id = {c["id"]: c for c in live}
+
+    def add(nid, **kw):
+        if nid in seen:
+            return seen[nid]
+        kw["id"] = nid
+        seen[nid] = kw
+        nodes.append(kw)
+        return kw
+
+    def edge(a, b, kind, how="detected", stale=False):
+        if a != b and not any(e["from"] == a and e["to"] == b for e in edges):
+            edges.append({"from": a, "to": b, "kind": kind, "how": how, "stale": bool(stale)})
+
+    if core:
+        add("core", layer="core", kind="core", short="", title=core["text"], status=core["status"], recheck=bool(core["recheck"]),
+            state=core.get("state", "proposed"), born=born(None, core.get("loc")))
+    # which claims hang under another claim ("stated as Theorem 1", "uses Lemma 2")
+    parent = {}
+    for c in live:
+        for s_ in c["support"]:
+            cid = s_.get("claim_id")
+            if cid in by_id and cid != c["id"] and s_["how"] != "suggested":
+                parent.setdefault(cid, c["id"])
+    for c in live:
+        add(c["id"], layer="claim", kind=c["kind"], short=_short(c), title=c["text"][:400], label=c["label"], status=c["status"],
+            recheck=bool(c["recheck"]), state=c["state"], formal=bool(c.get("formal")), depth=0, born=born(None, c.get("loc")))
+    for c in live:   # depth in the crown: 1 = directly under the core message
+        d, cur, guard = 1, c["id"], 0
+        while cur in parent and guard < 6:
+            cur, d, guard = parent[cur], d + 1, guard + 1
+        seen[c["id"]]["depth"] = d
+        seen[c["id"]]["parent"] = parent.get(c["id"], "core" if core else None)
+        if seen[c["id"]]["parent"]:
+            edge(seen[c["id"]]["parent"], c["id"], "branch")
+    in_tree = lambda n: n in G.nodes and G.nodes[n]["kind"] in BAND
+    for c in live:
+        real = 0
+        for s_ in c["support"]:
+            sug = s_["how"] == "suggested"
+            if s_.get("claim_id") in by_id:
+                if parent.get(s_["claim_id"]) != c["id"]:
+                    edge(c["id"], s_["claim_id"], "uses", s_["how"])       # a second claim leaning on the same statement
+                real += not sug
+                continue
+            nid = s_.get("node_id")
+            if nid and in_tree(nid):
+                n = G.nodes[nid]
+                add(nid, layer="root", band=BAND[n["kind"]], kind=n["kind"], short=n["name"].split(" · ")[0][:14], title=n["name"],
+                    node_id=nid, traced=bool(s_.get("traced")), born=born(nid, n.get("loc")))
+                edge(c["id"], nid, "support", s_["how"], s_.get("stale"))
+                if not sug:
+                    real += 1
+                    ch = s_.get("chain") or {}
+                    members = [x for x in ch.get("results", []) + ch.get("code", []) + ch.get("runs", []) + ch.get("settings", []) if in_tree(x)]
+                    for x in members:
+                        m = G.nodes[x]
+                        add(x, layer="root", band=BAND[m["kind"]], kind=m["kind"], short=m["name"].rsplit("/", 1)[-1][:16], title=m["name"],
+                            node_id=x, traced=True, born=born(x, None))
+                    mset = set(members) | {nid}
+                    linked = set()
+                    for e in G.edges.values():
+                        if e["kind"] in SUPPORT_REL and e["status"] in ("detected", "approved") and e["from"] in mset and e["to"] in mset:
+                            edge(e["from"], e["to"], "trace", "detected", s_.get("stale"))
+                            linked.add(e["to"])
+                    for x in members:      # anything the graph did not link explicitly hangs from the paper item
+                        if x not in linked:
+                            edge(nid, x, "trace", "detected", s_.get("stale"))
+            elif not nid:
+                rid = "x:%s:%s" % (s_["kind"], s_["name"]) if s_["relation"] != "proof" else "x:proof:" + c["id"]
+                add(rid, layer="root", band=1, kind=s_["kind"], short=s_["name"][:14] if s_["relation"] != "proof" else "Proof", title=s_["name"],
+                    loc=s_.get("loc"), traced=True, born=born(None, s_.get("loc")))
+                edge(c["id"], rid, "support", s_["how"])
+                real += not sug
+        if not real:
+            mid = "missing:" + c["id"]
+            add(mid, layer="root", band=1, kind="missing", short="?", title="Nothing backs this yet", traced=False, born=None)
+            edge(c["id"], mid, "missing")
+    shared = {}
+    for e in edges:
+        if e["kind"] == "support" and e["how"] != "suggested":
+            shared[e["to"]] = shared.get(e["to"], 0) + 1
+    for n in nodes:
+        if n["layer"] == "root":
+            n["shared"] = shared.get(n["id"], 0)
+    times = sorted(n["born"] for n in nodes if n.get("born"))
+    return {"schema": "lemmata.tree/1", "nodes": nodes, "edges": edges, "counts": doc["counts"],
+            "span": {"start": times[0], "end": times[-1]} if times else None, "dated": len(times), "undated": len(nodes) - len(times)}
 
 
 # ------------------------------------------------------------------ decisions
