@@ -212,7 +212,7 @@ def cmd_config(args):
     print(json.dumps(c, indent=1))
     if kw:
         import sys
-        print("Restart the hub for this to take effect (launchd: `launchctl kickstart -k gui/$(id -u)/com.lemmata.hub`, or stop and start `lemmata hub serve`).", file=sys.stderr)
+        print("Restart the hub for this to take effect (`lemmata hub uninstall && lemmata hub install`, or stop and start `lemmata hub serve`).", file=sys.stderr)
     return 0
 
 

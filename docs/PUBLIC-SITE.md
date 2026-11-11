@@ -7,7 +7,7 @@ Decision record and risks: `wiki/decisions/ADR-006-public-multi-user-site.md`. R
 ## 1. Update the hub (Mac mini)
 ```
 cd ~/work/lemmata && git fetch && git checkout s07-public-site && git pull
-launchctl kickstart -k gui/$(id -u)/com.lemmata.hub      # or stop and start `uv run lemmata hub serve`
+cd app && uv run lemmata hub uninstall && uv run lemmata hub install   # restarts the hub with the new code
 ```
 
 ## 2. Give the Mac mini a public HTTPS address
@@ -26,7 +26,7 @@ The command prints the address, for example `https://dais-juhyeongs-mac-mini.<ta
 cd ~/work/lemmata/app
 uv run lemmata hub config --public-url https://<the address from step 2>
 uv run lemmata hub config --invite their-github-name --invite another-name     # sign-up is invite-only by default
-launchctl kickstart -k gui/$(id -u)/com.lemmata.hub
+uv run lemmata hub uninstall && uv run lemmata hub install
 ```
 - `--signup invite` (default once a public URL is set): only you and the GitHub names you invited.
 - `--signup open`: anyone with the link, up to `--max-users` (default 50). Each person can have 5 projects.
