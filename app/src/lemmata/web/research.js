@@ -18,7 +18,8 @@ async function rxLoad() {
   if (READONLY && !(SNAP && SNAP.claims)) { RX.loaded = true; RX.error = 'This snapshot was made without the research views.'; return; }
   try {
     const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, loaded: true, error: null });
+    let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -46,7 +47,7 @@ function rxNodeBtn(nid, label) {
 async function rxPost(path, body, okMsg) {
   try {
     const r = await apiPost(path, body); if (okMsg) toast(okMsg);
-    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; } catch (e) { /* the old tree stays */ } }
+    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; RX.experiments = await apiGet('/api/experiments'); } catch (e) { /* the old tree stays */ } }
     else RX.digest = null;
     return r;
   }
@@ -415,20 +416,169 @@ function pageTimeline() {
   return root;
 }
 
-/* ---------- Experiments (ledger) ---------- */
+/* ---------- Experiments, by research question / hypothesis ---------- */
+const RX_CAT = { method: ['◆', 'Method'], settings: ['●', 'Settings'], data: ['▲', 'Data'], evaluation: ['⟂', 'Evaluation'] };
+const RX_CELL = { match: ['✓', 'Matches the result file'], rounding: ['≈', 'Rounded differently'], differs: ['✕', 'Differs from the result file'], loose: ['~', 'Value is in the file, but not in the matching row and column'], untraced: ['?', 'Not found in the result file'] };
+function rxFmt(v) { if (v == null) return '—'; const a = Math.abs(v); return a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : v.toFixed(3).replace(/0$/, ''); }
+function rxGapBar(sm) {
+  if (!sm || sm.gap == null) return h('span', { class: 'muted small' }, sm && sm.ours != null ? rxFmt(sm.ours) : '—');
+  const W = 132, mid = 56, scale = Math.max(Math.abs(sm.gap), Math.abs(sm.best.value) * 0.12, 1e-9), len = Math.max(2, Math.min(mid - 2, Math.abs(sm.gap) / scale * (mid - 2)));
+  const good = sm.gap > 0, s = sv('svg', { viewBox: '0 0 ' + W + ' 18', width: W, height: 18, class: 'rx-gap', role: 'img', 'aria-label': 'Ours ' + rxFmt(sm.ours) + ', best other ' + rxFmt(sm.best.value) + ' (' + sm.best.label + ')' });
+  s.append(sv('line', { x1: mid, x2: mid, y1: 1, y2: 17, class: 'zero' }), sv('rect', { x: good ? mid : mid - len, y: 5, width: len, height: 8, rx: 2, class: sm.gap === 0 ? 'tie' : good ? 'good' : 'bad' }),
+    sv('text', { x: mid + (good ? len + 4 : 4), y: 13, class: 'gl' }, (sm.gap > 0 ? '+' : '') + rxFmt(sm.gap)),
+    sv('title', null, sm.ours_label + ' ' + rxFmt(sm.ours) + ' · best other: ' + sm.best.label + ' ' + rxFmt(sm.best.value) + ' · ' + sm.metric + (sm.lower ? ' (lower is better)' : '')));
+  return s;
+}
+function rxSpark(spark) {
+  const pts = spark.filter(p => p.o != null); if (pts.length < 2) return h('span', { class: 'muted small' }, spark.length ? spark.length + '×' : '');
+  const W = 90, H = 22, vals = spark.flatMap(p => [p.o, p.b]).filter(v => v != null), lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1;
+  const x = i => 3 + i * (W - 6) / (spark.length - 1), y = v => H - 3 - (v - lo) / sp * (H - 6);
+  const s = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, class: 'rx-spark', role: 'img', 'aria-label': spark.length + ' versions of this result' });
+  const path = k => { let d = '', pen = false; spark.forEach((p, i) => { if (p[k] == null || (p.r && k === 'o')) { pen = p[k] != null && p.r ? (d += 'M' + x(i) + ',' + y(p[k]), true) : false; return; } d += (pen ? 'L' : 'M') + x(i) + ',' + y(p[k]); pen = true; }); return d; };
+  s.append(sv('path', { d: path('b'), class: 'b' }), sv('path', { d: path('o'), class: 'o' }));
+  spark.forEach((p, i) => { if (p.o != null) s.append(sv('circle', { cx: x(i), cy: y(p.o), r: i === spark.length - 1 ? 2.6 : 1.6, class: 'od' })); if (p.c) s.append(sv('line', { x1: x(i), x2: x(i), y1: H - 2, y2: H, class: 'tk' })); });
+  return s;
+}
+function rxTally(x) {
+  if (!x.tally) return x.kind === 'figure' ? h('span', { class: 'rx-tl ' + (x.connected ? 'ok' : 'bad') }, x.connected ? '✓ linked' : '? not linked') : h('span', { class: 'muted small' }, x.connected ? '' : '? not linked');
+  const t = x.tally, part = (k, cls) => t[k] ? h('span', { class: 'rx-tl ' + cls, title: RX_CELL[k][1] }, RX_CELL[k][0] + t[k]) : null;
+  return h('span', { class: 'rx-tally' }, part('match', 'ok'), part('rounding', 'warn'), part('differs', 'bad'), part('loose', 'warn'), part('untraced', 'bad'));
+}
+function rxExpRow(x, sec) {
+  const key = (sec ? sec.id : '-') + '|' + x.id, open = RX.exOpen === key;
+  const glyph = x.attention ? ['!', 'look'] : x.connected ? ['✓', 'fine'] : ['?', 'ign'];
+  const row = h('div', { class: 'rx-x-r' + (open ? ' open' : '') + (x.attention ? ' att' : '') },
+    h('button', { class: 'rx-x-main', 'aria-expanded': String(open), onclick: () => { RX.exOpen = open ? null : key; renderPage(true); } },
+      h('span', { class: 'sg ' + glyph[1] }, glyph[0]), h('span', { class: 'rx-x-name' }, h('b', null, x.name), h('span', { class: 'muted' }, x.caption ? ' ' : ''), x.caption ? h('span', { class: 'muted' }, rxMath(trunc(x.caption, 60))) : null)),
+    h('span', { class: 'rx-x-metric small muted' }, x.summary ? trunc(x.summary.metric, 16) + (x.summary.lower ? ' ↓' : ' ↑') : ''),
+    rxGapBar(x.summary), rxSpark(x.spark), rxTally(x),
+    h('span', { class: 'muted small' }, x.stale ? h('span', { class: 'rx-tl warn', title: 'The code or settings changed after this result was written' }, '↻ old') : x.last ? dmon(x.last) : ''));
+  if (open) row.append(rxExpDetail(x.id));
+  return row;
+}
+function rxHistoryChart(hist, sm) {
+  const W = 640, H = 190, L = 44, R = 16, T = 30, B = 26, n = hist.length;
+  const vals = hist.flatMap(p => [p.ours, p.best]).filter(v => v != null); if (!vals.length) return null;
+  const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo || Math.abs(hi) * 0.1 || 1) * 0.15, y0 = lo - pad, y1 = hi + pad;
+  const x = i => n === 1 ? (L + W - R) / 2 : L + i * (W - L - R) / (n - 1), y = v => T + (y1 - v) / (y1 - y0) * (H - T - B);
+  const s = sv('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'rx-hist', role: 'img', 'aria-label': 'How the result moved over ' + n + ' versions' });
+  [y0 + pad, (lo + hi) / 2, y1 - pad].forEach(v => s.append(sv('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'grid' }), sv('text', { x: L - 6, y: y(v) + 3, class: 'ax', 'text-anchor': 'end' }, rxFmt(v))));
+  const step = k => { let d = '', prev = null; hist.forEach((p, i) => { if (p[k] == null) { prev = null; return; } if (prev == null || (p.ruler && k === 'ours')) d += 'M' + x(i) + ',' + y(p[k]); else d += 'L' + x(i) + ',' + y(prev) + 'L' + x(i) + ',' + y(p[k]); prev = p[k]; }); return d; };
+  s.append(sv('path', { d: step('best'), class: 'b' }), sv('path', { d: step('ours'), class: 'o' }));
+  hist.forEach((p, i) => {
+    if (p.ruler) s.append(sv('line', { x1: x(i) - 14, x2: x(i) - 14, y1: T - 6, y2: H - B, class: 'ruler' }));
+    if (p.changes.length) {
+      s.append(sv('line', { x1: x(i), x2: x(i), y1: T - 4, y2: H - B, class: 'ev' }));
+      p.cats.forEach((c, j) => s.append(sv('text', { x: x(i) + (j - (p.cats.length - 1) / 2) * 12, y: T - 9, class: 'cat c-' + c + (p.attribution === 'bundled' ? ' bundled' : ''), 'text-anchor': 'middle' }, (RX_CAT[c] || ['•'])[0],
+        sv('title', null, p.changes.map(ch => ch.short + ' ' + ch.subject + (ch.keys.length ? ' (' + ch.keys.map(k => k.key + ' ' + k.from + '→' + k.to).join(', ') + ')' : '')).join('\n')))));
+    }
+    if (p.ours != null) s.append(sv('circle', { cx: x(i), cy: y(p.ours), r: 4.5, class: 'od' + (p.rank === 1 ? ' first' : '') }, sv('title', null, dmon(p.time) + ' · ' + sm.ours_label + ' ' + rxFmt(p.ours) + (p.best != null ? ' · best other ' + rxFmt(p.best) + ' (' + p.best_label + ')' : '') + (p.rank ? ' · rank ' + p.rank + '/' + p.of : ''))));
+    if (p.best != null) s.append(sv('circle', { cx: x(i), cy: y(p.best), r: 2.5, class: 'bd' }));
+    if (p.became_best) s.append(sv('text', { x: x(i), y: y(p.ours) - 9, class: 'star', 'text-anchor': 'middle' }, '★'));
+    s.append(sv('text', { x: x(i), y: H - 8, class: 'ax', 'text-anchor': 'middle' }, dmon(p.time)));
+  });
+  return s;
+}
+function rxPaperGrid(x) {
+  if (!x.cells) return null;
+  return h('div', { class: 'rx-ev-tablewrap wide' }, h('table', { class: 'tbl rx-chk' }, h('tbody', null, x.cells.map((r, i) => h('tr', null, r.map((c, j) => {
+    const st = c.status, g = st ? RX_CELL[st] : null;
+    return h(i && j ? 'td' : 'th', { class: (st ? 'c-' + st : '') + (c.bold ? ' bold' : '') + (c.bold_wrong ? ' boldwrong' : ''),
+      title: st ? g[1] + (c.file != null ? ' · paper ' + c.text + ' · file ' + rxFmt(c.file) + (c.file_shown !== c.file ? ' → ' + rxFmt(c.file_shown) : '') + ' (' + c.row + ', ' + c.col + ')' : '') + (c.bold_wrong ? ' · bold, but not the best in its column' : '') : null },
+      rxMath(c.text), st ? h('span', { class: 'cg' }, g[0]) : null);
+  }))))));
+}
+function rxExpDetail(id) {
+  const box = h('div', { class: 'rx-x-d' }, h('div', { class: 'muted' }, '…'));
+  const load = () => apiGet('/api/experiment?id=' + encodeURIComponent(id)).then(paint).catch(e => { clear(box).append(h('div', { class: 'muted' }, e.message)); });
+  const post = async body => { const r = await rxPost('/api/experiment', Object.assign({ id }, body)); if (r) { try { RX.experiments = await apiGet('/api/experiments'); } catch (e) { /* keep */ } renderPage(true); } };
+  function paint(x) {
+    const sm = x.summary, gh = u => u ? h('a', { class: 'ghl', href: u, target: '_blank', rel: 'noopener noreferrer' }, '↗') : null;
+    const blk = (title, ...kids) => h('section', { class: 'rx-x-b' }, h('h4', null, title), kids);
+    const out = [];
+    if (x.caveats.length) out.push(h('div', { class: 'rx-x-cav' }, x.caveats.map(c => plainChip(c.k === 'stale' ? '↻' : '!', c.t, 'look'))));
+    // result
+    if (sm && x.table) {
+      const rows = x.table.rows.filter(r => r.values[sm.metric] != null), vs = rows.map(r => r.values[sm.metric]), hi = Math.max(...vs.map(Math.abs)) || 1;
+      const sorted = rows.slice().sort((a, b) => sm.lower ? a.values[sm.metric] - b.values[sm.metric] : b.values[sm.metric] - a.values[sm.metric]);
+      const sel = (cur, opts, fn, label) => { const s = h('select', { 'aria-label': label, disabled: READONLY }, opts.map(o => h('option', { value: o, selected: o === cur }, o))); s.addEventListener('change', () => fn(s.value)); return s; };
+      out.push(blk('Result', h('div', { class: 'rx-x-ctl' }, sel(sm.metric, sm.cols, v => post({ metric: v }), 'Metric'),
+        h('button', { class: 'btn sm', disabled: READONLY, title: 'Switch which direction is better', onclick: () => post({ lower: !sm.lower }) }, sm.lower ? '↓ lower is better' : '↑ higher is better'),
+        h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
+        sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, sm.ours_by === 'paper' || sm.ours_by === 'name' ? '' : '(guessed)') : null),
+        h('div', { class: 'rx-bars' }, sorted.map((r, i) => { const v = r.values[sm.metric], me = r.label === sm.ours_label; return h('div', { class: 'rx-bar' + (me ? ' me' : '') },
+          h('span', { class: 'bl' }, r.label), h('span', { class: 'bt' }, h('span', { class: 'bf', style: 'width:' + Math.max(1, Math.abs(v) / hi * 100) + '%' })),
+          h('span', { class: 'bv mono' }, rxFmt(v) + (r.std[sm.metric] != null ? ' ±' + rxFmt(r.std[sm.metric]) : '')), h('span', { class: 'muted small' }, i === 0 ? '★' : '')); }))));
+    } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
+    // design
+    const d = x.design || { scripts: [], settings: [], runs: [], values: [] };
+    out.push(blk('Design', h('dl', { class: 'rx-dl' },
+      x.result ? [h('dt', null, 'Result file'), h('dd', null, rxNodeBtn(x.result.node_id, x.result.path), ' ', gh(x.result.github))] : null,
+      d.scripts.length || d.runs.length ? [h('dt', null, 'Made by'), h('dd', null, d.runs.map(r => [rxNodeBtn(r.node_id, r.name), r.command ? h('span', { class: 'muted mono small' }, ' ' + trunc(r.command, 60)) : null, ' ']), d.scripts.map((s, i) => [i ? ', ' : null, rxNodeBtn(s.node_id, s.name), ' ', gh(s.github)]))] : null,
+      sm && sm.baselines.length ? [h('dt', null, 'Compared with'), h('dd', null, sm.baselines.map(b => h('span', { class: 'rx-code' }, b)))] : null,
+      sm && sm.cols.length ? [h('dt', null, sm.datasets && sm.datasets.length ? 'Datasets' : 'Columns'), h('dd', null, (sm.datasets && sm.datasets.length ? sm.datasets : sm.cols).map(b => h('span', { class: 'rx-code' }, b)))] : null,
+      d.values.length ? [h('dt', null, 'Settings'), h('dd', null, d.values.slice(0, 14).map(v => h('span', { class: 'rx-code mono', title: v.file }, v.key.split('.').pop() + ' = ' + v.value)))] : null,
+      x.questions && x.questions.length ? [h('dt', null, 'Tests'), h('dd', null, x.questions.map(q => h('button', { class: 'chip-btn', title: q.text, onclick: () => { RX.sel = q.id; RX.view = 'tree'; openTab('claims'); } }, '◆ ' + q.label)))] : null)));
+    // history
+    if (x.history && x.history.length) {
+      const hs = x.history, chart = hs.length > 1 ? rxHistoryChart(hs, sm) : null;
+      const word = { single: 'one change', bundled: 'several changes at once', none: 'no code change found', ruler: 'evaluation changed: not comparable', first: 'first version' };
+      out.push(blk('History', chart, hs.length > 1 ? h('div', { class: 'rx-legend' }, h('span', null, h('span', { class: 'lg-o' }, '━'), ' ' + sm.ours_label), h('span', null, h('span', { class: 'lg-b' }, '┄'), ' best other'),
+        Object.keys(RX_CAT).filter(c => hs.some(p => p.cats.includes(c))).map(c => h('span', null, h('span', { class: 'lg-g' }, RX_CAT[c][0]), ' ' + RX_CAT[c][1])), hs.some(p => p.became_best) ? h('span', null, '★ became best') : null) : null,
+        h('div', { class: 'rx-steps' }, hs.slice().reverse().map(p => { const better = p.delta != null && (sm.lower ? p.delta < 0 : p.delta > 0); return h('div', { class: 'rx-st' },
+          h('span', { class: 'mono small muted' }, dmon(p.time)), h('span', { class: 'mono' }, rxFmt(p.ours)),
+          h('span', { class: 'mono rx-dlt ' + (p.delta == null || p.delta === 0 ? '' : better ? 'good' : 'bad') }, p.delta == null ? '' : (p.delta > 0 ? '+' : '') + rxFmt(p.delta)),
+          h('span', { class: 'rx-st-w' }, p.became_best ? h('b', null, '★ became best · ') : null, p.rank ? h('span', { class: 'muted' }, '#' + p.rank + '/' + p.of + ' · ') : null,
+            p.changes.length ? p.changes.map((c, i) => [i ? '; ' : null, c.cats.map(k => h('span', { class: 'lg-g c-' + k, title: (RX_CAT[k] || ['', k])[1] }, (RX_CAT[k] || ['•'])[0])), ' ' + c.subject, c.keys.length ? h('span', { class: 'mono small' }, ' ' + c.keys.map(k => k.key + ' ' + k.from + '→' + k.to).join(', ')) : null]) : h('span', { class: 'muted' }, p.subject),
+            p.attribution !== 'single' && p.attribution !== 'first' ? h('span', { class: 'tag' + (p.attribution === 'bundled' || p.attribution === 'ruler' ? ' warn' : '') }, word[p.attribution]) : null)); }))));
+    }
+    // paper check
+    if (x.cells) out.push(blk('Paper check', rxPaperGrid(x),
+      h('div', { class: 'rx-legend' }, Object.keys(RX_CELL).filter(k => x.tally && x.tally[k]).map(k => h('span', null, h('span', { class: 'cg c-' + k }, RX_CELL[k][0]), ' ' + RX_CELL[k][1])), h('span', { class: 'grow' }), rxWhere(x.loc)),
+      x.problems.map(p => h('div', { class: 'rx-warn' }, p.kind === 'differs' ? ['✕ ' + p.row + ' · ' + p.col + ': paper ', h('b', null, p.paper), ', file ', h('b', null, rxFmt(p.file))] : ['Bold ', h('b', null, p.paper), ' in “' + p.col + '” is not the best value (' + rxFmt(p.best) + ').'])),
+      x.stale ? h('div', { class: 'rx-warn' }, '↻ ' + x.stale.newer.map(n => n.name).join(', ') + ' changed after ' + x.stale.file + ' was written.') : null));
+    else if (x.kind === 'figure') out.push(blk('Paper check', h('div', { class: 'row' }, x.image && !READONLY ? h('img', { class: 'rx-x-fig', src: apiUrl('/api/thumb?node=' + encodeURIComponent(x.id)), alt: x.name, onerror: ev => ev.target.remove() }) : null,
+      h('div', { class: 'muted small' }, x.connected ? 'Linked to the files above. Numbers inside a picture cannot be checked.' : 'No script or result file found behind this figure.'))));
+    clear(box).append(out);
+  }
+  load();
+  return box;
+}
 function pageExperiments() {
   const nr = rxNotReady('Experiments'); if (nr) return nr;
   S.outline = [];
-  const L = RX.ledger, F = RX.exFilter, c = L.counts;
-  const root = doc(h('h1', { class: 'ptitle' }, 'Experiments'),
-    h('p', { class: 'muted' }, 'Result files, what made them, and what relies on them.'));
-  root.append(h('div', { class: 'fchips' }, [['all', 'All', L.rows.length], ['stale', 'Out of date', c.stale], ['unknown', 'No known source', c.unknown], ['current', 'Current', c.current]].map(([k, l, n]) =>
-    h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.exFilter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, n)))));
-  const rows = L.rows.filter(r => F === 'all' || r.status === F);
-  if (!L.rows.length) return root.append(emptyState('▦', 'No result files found', 'Lemmata looks for files in folders named results, outputs, figures, tables, plots or logs, and for run records in runs/*.json.')), root;
+  const E = RX.experiments, root = doc(h('h1', { class: 'ptitle' }, 'Experiments'));
+  if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
+  const c = E.counts;
+  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.versions), ' result versions'),
+    c.untested ? h('span', { class: 'bad' }, h('b', null, c.untested), ' not tested') : null, c.attention ? h('span', { class: 'warn' }, h('b', null, c.attention), ' to check') : null));
+  const head = () => h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
+  for (const s of E.sections) {
+    const st = RX_STATUS[s.status];
+    const sec = h('section', { class: 'rx-x-sec st-' + s.status },
+      h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: st[1] }, st[0]), h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = s.id; RX.view = 'tree'; openTab('claims'); } }, s.kind === 'question' ? s.label : 'H · ' + s.label),
+        h('span', { class: 'rx-x-qt serif' }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
+    if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
+    else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),
+      READONLY ? null : s.suggested.map(g => h('button', { class: 'chip-btn', title: 'Link this as the experiment for it', onclick: async () => { const r = await rxPost('/api/claims/link', { id: s.id, target: g.node_id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } } }, g.name + '?'))));
+    root.append(sec);
+  }
+  if (E.unassigned.length) {
+    const opts = E.sections.map(s => [s.id, s.label]);
+    root.append(h('section', { class: 'rx-x-sec loose' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ign' }, '○'), h('span', { class: 'rx-x-q static' }, 'No question'), h('span', { class: 'rx-x-qt muted' }, 'Results that no question or hypothesis points to'), h('span', { class: 'grow' })),
+      h('div', { class: 'rx-x-t' }, head(), E.unassigned.map(x => { const row = rxExpRow(x, null);
+        if (!READONLY && opts.length) { const sel = h('select', { class: 'rx-x-assign', 'aria-label': 'Which question does this test?' }, h('option', { value: '' }, 'Tests…'), opts.map(o => h('option', { value: o[0] }, o[1])));
+          sel.addEventListener('change', async () => { if (!sel.value) return; const r = await rxPost('/api/claims/link', { id: sel.value, target: x.id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } }); row.querySelector('.rx-x-main').after(sel); row.classList.add('assign'); }
+        return row; }))));
+  }
+  if (RX.ledger && RX.ledger.rows.length) root.append(h('details', { class: 'details' }, h('summary', null, 'All result files (' + RX.ledger.rows.length + ')'), rxLedgerList()));
+  return root;
+}
+function rxLedgerList() {
+  const L = RX.ledger, rows = L.rows, out = [];
   const stChip = r => r.status === 'stale' ? plainChip('↻', 'Out of date', 'look') : r.status === 'current' ? plainChip('✓', 'Current', 'fine') : plainChip('?', 'No known source', 'ign');
   for (const r of rows) {
-    root.append(h('article', { class: 'card rx-ex st-' + r.status },
+    out.push(h('article', { class: 'card rx-ex st-' + r.status },
       h('div', { class: 'rx-ex-h' }, h('button', { class: 'linkbtn', 'aria-expanded': String(RX.exSel === r.node_id), onclick: () => { RX.exSel = RX.exSel === r.node_id ? null : r.node_id; renderPage(true); } }, h('b', null, r.name)), stChip(r), h('span', { class: 'grow' }), r.made ? h('span', { class: 'muted small' }, 'written ' + absTime(r.made.time) + ' · ', mono(r.made.short)) : null),
       h('dl', { class: 'rx-dl' },
         r.code.length || r.runs.length ? [h('dt', null, 'Made by'), h('dd', null, r.runs.map(x => [rxNodeBtn(x.node_id, x.name), x.command ? h('span', { class: 'muted mono small' }, ' ' + trunc(x.command, 70)) : null, ' ']), r.code.map((x, i) => [i || r.runs.length ? ', ' : null, rxNodeBtn(x.node_id, x.name)]))] : [h('dt', null, 'Made by'), h('dd', { class: 'muted' }, 'Unknown. No script writes a file with this name.')],
@@ -438,8 +588,7 @@ function pageExperiments() {
       RX.exSel === r.node_id ? rxEvidenceCard(r.node_id) : null,
       r.newer.length ? h('div', { class: 'rx-warn' }, '↻ Changed after this file was written: ', r.newer.slice(0, 3).map((x, i) => [i ? '; ' : null, h('b', null, x.name), ' on ' + dmon(x.time) + ' (“' + trunc(x.subject || '', 60) + '”)']), '. Rerun it, or check that the change does not affect the output.') : null));
   }
-  if (!rows.length) root.append(h('div', { class: 'muted' }, 'None with this filter.'));
-  return root;
+  return out;
 }
 
 /* ---------- Tasks (feedback) ---------- */
@@ -634,7 +783,7 @@ function rxNavRows() {
     navRow('Claims', '◆', () => openTab('claims'), cc ? (cc.unsupported + cc.partial) || null : null, act('claims')),
     navRow('Notation', '𝑥', () => openTab('notation'), RX.notation && RX.notation.counts ? RX.notation.issues.length || null : null, act('notation')),
     navRow('Timeline', '⚑', () => openTab('timeline'), null, act('timeline')),
-    navRow('Experiments', '▦', () => openTab('experiments'), lc ? lc.stale || null : null, act('experiments')),
+    navRow('Experiments', '▦', () => openTab('experiments'), RX.experiments ? (RX.experiments.counts.attention + RX.experiments.counts.untested) || null : (lc ? lc.stale || null : null), act('experiments')),
     navRow('Tasks', '☑', () => openTab('tasks'), tc ? tc.open || null : null, act('tasks')),
     navRow('Ask', '?', () => openTab('ask'), null, act('ask')),
   ];

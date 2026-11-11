@@ -183,6 +183,13 @@ class PublicTest(unittest.TestCase):
         s, nt, _ = self.req("GET", base + "/notation", cookie=self.bob)
         self.assertEqual((s, nt["has_paper"]), (200, True))
         self.assertEqual(self.req("POST", base + "/notation", {"symbol": "nope", "meaning": "x"}, cookie=self.bob)[0], 404)
+        s, ex, _ = self.req("GET", base + "/experiments", cookie=self.bob)
+        sec = next(x for x in ex["sections"] if x["id"] == "contrib:2")
+        self.assertEqual((s, [x["id"] for x in sec["experiments"]], sec["kind"]), (200, ["tex:tab:acc"], "hypothesis"))
+        s, one, _ = self.req("GET", base + "/experiment?id=tex:tab:acc", cookie=self.bob)
+        self.assertEqual((s, one["tally"]["match"], one["summary"]["ours_label"], len(one["history"])), (200, 1, "ours", 1))
+        self.assertEqual(self.req("POST", base + "/experiment", {"id": "tex:tab:acc", "lower": True}, cookie=self.bob)[1]["summary"]["lower"], True)
+        self.assertEqual(self.req("GET", base + "/experiment?id=nope", cookie=self.bob)[0], 404)
         for route in ("/timeline", "/ledger", "/digest"):
             self.assertEqual(self.req("GET", base + route, cookie=self.bob)[0], 200, route)
         s, a, _ = self.req("POST", base + "/ask", {"question": "which claims are unsupported?"}, cookie=self.bob)

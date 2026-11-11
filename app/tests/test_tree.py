@@ -46,3 +46,34 @@ class NotationTest(unittest.TestCase):
         from lemmata.engine.claims import cut, detex
         self.assertEqual(detex(r"Loss \textbf{is} $\mathbf{x}~+ 1$ \cite{a}."), r"Loss is $\mathbf{x}~+ 1$ .")
         self.assertEqual(cut("abc $x+y$ def", 6), "abc…")
+
+
+class ExperimentsTest(unittest.TestCase):
+    def test_result_file_and_summary(self):
+        from lemmata.engine.experiments import lower_better, parse_result, pick_ours, summarise
+        t = parse_result("results/main.csv", b"method,seed,F1\nA,1,0.80\nA,2,0.84\nOurs,1,0.90\nOurs,2,0.92\n")
+        self.assertEqual((t["cols"], [r["label"] for r in t["rows"]], t["seeds"]), (["F1"], ["A", "Ours"], True))
+        self.assertAlmostEqual(t["rows"][0]["values"]["F1"], 0.82)
+        self.assertEqual(t["rows"][0]["n"]["F1"], 2)
+        self.assertEqual(pick_ours(t, []), ("Ours", "name"))
+        s = summarise(t, "Ours", "F1", False)
+        self.assertEqual((s["rank"], s["best"]["label"], round(s["gap"], 2)), (1, "A", 0.09))
+        self.assertEqual(summarise(t, "Ours", "F1", True)["rank"], 2)
+        self.assertTrue(lower_better("val_loss") and not lower_better("F1"))
+        j = parse_result("r.json", b'{"A": {"acc": 0.5}, "B": {"acc": 0.7}}')
+        self.assertEqual([r["label"] for r in j["rows"]], ["A", "B"])
+        self.assertIsNone(parse_result("r.csv", b"just text\n"))
+
+    def test_paper_table_is_checked_cell_by_cell(self):
+        from lemmata.engine.experiments import align, num, parse_result
+        self.assertEqual(num("91.2\\%")[:3], (91.2, None, True))
+        self.assertEqual(num("0.91 ± 0.02")[:2], (0.91, 0.02))
+        tab = parse_result("m.csv", b"method,acc,loss\nA,0.8127,0.30\nB,0.9049,0.21\n")
+        cell = lambda t, bold=False: dict(tex=t, text=t, bold=bold, **dict(zip(("value", "std", "pct", "dec"), num(t) or (None, None, False, None))))
+        grid = [[cell("Method"), cell("acc"), cell("loss")], [cell("A"), cell("81.3"), cell("0.30", True)], [cell("B"), cell("90.4"), cell("0.25")], [cell("C"), cell("77.0"), cell("0.21")]]
+        g, tally, problems = align(grid, tab)
+        self.assertEqual([c.get("status") for c in g[1]], [None, "match", "match"])            # 0.8127 -> 81.3 %
+        self.assertEqual([c.get("status") for c in g[2]], [None, "rounding", "differs"])       # 90.49 printed as 90.4; 0.25 vs 0.21
+        self.assertEqual([c.get("status") for c in g[3]], [None, "untraced", "loose"])         # no row C; 0.21 is B's value
+        self.assertEqual(tally, {"match": 2, "rounding": 1, "differs": 1, "loose": 1, "untraced": 1})
+        self.assertEqual(sorted(p["kind"] for p in problems), ["bold", "differs"])             # bold 0.30 is not the lowest loss

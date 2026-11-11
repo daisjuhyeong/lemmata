@@ -371,9 +371,16 @@ def draft(G, alarms=None, findings=None):
         if not n:
             continue
         sup, have = [], set()
+        rq_rx = re.compile(r"\b%s\b" % re.escape(name).replace("RQ", r"RQ\s?"))
+        text = n["attrs"].get("text", n["detail"])
+        m = re.search(rq_rx.pattern + r"\}?\s*[:.)\-]*\s*(.+?[?])", detex(P.lines[idx].code)) if 0 <= idx < len(P.lines) else None
+        if m:
+            text = m.group(1).strip()          # the question itself, not the whole line it sits on
         for ln in P.lines:
-            if re.search(r"\b%s\b" % re.escape(name).replace("RQ", r"RQ\s?"), ln.code):
-                for grp in lx.REF_RE.findall(ln.code):
+            # only the sentences that name this question count, so "RQ1 is answered by Table 1. RQ2 by Table 2." splits correctly
+            for sent in re.split(r"(?<=[.;?!])\s+", ln.code):
+              if rq_rx.search(sent) and not re.search(r"\bRQ\s?\d+\b", rq_rx.sub("", sent)):
+                for grp in lx.REF_RE.findall(sent):
                     for r in grp.split(","):
                         f = label_node.get(r.strip())
                         if f and f not in have and G.nodes[f]["kind"] in ("figure", "table"):
@@ -385,7 +392,7 @@ def draft(G, alarms=None, findings=None):
                     if f not in have:   # in a section that discusses the question, but not named with it: a suggestion only
                         have.add(f)
                         sup.append(_support_for_node(ctx, f, "evidence", "suggested", 0.5))
-        claims.append({"id": nid, "kind": "question", "label": name, "text": n["attrs"].get("text", n["detail"])[:600], "loc": n["loc"],
+        claims.append({"id": nid, "kind": "question", "label": name, "text": cut(text, 600), "loc": n["loc"],
                        "support": sup, "_have": have, "_refs": []})
 
     # --- formal statements

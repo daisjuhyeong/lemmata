@@ -8,6 +8,7 @@ from . import alarms as alarmsmod
 from . import analyze as analyzemod
 from . import checks as checksmod
 from . import claims as claimsmod
+from . import experiments as expmod
 from . import notation as notationmod
 from . import process as processmod
 from . import graph as graphmod
@@ -421,6 +422,26 @@ class Engine:
             d["notes"].pop(node_id, None)
         self.hub.write_json("notes.json", d)
         return self.evidence(node_id)
+
+    # ------------------------------------------------------------------ experiments, by question
+    def _exp(self, detail=None):
+        s = self._ensure()
+        return expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.claims(), self.ledger(),
+                            expmod.load(self.hub), self._github(), detail)
+
+    def experiments(self):
+        return self._exp()
+
+    def experiment(self, exp_id):
+        return self._exp(exp_id)
+
+    def set_experiment(self, exp_id, ours=None, metric=None, lower=None):
+        s = self._ensure()
+        st = expmod.load(self.hub)
+        known = {nid for nid, n in s["G"].nodes.items() if n["kind"] in ("table", "figure", "result", "data")}
+        expmod.decide(st, known, exp_id, ours, metric, lower)
+        self.hub.write_json("experiments.json", st)
+        return self._exp(exp_id)
 
     # ------------------------------------------------------------------ notation
     def notation(self):
