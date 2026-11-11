@@ -147,14 +147,18 @@ def build(E, store, days=30, now=None):
     complete = [r for r in rows if r["complete"]]
     span = "%d day%s" % (days, "" if days == 1 else "s")
     vs = extends["name"] if extends else "the best other method"
+    ours = ((E.get("map") or {}).get("method") or {}).get("name") or "our method"
+    period = {30: "the last 30 days", 7: "the last week", 1: "the last day"}[days]
     checks = [
-        {"k": "moving", "q": "Is it moving?", "verdict": "none" if not started else "yes" if len(moved) * 2 >= len(rows) else "partly" if moved else "no",
+        {"k": "moving", "q": "Any new results in %s?" % period, "help": "A question counts when one of its experiments got a new result file in this period.", "verdict": "none" if not started else "yes" if len(moved) * 2 >= len(rows) else "partly" if moved else "no",
          "line": "No experiment yet" if not started else "%d of %d questions moved in %s" % (len(moved), len(rows), span),
          "rows": [r["id"] for r in rows if r["trend"] != "moved"]},
-        {"k": "ahead", "q": "Is it ahead?", "verdict": "none" if not xs else "yes" if ahead and not behind else "partly" if ahead else "no",
+        {"k": "ahead", "q": "Does %s beat %s?" % (ours, extends["name"] if extends else "the other methods"),
+         "help": "Counts the experiments where %s scores better than %s on the experiment's metric." % (ours, vs), "verdict": "none" if not xs else "yes" if ahead and not behind else "partly" if ahead else "no",
          "line": "Nothing to compare yet" if not xs else "Ahead of %s in %d of %d%s" % (vs, len(ahead), len(xs), ", behind in %d" % len(behind) if behind else ""),
          "rows": sorted({x["question_id"] for x in behind}), "behind": behind},
-        {"k": "paper", "q": "Is there a paper today?", "verdict": "none" if not rows else "yes" if len(complete) == len(rows) else "partly" if complete else "no",
+        {"k": "paper", "q": "Is the evidence enough to write the paper now?",
+         "help": "A claim is fully backed when every item of its checklist is done: more than one run, a baseline, an ablation, a matching paper table, confounds checked.", "verdict": "none" if not rows else "yes" if len(complete) == len(rows) else "partly" if complete else "no",
          "line": "No question yet" if not rows else "%d of %d claims fully backed" % (len(complete), len(rows)),
          "rows": [r["id"] for r in rows if not r["complete"]]},
     ]

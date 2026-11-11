@@ -769,8 +769,8 @@ function pageReview() {
   const post = async body => { const r = await rxPost('/api/review', Object.assign({ days }, body)); if (r) { RX.review = r; renderPage(true); } };
   const F = RX.rvFilter, fc = F && R.checks.find(c => c.k === F);
   root.append(h('div', { class: 'rx-rv-checks' }, R.checks.map((c, i) => { const v = RX_VERDICT[c.verdict];
-    return h('button', { class: 'rx-rv-check v-' + c.verdict + (F === c.k ? ' sel' : ''), 'aria-pressed': String(F === c.k), title: 'Show what is behind this', onclick: () => { RX.rvFilter = F === c.k ? null : c.k; renderPage(true); } },
-      h('span', { class: 'rx-rv-q' }, (i + 1) + ' · ' + c.q), h('span', { class: 'rx-rv-v ' + v[2] }, v[0] + ' ' + (c.k === 'paper' && c.verdict === 'partly' ? 'A smaller one' : v[1])), h('span', { class: 'rx-rv-l' }, c.line)); })));
+    return h('button', { class: 'rx-rv-check v-' + c.verdict + (F === c.k ? ' sel' : ''), 'aria-pressed': String(F === c.k), title: (c.help || '') + ' Click to see the questions behind this.', onclick: () => { RX.rvFilter = F === c.k ? null : c.k; renderPage(true); } },
+      h('span', { class: 'rx-rv-q' }, c.q), h('span', { class: 'rx-rv-v ' + v[2] }, v[0] + ' ' + (c.k === 'paper' && c.verdict === 'partly' ? 'For a smaller paper' : v[1])), h('span', { class: 'rx-rv-l' }, c.line)); })));
   // hoped vs supported
   const hopedIn = h('textarea', { class: 'rx-rv-hoped serif', rows: 2, disabled: READONLY, placeholder: 'The best-case conclusion, in one or two sentences. Write it before the results are in.', 'aria-label': 'Hoped conclusion' }, R.hoped || '');
   hopedIn.addEventListener('change', () => post({ hoped: hopedIn.value }));
