@@ -417,3 +417,22 @@ table.tbl { width:100%; border-collapse:collapse; } table.tbl th { text-align:le
 .chip-btn.st-supported { color:var(--verify); border-color:var(--verify); } .chip-btn.st-partial { color:var(--amber-text); border-color:var(--amber); } .chip-btn.st-unsupported { color:var(--red); border-color:var(--red); }
 .ghl { font-size:var(--fs-12); white-space:nowrap; }
 .rx-ev .rx-ta { margin-bottom:0; }
+
+/* S09: math and notation */
+.rx-math.disp { display:block; margin:6px 0; overflow-x:auto; }
+.katex { font-size:1.05em; }
+.rx-coretext .katex { font-size:1em; }
+.rx-nt { border:1px solid var(--border); border-radius:var(--r-md); background:var(--surface); overflow:hidden; }
+.rx-nt-r { display:grid; grid-template-columns:120px minmax(140px,1.2fr) minmax(160px,1.4fr) 48px; gap:var(--s-2) var(--s-3); align-items:center; padding:8px 12px; border-top:1px solid var(--border); }
+.rx-nt-r.head { border-top:0; font:var(--fw-bold) var(--fs-11) var(--font-sans); text-transform:uppercase; letter-spacing:.04em; color:var(--muted); background:var(--paper); }
+.rx-nt-r.bad { box-shadow:inset 3px 0 0 var(--amber); }
+.rx-nt-r.open { background:var(--paper); }
+.rx-nt-sym { background:none; border:0; text-align:left; cursor:pointer; font-size:var(--fs-16); padding:2px 0; overflow:hidden; }
+.rx-nt-x { grid-column:1 / -1; display:flex; flex-direction:column; gap:4px; font-size:var(--fs-13); }
+.rx-nt-x.detail { padding:var(--s-2) 0 var(--s-1); border-top:1px dashed var(--border); }
+.rx-nt-x.detail input { height:30px; flex:1; min-width:180px; border:1px solid var(--border-strong); border-radius:var(--r-sm); padding:2px 8px; background:var(--surface); }
+.rx-nt-issue { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.rx-nt-code { display:flex; gap:6px; flex-wrap:wrap; }
+.rx-code { display:inline-flex; align-items:center; gap:4px; border:1px solid var(--border-strong); border-radius:var(--r-sm); padding:1px 6px; font-size:var(--fs-12); background:var(--paper); }
+.rx-code.sug { border-style:dashed; background:transparent; }
+.xbtn.ok:hover { color:var(--verify); }

@@ -152,7 +152,7 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
-        for name in ("claims", "timeline", "ledger", "tasks", "tree"):   # research views (absent on fixture data)
+        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation"):   # research views (absent on fixture data)
             fn = getattr(e, name, None)
             if fn is not None:
                 try:
@@ -227,6 +227,8 @@ class App:
                 .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
         html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % css.replace("</style", "<\\/style"))
         html = html.replace('<script src="vendor/cytoscape.min.js"></script>', "<script>\n%s\n</script>" % esc_script(vend))
+        # the exported file must work offline as one file: no typesetting library, so formulas show as their TeX source
+        html = html.replace('<link rel="stylesheet" href="vendor/katex/katex.min.css">\n', "").replace('<script src="vendor/katex/katex.min.js"></script>\n', "")
         rjs = (WEB / "research.js").read_text(encoding="utf-8")
         html = html.replace('<script src="research.js"></script>', "<script>\n%s\n</script>" % esc_script(rjs))
         html = html.replace('<script src="app.js"></script>',
@@ -358,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -416,7 +418,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note")
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -442,6 +444,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("add_claim")(txt("text", True), txt("kind") or "claim"), 201)
                 if r == "/claims/remove":
                     return self._json(need("remove_claim")(txt("id", True)))
+                if r == "/notation":
+                    ig = body.get("ignore")
+                    if ig is not None and not isinstance(ig, bool):
+                        raise ApiError(400, "bad_request", "ignore must be true or false")
+                    return self._json(need("set_notation")(txt("symbol", True), txt("meaning"), ig, txt("link"), txt("unlink")))
                 if r == "/note":
                     return self._json(need("set_note")(txt("node", True), txt("caveat"), txt("purpose")))
                 if r == "/feedback":

@@ -180,6 +180,9 @@ class PublicTest(unittest.TestCase):
         self.assertTrue(next(n for n in self.req("GET", base + "/tree", cookie=self.bob)[1]["nodes"] if n["id"] == "tex:tab:acc")["caveat"])
         self.assertEqual(self.req("GET", base + "/thumb?node=tex:tab:acc", cookie=self.bob)[0], 404)
         self.assertEqual(self.req("GET", base + "/evidence?node=tex:tab:acc", cookie=self.alice)[0], 404)
+        s, nt, _ = self.req("GET", base + "/notation", cookie=self.bob)
+        self.assertEqual((s, nt["has_paper"]), (200, True))
+        self.assertEqual(self.req("POST", base + "/notation", {"symbol": "nope", "meaning": "x"}, cookie=self.bob)[0], 404)
         for route in ("/timeline", "/ledger", "/digest"):
             self.assertEqual(self.req("GET", base + route, cookie=self.bob)[0], 200, route)
         s, a, _ = self.req("POST", base + "/ask", {"question": "which claims are unsupported?"}, cookie=self.bob)

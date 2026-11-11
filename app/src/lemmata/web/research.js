@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
+const RX_TABS = { notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 const RX_KIND = { contribution: 'Contribution', question: 'Research question', theorem: 'Theorem', lemma: 'Lemma', proposition: 'Proposition', corollary: 'Corollary', claim: 'Claim', core: 'Core message' };
@@ -17,8 +17,8 @@ function rxTrack(event, extra) {
 async function rxLoad() {
   if (READONLY && !(SNAP && SNAP.claims)) { RX.loaded = true; RX.error = 'This snapshot was made without the research views.'; return; }
   try {
-    const [claims, timeline, ledger, tasks, tree] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree'].map(p => apiGet('/api/' + p)));
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, loaded: true, error: null });
+    const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -70,7 +70,7 @@ function rxSupportRow(c, s) {
   return h('div', { class: 'rx-sup' + (suggested ? ' sug' : '') },
     h('div', { class: 'rx-sup-h' },
       h('span', { class: 'rx-rel' }, suggested ? 'Suggested' : rel), name,
-      s.detail ? h('span', { class: 'muted' }, ' · ' + trunc(s.detail, 90)) : null, h('span', { class: 'grow' }), rxWhere(s.loc),
+      s.detail ? h('span', { class: 'muted' }, ' · ', rxMath(s.detail)) : null, h('span', { class: 'grow' }), rxWhere(s.loc),
       suggested ? [h('button', { class: 'btn sm primary', disabled: READONLY, onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: true }); if (r) { RX.claims = r; rxTrack('claim_linked'); renderPage(true); renderLeft(); } } }, 'Yes, this backs it'),
         h('button', { class: 'btn sm', disabled: READONLY, onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: false }); if (r) { RX.claims = r; renderPage(true); } } }, 'No')]
         : (s.how === 'manual' || s.node_id) && !READONLY ? h('button', { class: 'linkbtn small', title: 'Remove this link', onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: false }); if (r) { RX.claims = r; renderPage(true); renderLeft(); } } }, 'Unlink') : null),
@@ -109,7 +109,7 @@ function rxClaimCard(c) {
       h('span', { class: 'caret' }, open ? '▾' : '▸'), h('span', { class: 'rx-label' }, c.label), rxChip(c.status),
       c.recheck ? plainChip('↻', 'Recheck', 'look') : null, c.state === 'proposed' ? plainChip('✎', 'Draft', 'proposed') : null, c.manual ? plainChip('+', 'Yours', 'plain') : null,
       h('span', { class: 'grow' }), h('span', { class: 'muted small' }, RX_KIND[c.kind] || '')),
-    h('div', { class: 'rx-text serif' }, c.text),
+    h('div', { class: 'rx-text serif' }, rxMath(c.text)),
     open ? h('div', { class: 'rx-body' },
       c.loc ? h('div', { class: 'muted small' }, 'In the paper: ', rxWhere(c.loc)) : null,
       c.recheck ? h('div', { class: 'rx-warn' }, '↻ Something behind this claim changed: ' + c.recheck) : null,
@@ -166,11 +166,11 @@ function pageClaims() {
 }
 function rxCoreCard(core) {
   const cc = RX.claims.counts;
-  const full = h('details', { class: 'details' }, h('summary', null, 'Abstract'), h('div', { class: 'serif' }, core.abstract || ''));
+  const full = h('details', { class: 'details' }, h('summary', null, 'Abstract'), h('div', { class: 'serif' }, rxMath(core.abstract || '')));
   return h('section', { class: 'rx-core st-' + core.status },
     h('div', { class: 'rx-core-h' }, h('span', { class: 'rx-label' }, 'Core message'), rxChip(core.status), core.recheck ? plainChip('↻', 'Recheck', 'look') : null, h('span', { class: 'grow' }),
       READONLY ? null : h('button', { class: 'linkbtn small', onclick: () => rxEditDialog(core) }, 'Reword'), rxWhere(core.loc)),
-    h('div', { class: 'rx-core-t serif' }, core.text),
+    h('div', { class: 'rx-core-t serif' }, rxMath(core.text)),
     h('div', { class: 'rx-meter', role: 'img', 'aria-label': cc.supported + ' supported, ' + cc.partial + ' partly, ' + cc.unsupported + ' not supported' },
       cc.total ? [['supported', cc.supported], ['partial', cc.partial], ['unsupported', cc.unsupported]].filter(x => x[1]).map(([k, n]) => h('span', { class: 'seg ' + k, style: 'flex:' + n }, String(n))) : null),
     core.abstract ? full : null);
@@ -215,7 +215,7 @@ function rxTreeLayout(T) {
   const coreW = 620, pad = 64;
   const lo = Math.min(minX, P.core.x - coreW / 2), hi = Math.max(maxX, P.core.x + coreW / 2);
   for (const id in P) P[id].x += pad - lo;
-  return { P, N, W: hi - lo + pad * 2, H: maxY + 58, ground, coreW };
+  return { P, N, W: hi - lo + pad * 2, H: Math.max(maxY + 58, ground + 44), ground, coreW };
 }
 function rxTree(opts) {
   const T = RX.tree, L = rxTreeLayout(T), { P, N } = L;
@@ -249,7 +249,7 @@ function rxTree(opts) {
     const inner = sv('g', { class: 'sprout' }); g.append(inner);
     if (n.layer === 'core') {
       const fo = sv('foreignObject', { x: -L.coreW / 2, y: -118, width: L.coreW, height: 96 });
-      fo.append(h('div', { class: 'rx-coretext serif', title: READONLY ? '' : 'Click to reword' }, n.title || 'No core message found. Click to write it.'));
+      fo.append(h('div', { class: 'rx-coretext serif', title: READONLY ? '' : 'Click to reword' }, h('span', null, rxMath(n.title || 'No core message found. Click to write it.'))));
       inner.append(fo, sv('circle', { r: 13, class: 'dot' }), n.status === 'partial' ? sv('path', { d: half(13), class: 'halfdot' }) : null, n.recheck ? sv('circle', { r: 18, class: 'ring' }) : null);
     } else if (n.layer === 'claim') {
       const r = n.depth > 1 ? 11 : 14;
@@ -313,7 +313,7 @@ function rxEvidenceCard(nodeId, onChange) {
       x.last ? h('span', { class: 'muted small mono' }, ' ' + x.last.short + ' · ' + dmon(x.last.time)) : null);
     let pic = null;
     if (d.image && !READONLY) { const src = apiUrl('/api/thumb?node=' + encodeURIComponent(nodeId)); pic = h('a', { href: src, target: '_blank', rel: 'noopener noreferrer', class: 'rx-ev-pic' }, h('img', { src, alt: n.name, onerror: ev => { ev.target.closest('a').replaceWith(h('div', { class: 'rx-ev-nopic muted' }, 'No preview')); } })); }
-    else if (d.table) pic = h('div', { class: 'rx-ev-tablewrap' }, h('table', { class: 'tbl rx-ev-table' }, h('tbody', null, d.table.map((r, i) => h('tr', null, r.map(c => h(i ? 'td' : 'th', null, c)))))));
+    else if (d.table) pic = h('div', { class: 'rx-ev-tablewrap' }, h('table', { class: 'tbl rx-ev-table' }, h('tbody', null, d.table.map((r, i) => h('tr', null, r.map(c => h(i ? 'td' : 'th', null, rxMath(c))))))));
     const cav = h('textarea', { rows: '2', class: 'rx-ta', 'aria-label': 'Caveat', placeholder: 'Caveat: what a reader must keep in mind' }); cav.value = d.note.caveat || '';
     const pur = h('textarea', { rows: '2', class: 'rx-ta', 'aria-label': 'Meant to show', placeholder: 'Meant to show: the one thing this is in the paper for' }); pur.value = d.note.purpose || '';
     const linked = d.connected;
@@ -322,7 +322,7 @@ function rxEvidenceCard(nodeId, onChange) {
         d.stale ? plainChip('↻', 'Out of date', 'look') : null, d.note.caveat ? plainChip('!', 'Caveat', 'look') : null, h('span', { class: 'grow' }),
         d.self ? gh(d.self) : null, rxWhere(n.loc, n.repo), h('button', { class: 'linkbtn small', onclick: () => openNode(nodeId) }, 'Open')),
       h('div', { class: 'rx-ev-b' }, pic, h('div', { class: 'rx-ev-r' },
-        d.caption ? h('div', { class: 'serif rx-ev-cap' }, d.caption) : null,
+        d.caption ? h('div', { class: 'serif rx-ev-cap' }, rxMath(d.caption)) : null,
         d.backs.length ? h('div', { class: 'rx-ev-backs' }, d.backs.map(b => h('button', { class: 'chip-btn st-' + b.status, title: b.text, onclick: () => { RX.sel = b.id; RX.view = 'tree'; openTab('claims'); renderPage(true); } }, '◆ ' + b.label))) : h('div', { class: 'muted small' }, 'Backs no claim yet.'),
         d.chain.length ? h('div', { class: 'rx-ev-chain' }, d.chain.map(row))
           : !linked ? h('div', { class: 'rx-warn' }, d.typed_by_hand || n.kind === 'table' ? 'No result file found behind it. Put “% source: code:results/file.csv” above it in the LaTeX.' : 'No script or result file found that makes it.') : null,
@@ -511,7 +511,7 @@ function rxAnswerCard(a) {
   return h('article', { class: 'card rx-ans' },
     h('div', { class: 'rx-ans-h' }, h('button', { class: 'linkbtn', onclick: go }, h('b', null, a.title)), a.status ? rxChip(a.status) : null, a.recheck ? plainChip('↻', 'Recheck', 'look') : null,
       h('span', { class: 'grow' }), h('span', { class: 'muted small' }, { claim: 'Claim', item: 'In the paper', result: 'Result file', step: 'Timeline', task: 'Task', impact: 'Impact', check: 'Check' }[a.type] || '')),
-    a.text ? h('div', null, a.text) : null,
+    a.text ? h('div', null, rxMath(a.text)) : null,
     a.support && a.support.length ? h('ul', { class: 'rx-ans-l' }, a.support.map(s => h('li', { class: s.how === 'suggested' ? 'muted' : '' }, (s.how === 'suggested' ? 'suggested: ' : s.relation + ': '), s.node_id ? rxNodeBtn(s.node_id, s.name) : s.name, s.how !== 'suggested' && s.traced === false ? h('span', { class: 'muted' }, ' (not traced)') : null))) : (a.type === 'claim' ? h('div', { class: 'muted' }, 'Nothing backs it yet.') : null),
     a.issues && a.issues.length ? a.issues.map(i => h('div', { class: 'rx-warn' }, '! ' + i)) : null,
     a.nodes && a.nodes.length ? h('div', { class: 'small' }, a.nodes.map((n, i) => [i ? ', ' : null, rxNodeBtn(n)])) : null,
@@ -546,13 +546,93 @@ function pageAsk() {
   return root;
 }
 
+
+/* ---------- Math: TeX between $...$ or \[...\] is typeset with the bundled KaTeX (no network). Falls back to the source. ---------- */
+const RX_MATH_RE = /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$[^$]+?\$)/;
+function rxTex(tex, display) {
+  const el = h('span', { class: display ? 'rx-math disp' : 'rx-math' });
+  if (typeof katex === 'undefined') { el.textContent = tex; return el; }
+  try { katex.render(tex, el, { throwOnError: false, displayMode: !!display, macros: Object.assign({}, (RX.claims && RX.claims.macros) || {}), strict: 'ignore', trust: false, maxExpand: 300, errorColor: '#8a5a00' }); }
+  catch (e) { el.textContent = tex; }
+  return el;
+}
+function rxMath(text) {
+  if (!text || (text.indexOf('$') < 0 && text.indexOf('\\[') < 0 && text.indexOf('\\(') < 0)) return text || '';
+  return String(text).split(RX_MATH_RE).map((p, i) => {
+    if (!(i % 2)) return p;
+    if (p.startsWith('$$')) return rxTex(p.slice(2, -2), true);
+    if (p.startsWith('\\[')) return rxTex(p.slice(2, -2), true);
+    if (p.startsWith('\\(')) return rxTex(p.slice(2, -2), false);
+    return rxTex(p.slice(1, -1), false);
+  });
+}
+
+/* ---------- Notation: glossary of symbols, what each means, where meanings disagree, and the name in the code ---------- */
+function rxCodeChip(sym, c) {
+  const sug = c.how === 'suggested';
+  const post = async body => { const r = await rxPost('/api/notation', Object.assign({ symbol: sym.key }, body)); if (r) { RX.notation = r; renderPage(true); renderLeft(); } };
+  return h('span', { class: 'rx-code' + (sug ? ' sug' : ''), title: c.kind + ' in ' + c.path + (c.line ? ':' + c.line : '') },
+    h('span', { class: 'mono' }, c.name + (c.value != null ? ' = ' + c.value : '')),
+    c.github ? h('a', { class: 'ghl', href: c.github, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Open on GitHub' }, '↗') : null,
+    READONLY ? null : sug ? [h('button', { class: 'xbtn ok', title: 'Yes, same thing', 'aria-label': 'Accept ' + c.name, onclick: () => post({ link: c.id }) }, '✓'), h('button', { class: 'xbtn', title: 'No', 'aria-label': 'Reject ' + c.name, onclick: () => post({ unlink: c.id }) }, '×')]
+      : h('button', { class: 'xbtn', title: 'Unlink', 'aria-label': 'Unlink ' + c.name, onclick: () => post({ unlink: c.id }) }, '×'));
+}
+function rxIssueLine(sym, x) {
+  const where = l => rxWhere(l);
+  if (x.kind === 'conflict') return h('div', { class: 'rx-nt-issue' }, plainChip('≠', 'Two meanings', 'fix'), x.meanings.map((m, i) => [i ? h('span', { class: 'muted' }, ' ≠ ') : ' ', h('b', null, m.text), ' ', where(m.loc)]));
+  if (x.kind === 'synonym') return h('div', { class: 'rx-nt-issue' }, plainChip('=', 'Two symbols', 'look'), ' ', x.others.map((k, i) => [i ? ', ' : null, rxTex(k)]), h('span', { class: 'muted' }, ' also ' + (x.others.length > 1 ? 'mean' : 'means') + ' “' + x.meaning + '”'));
+  if (x.kind === 'value') return h('div', { class: 'rx-nt-issue' }, plainChip('≠', x.confirmed ? 'Paper ≠ code' : 'Paper ≠ code?', x.confirmed ? 'fix' : 'look'), ' paper ', h('b', { class: 'mono' }, x.paper.value), ' ', where(x.paper.loc),
+    h('span', { class: 'muted' }, ' · code '), h('b', { class: 'mono' }, x.code.name + ' = ' + x.code.value), x.code.github ? [' ', h('a', { class: 'ghl', href: x.code.github, target: '_blank', rel: 'noopener noreferrer' }, '↗')] : null);
+  if (x.kind === 'variant') return h('div', { class: 'rx-nt-issue' }, plainChip('~', 'Also written', 'look'), ' ', x.others.map(k => rxTex(k)));
+  return null;
+}
+function pageNotation() {
+  const nr = rxNotReady('Notation'); if (nr) return nr;
+  S.outline = [];
+  const N = RX.notation;
+  const root = doc(h('h1', { class: 'ptitle' }, 'Notation'));
+  if (!N || !N.has_paper) return root.append(emptyState('𝑥', 'No paper connected', 'The glossary is read from the math in the LaTeX source.')), root;
+  const F = RX.ntFilter || 'all', c = N.counts;
+  const live = N.symbols.filter(s => !s.ignored);
+  const pass = s => F === 'all' ? !s.ignored : F === 'issues' ? s.issues.length && !s.ignored : F === 'code' ? s.code.length && !s.ignored : F === 'undefined' ? !s.meaning && !s.ignored : s.ignored;
+  root.append(h('div', { class: 'fchips' }, [['all', 'All', live.length], ['issues', 'Inconsistent', live.filter(s => s.issues.length).length], ['code', 'In code', live.filter(s => s.code.length).length], ['undefined', 'No meaning found', live.filter(s => !s.meaning).length], ['ignored', 'Hidden', N.symbols.length - live.length]]
+    .filter(x => x[0] !== 'ignored' || x[2]).map(([k, l, n]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.ntFilter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, n)))));
+  const rows = N.symbols.filter(pass);
+  if (!rows.length) return root.append(h('div', { class: 'muted' }, N.symbols.length ? 'None.' : 'No symbols found in the math.')), root;
+  const tb = h('div', { class: 'rx-nt' }, h('div', { class: 'rx-nt-r head' }, h('span', null, 'Symbol'), h('span', null, 'Means'), h('span', null, 'In the code'), h('span', null, 'Used')));
+  for (const s of rows) {
+    const open = RX.ntOpen === s.key;
+    const post = async body => { const r = await rxPost('/api/notation', Object.assign({ symbol: s.key }, body)); if (r) { RX.notation = r; renderPage(true); renderLeft(); } };
+    tb.append(h('div', { class: 'rx-nt-r' + (s.issues.length ? ' bad' : '') + (open ? ' open' : '') },
+      h('button', { class: 'rx-nt-sym', 'aria-expanded': String(open), onclick: () => { RX.ntOpen = open ? null : s.key; renderPage(true); } }, rxTex(s.tex)),
+      h('span', { class: s.meaning ? '' : 'muted' }, s.meaning || '—', s.meaning_by === 'you' ? h('span', { class: 'muted small' }, ' ✎') : null),
+      h('span', { class: 'rx-nt-code' }, s.code.length ? s.code.map(cd => rxCodeChip(s, cd)) : h('span', { class: 'muted' }, '—')),
+      h('span', { class: 'muted small mono' }, s.uses + '×'),
+      s.issues.length ? h('div', { class: 'rx-nt-x' }, s.issues.map(x => rxIssueLine(s, x))) : null,
+      open ? rxNotationDetail(s, post) : null));
+  }
+  root.append(tb);
+  return root;
+}
+function rxNotationDetail(s, post) {
+  const inp = h('input', { type: 'text', value: s.meaning || '', 'aria-label': 'Meaning', placeholder: 'What it means, in a few words' });
+  return h('div', { class: 'rx-nt-x detail' },
+    s.meanings.length ? h('div', null, s.meanings.map(m => h('div', { class: 'rx-ev-row' }, h('span', null, '“' + m.text + '”'), rxWhere(m.loc), m.in_appendix ? h('span', { class: 'tag' }, 'Appendix') : null,
+      READONLY || m.text === s.meaning ? null : h('button', { class: 'linkbtn small', onclick: () => post({ meaning: m.text }) }, 'Use this')))) : h('div', { class: 'muted small' }, 'No sentence found that says what it is.'),
+    s.values.length ? h('div', { class: 'small' }, h('span', { class: 'muted' }, 'Stated values: '), s.values.map((v, i) => [i ? ', ' : null, h('b', { class: 'mono' }, v.value), ' ', rxWhere(v.loc)])) : null,
+    s.first ? h('div', { class: 'small muted' }, 'First used ', rxWhere(s.first), ' · on ' + plural(s.lines, 'line') + (s.appendix_only ? ' · appendix only' : '')) : null,
+    READONLY ? null : h('div', { class: 'btnrow' }, inp, h('button', { class: 'btn', onclick: () => post({ meaning: inp.value }) }, 'Save meaning'),
+      h('button', { class: 'linkbtn', onclick: () => post({ ignore: !s.ignored }) }, s.ignored ? 'Show again' : 'Hide (not a symbol)')));
+}
+
 /* ---------- wiring into the shell ---------- */
-const RX_PAGES = { claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, tasks: pageTasks, ask: pageAsk };
+const RX_PAGES = { notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, tasks: pageTasks, ask: pageAsk };
 function rxNavRows() {
   const cc = RX.claims && RX.claims.counts, lc = RX.ledger && RX.ledger.counts, tc = RX.tasks && RX.tasks.counts;
   const act = k => { const t = S.tabs[S.active]; return !!t && t.k === k; };
   return [
     navRow('Claims', '◆', () => openTab('claims'), cc ? (cc.unsupported + cc.partial) || null : null, act('claims')),
+    navRow('Notation', '𝑥', () => openTab('notation'), RX.notation && RX.notation.counts ? RX.notation.issues.length || null : null, act('notation')),
     navRow('Timeline', '⚑', () => openTab('timeline'), null, act('timeline')),
     navRow('Experiments', '▦', () => openTab('experiments'), lc ? lc.stale || null : null, act('experiments')),
     navRow('Tasks', '☑', () => openTab('tasks'), tc ? tc.open || null : null, act('tasks')),

@@ -1934,7 +1934,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'claims', 'timeline', 'experiments', 'tasks', 'ask'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'claims', 'timeline', 'experiments', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (!S.tabs.length) { S.tabs = [{ k: 'claims' }, { k: 'changes' }, { k: 'graph' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
@@ -1949,13 +1949,13 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History';
-    case 'claims': case 'timeline': case 'experiments': case 'tasks': case 'ask': return RX_TABS[t.k][1];
+    case 'claims': case 'timeline': case 'experiments': case 'tasks': case 'ask': case 'notation': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
   return '';
 }
-const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?' };
+const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?', notation: '𝑥' };
 function openTab(k, id, opts) {
   opts = opts || {};
   const key = tabKey({ k, id });
@@ -2326,7 +2326,7 @@ function currentItemCmd(state) {
 function palette() {
   const it = S.tabs[S.active] && S.tabs[S.active].k === 'item' ? M.byId.get(S.tabs[S.active].id) : null;
   const cmds = [
-    { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
+    { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Notation', run: () => openTab('notation') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
     { label: 'Go to Changes', run: () => openTab('changes') }, { label: 'Go to Graph', run: () => openTab('graph') }, { label: 'Go to Checks', run: () => openTab('checks') }, { label: 'Go to History', run: () => openTab('history') },
     { label: 'Open item…', hint: 'Ctrl+O', run: () => quickSwitcher() },
     { label: 'Mark everything as looked at', run: () => markAllDialog(), disabled: READONLY, reason: 'Read-only snapshot' },

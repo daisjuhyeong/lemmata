@@ -35,8 +35,18 @@ NUM_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?%?(?![\w.])")
 SUPPORT_REL = ("traces_to", "includes", "generated_by", "value_match", "produced_by", "executes", "reads", "imports")
 
 
-def detex(s):
-    """LaTeX -> plain text good enough for a one-line statement."""
+DISPLAY_RE = re.compile(r"\\begin\{(equation|align|gather|multline|eqnarray|alignat|flalign|displaymath)\*?\}(?:\{\d+\})?(.+?)\\end\{\1\*?\}", re.S)
+MATH_SPLIT_RE = re.compile(r"(\$\$.+?\$\$|(?<!\\)\$.+?(?<!\\)\$|\\\(.+?\\\)|\\\[.+?\\\])", re.S)
+
+
+def _display(m):
+    body = re.sub(r"\\(?:label|tag)\{[^}]*\}|\\nonumber|\\notag", "", m.group(2)).strip()
+    if m.group(1) in ("align", "eqnarray", "alignat", "flalign") or "\\\\" in body:
+        body = "\\begin{aligned}%s\\end{aligned}" % body.replace("&=&", "&=")
+    return "\\[" + body + "\\]"
+
+
+def _detex_text(s):
     s = re.sub(r"\\label\{[^}]*\}", "", s)
     s = re.sub(r"\\(?:cite[a-z]*|nocite)\*?(?:\[[^\]]*\])*\{[^}]*\}", "", s)
     s = re.sub(r"\\(?:ref|cref|Cref|autoref|eqref)\*?\{([^}]*)\}", lambda m: "[" + m.group(1) + "]", s)
@@ -45,8 +55,32 @@ def detex(s):
     s = re.sub(r"\\item\b", " ", s)
     s = s.replace("~", " ").replace("\\%", "%").replace("\\&", "&").replace("\\_", "_").replace("``", '"').replace("''", '"')
     s = re.sub(r"\\[,;:! ]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+def detex(s):
+    """LaTeX -> plain text good enough for a one-line statement. Math is kept as TeX between its delimiters ($...$, \\[...\\])
+    so the app can typeset it; display environments become \\[...\\]."""
+    s = DISPLAY_RE.sub(_display, s or "")
+    parts = MATH_SPLIT_RE.split(s)
+    for i, p in enumerate(parts):
+        if i % 2:      # math
+            parts[i] = re.sub(r"\s+", " ", re.sub(r"\\label\{[^}]*\}", "", p))
+        else:
+            parts[i] = _detex_text(p)
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def cut(text, n):
+    """Truncate without cutting a formula in half."""
+    if len(text) <= n:
+        return text
+    t = text[:n]
+    for m in MATH_SPLIT_RE.finditer(text):
+        if m.start() < n < m.end():
+            t = text[:m.start()]
+            break
+    return t.rstrip() + "…"
 
 
 TITLE_RE = re.compile(r"\\title(?:\[[^\]]*\])?\{((?:[^{}]|\{[^{}]*\})*)\}")
@@ -91,7 +125,7 @@ def pick_core(abstract, title="", contrib_words=()):
 
 
 def words(s):
-    return {w for w in re.findall(r"[a-z][a-z0-9-]{2,}", detex(s).lower()) if w not in STOP}
+    return {w for w in re.findall(r"[a-z][a-z0-9-]{2,}", MATH_SPLIT_RE.sub(" ", detex(s)).lower()) if w not in STOP}
 
 
 def _canon_env(name, newthm):
@@ -129,7 +163,7 @@ def _blocks(P):
                 labels = lx.LABEL_RE.findall(body)
                 refs = [r.strip() for grp in lx.REF_RE.findall(body) for r in grp.split(",") if r.strip()]
                 blk = {"kind": kind, "begin": b, "end": i, "title": detex(opt) if opt else None, "label": labels[0] if labels else None,
-                       "refs": refs, "text": detex(re.sub(r"^\s*\[[^\]]*\]", "", body.split("}", 1)[1] if "}" in body else body))[:600],
+                       "refs": refs, "text": cut(detex(re.sub(r"^\s*\[[^\]]*\]", "", body.split("}", 1)[1] if "}" in body else body)), 600),
                        "in_appendix": P.appendix_idx is not None and b > P.appendix_idx, "raw_head": lines[b].code}
                 if kind != "proof":
                     counters[kind] = counters.get(kind, 0) + 1
@@ -316,7 +350,7 @@ def draft(G, alarms=None, findings=None):
         contrib_words = set()
         for it in _contribution_items(P):
             contrib_words |= words(it["text"])
-        claims.append({"id": "core", "kind": "core", "label": "Core message", "text": pick_core(full, title, contrib_words)[:600],
+        claims.append({"id": "core", "kind": "core", "label": "Core message", "text": cut(pick_core(full, title, contrib_words), 600),
                        "abstract": full[:4000], "title": title[:300], "loc": th["loc"], "support": [], "children": []})
 
     # --- contributions
@@ -327,7 +361,7 @@ def draft(G, alarms=None, findings=None):
             if nid and nid not in have:
                 have.add(nid)
                 sup.append(_support_for_node(ctx, nid, "evidence", "detected"))
-        claims.append({"id": "contrib:%d" % k, "kind": "contribution", "label": "Contribution %d" % k, "text": it["text"][:600],
+        claims.append({"id": "contrib:%d" % k, "kind": "contribution", "label": "Contribution %d" % k, "text": cut(it["text"], 600),
                        "loc": _loc(P, it["begin"], it["end"]), "support": sup, "_refs": it["refs"], "_have": have})
 
     # --- research questions
@@ -375,7 +409,7 @@ def draft(G, alarms=None, findings=None):
             pr = next((p for p in proofs if p["begin"] <= i <= p["end"] or 0 <= p["begin"] - i <= 3), None)
             where = i
         if pr is not None:
-            sup.append({"node_id": None, "kind": "proof", "name": "Proof" + (" (appendix)" if pr["in_appendix"] else ""), "detail": pr["text"][:160],
+            sup.append({"node_id": None, "kind": "proof", "name": "Proof" + (" (appendix)" if pr["in_appendix"] else ""), "detail": cut(pr["text"], 160),
                         "relation": "proof", "how": "detected", "loc": _loc(P, pr["begin"], pr["end"]), "stale": None, "traced": True})
         elif where is not None:
             sup.append({"node_id": None, "kind": "proof", "name": "Proof section", "detail": detex(P.lines[where].code)[:160], "relation": "proof",
@@ -390,7 +424,7 @@ def draft(G, alarms=None, findings=None):
                     issues.append("Refers to [%s], which is not defined." % r)
                 continue
             dname = "%s %d" % ((FORMAL.get(dep["kind"]) or PREMISE[dep["kind"]]), dep["number"])
-            sup.append({"node_id": None, "kind": dep["kind"], "name": dname, "detail": dep["text"][:160],
+            sup.append({"node_id": None, "kind": dep["kind"], "name": dname, "detail": cut(dep["text"], 160),
                         "relation": "assumes" if dep["kind"] in PREMISE else "uses", "how": "detected", "loc": _loc(P, dep["begin"], dep["end"]),
                         "stale": None, "traced": True, "claim_id": "stmt:" + dep["label"] if dep["kind"] in FORMAL else None})
         claims.append({"id": cid, "kind": b["kind"], "label": name, "text": b["text"], "loc": _loc(P, b["begin"], b["end"]),
@@ -520,7 +554,7 @@ def table_rows(P, node_id, max_rows=14, max_cols=9):
     for raw in re.split(r"\\\\(?:\[[^\]]*\])?", inner):
         if not raw.strip():
             continue
-        cells = [detex(re.sub(r"\\multi(?:column|row)\{[^}]*\}\{[^}]*\}\{((?:[^{}]|\{[^{}]*\})*)\}", r"\1", c)).replace("$", "") for c in re.split(r"(?<!\\)&", raw)]
+        cells = [detex(re.sub(r"\\multi(?:column|row)\{[^}]*\}\{[^}]*\}\{((?:[^{}]|\{[^{}]*\})*)\}", r"\1", c)) for c in re.split(r"(?<!\\)&", raw)]
         rows.append([c[:40] for c in cells[:max_cols]])
         if len(rows) >= max_rows:
             break

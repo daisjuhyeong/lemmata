@@ -574,6 +574,30 @@ def t_add_feedback(ctx, args):
     return "Added %d task(s).\n%s" % (len(new), "\n".join(lines)), {"added": new}, "Nothing to narrow."
 
 
+def t_notation(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.notation()
+    lines = []
+    for s_ in d["symbols"]:
+        if s_["ignored"]:
+            continue
+        code = ", ".join("%s%s (%s:%s, %s)" % (c["name"], " = %s" % c["value"] if c["value"] is not None else "", c["path"], c["line"],
+                                              "confirmed" if c["how"] == "you" else "suggested") for c in s_["code"])
+        lines.append("%s · %s · used %d times%s%s" % (s_["key"], s_["meaning"] or "(no meaning found)", s_["uses"], _where(s_["first"]), " · code: " + code if code else ""))
+        for x in s_["issues"]:
+            if x["kind"] == "conflict":
+                lines.append("    TWO MEANINGS: " + " vs ".join("'%s'%s" % (m["text"], _where(m["loc"])) for m in x["meanings"]))
+            elif x["kind"] == "synonym":
+                lines.append("    SAME MEANING AS %s ('%s')" % (", ".join(x["others"]), x["meaning"]))
+            elif x["kind"] == "value":
+                lines.append("    PAPER %s%s vs CODE %s = %s (%s:%s)%s" % (x["paper"]["value"], _where(x["paper"]["loc"]), x["code"]["name"], x["code"]["value"],
+                                                                         x["code"]["path"], x["code"]["line"], "" if x["confirmed"] else " — link is only suggested"))
+    c = d["counts"]
+    head = ("%d symbols, %d with a meaning found in the text, %d inconsistencies. Meanings are picked by rules from sentences such as "
+            "'where w is the window size'; code names marked 'suggested' are guesses from the wording." % (c["symbols"], c["defined"], c["issues"]))
+    return head + "\n" + "\n".join(lines), d, "Nothing to narrow."
+
+
 _PROJECT_PROP = {"type": "string", "description": "Project id, project name, or GitHub repo name (see list_projects)."}
 
 
@@ -666,6 +690,11 @@ TOOLS = [
      "inputSchema": _schema({"project": _PROJECT_PROP, "text": {"type": "string", "description": "The feedback, one point per line or bullet."}, "source": {"type": "string", "description": "e.g. 'Advisor meeting 10 Nov'"}},
                             ["project", "text"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
+    {"name": "notation", "fn": t_notation, "title": "Notation glossary",
+     "description": "Glossary of the symbols in the paper's math: what each means (from the surrounding sentences), where one symbol is given "
+                    "two meanings or one meaning two symbols, the matching names in the code (parameters, variables, options, settings), and "
+                    "values that differ between paper and code. Use it before editing math or renaming things in code.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
 ]
 _BY_NAME = {t["name"]: t for t in TOOLS}
 

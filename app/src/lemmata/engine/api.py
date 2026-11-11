@@ -8,6 +8,7 @@ from . import alarms as alarmsmod
 from . import analyze as analyzemod
 from . import checks as checksmod
 from . import claims as claimsmod
+from . import notation as notationmod
 from . import process as processmod
 from . import graph as graphmod
 from . import history as historymod
@@ -229,6 +230,7 @@ class Engine:
     def claims(self):
         s = self._ensure()
         doc = claimsmod.build(s["G"], s["alarms"], s["findings"], claimsmod.load(self.hub))
+        doc["macros"] = notationmod.macros(s["G"].paper.lines) if s["G"].paper is not None else {}
         # a result file older than the code or settings behind it makes every claim resting on it a recheck
         stale = {r["node_id"]: r["newer"][0]["name"] for r in processmod.ledger(s["G"].nodes, s["G"].edge_list(), s["events"])["rows"]
                  if r["status"] == "stale"}
@@ -419,6 +421,24 @@ class Engine:
             d["notes"].pop(node_id, None)
         self.hub.write_json("notes.json", d)
         return self.evidence(node_id)
+
+    # ------------------------------------------------------------------ notation
+    def notation(self):
+        s = self._ensure()
+        cache = getattr(self, "_nt_cache", None)
+        st = notationmod.load(self.hub)
+        key = (id(s["G"]), repr(sorted(st["entries"].items())))
+        if cache is None or cache[0] != key:
+            cache = (key, notationmod.build(s["G"].paper, s["G"].nodes, s["trees"], st, self._github()))
+            self._nt_cache = cache
+        return cache[1]
+
+    def set_notation(self, symbol, meaning=None, ignore=None, link=None, unlink=None):
+        known = {i["key"] for i in self.notation()["symbols"]}
+        st = notationmod.load(self.hub)
+        notationmod.decide(st, known, symbol, meaning, ignore, link, unlink)
+        self.hub.write_json("notation.json", st)
+        return self.notation()
 
     def _claim_ids(self):
         d = self.claims()

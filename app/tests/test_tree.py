@@ -25,3 +25,24 @@ class CoreTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotationTest(unittest.TestCase):
+    def test_symbols(self):
+        from lemmata.engine.notation import symbols
+        keys = lambda t, m=(): [k for k, _, _ in symbols(t, m)]
+        self.assertEqual(keys(r"\mathcal{L}_{\text{rec}}(\theta) + \lambda \bm{x}_t"), [r"\mathcal{L}_{\mathrm{rec}}", r"\theta", r"\lambda", r"\mathbf{x}", "t"])
+        self.assertEqual(keys(r"\frac{1}{\sqrt{n}} \sum_i \log p"), ["n", "i", "p"])
+        self.assertEqual(keys(r"\Loss + F_{PA}", {r"\Loss": "x"}), [r"\Loss", r"F_{\mathrm{PA}}"])
+
+    def test_same_meaning_and_code_tokens(self):
+        from lemmata.engine.notation import _same, _tokens
+        self.assertTrue(_same("segment length", "length of an anomaly segment"))
+        self.assertFalse(_same("window size", "weight vector"))
+        self.assertEqual(_tokens("lr"), ["learning", "rate"])
+        self.assertEqual(_tokens("windowSize"), ["window", "size"])
+
+    def test_detex_keeps_math(self):
+        from lemmata.engine.claims import cut, detex
+        self.assertEqual(detex(r"Loss \textbf{is} $\mathbf{x}~+ 1$ \cite{a}."), r"Loss is $\mathbf{x}~+ 1$ .")
+        self.assertEqual(cut("abc $x+y$ def", 6), "abc…")
