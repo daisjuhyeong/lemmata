@@ -280,6 +280,8 @@ class MapTest(unittest.TestCase):
         now = datetime(2026, 10, 13, tzinfo=timezone.utc)
         r = self.e.review(30, now)
         self.assertEqual([(c["k"], c["verdict"]) for c in r["checks"]], [("moving", "yes"), ("ahead", "yes"), ("paper", "no")])
+        self.assertEqual([(b["name"], b["ahead"], b["tie"], b["behind"], b["verdict"]) for b in r["baselines"]], [("ADWIN", 1, 1, 0, "ahead"), ("DDM", 1, 1, 0, "ahead")])
+        self.assertEqual(r["checks"][1]["line"], "Ahead of 2 of 2 baselines")
         self.assertEqual(self.e.review(1, now)["checks"][0]["line"], "1 of 3 questions moved in 1 day")
         q = {x["label"]: x for x in r["questions"]}
         self.assertEqual([(c["k"], c["state"]) for c in q["H1"]["checklist"]],

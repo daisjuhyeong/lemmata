@@ -140,6 +140,29 @@ def build(E, store, days=30, now=None):
                      "complete": bool(counted) and all(c["state"] == "done" for c in counted) and bool(s["experiments"]),
                      "started": bool(s["experiments"]), "trend": trend, "last": last, "experiments": len(s["experiments"]),
                      "ahead": states.count("ahead"), "behind": states.count("behind")})
+    # ours against each baseline, over every experiment that has both
+    base_key = re.sub(r"[^a-z0-9]+", "", extends["name"].lower()) if extends else None
+    base_keys = {re.sub(r"[^a-z0-9]+", "", n.lower()) for n in ([extends["name"]] + extends.get("aliases", []))} if extends else set()
+    bl, done = {}, set()
+    for s in E["sections"]:
+        for x in s["experiments"]:
+            sm = x.get("summary") or {}
+            if x["id"] in done or x.get("tuning") or x.get("type") in ("ablation", "sensitivity") or not sm.get("vs"):      # variants of ours are not baselines
+                continue
+            done.add(x["id"])
+            for v in sm["vs"]:
+                key = re.sub(r"[^a-z0-9]+", "", v["label"].lower())
+                key = base_key if key in base_keys else key
+                b = bl.setdefault(key, {"name": extends["name"] if key == base_key else v["label"], "base": key == base_key, "ahead": 0, "behind": 0, "tie": 0, "experiments": []})
+                st = "ahead" if v["gap"] > 0 else "behind" if v["gap"] < 0 else "tie"
+                b[st] += 1
+                b["experiments"].append({"id": x["id"], "name": x["name"], "state": st, "gap": v["gap"], "metric": sm.get("measure") or sm.get("metric"),
+                                         "question": s["label"] if s["kind"] != "other" else None})
+    baselines = sorted(bl.values(), key=lambda b: (not b["base"], -(b["ahead"] + b["behind"] + b["tie"]), b["name"].lower()))[:20]
+    for b in baselines:
+        b["of"] = b["ahead"] + b["behind"] + b["tie"]
+        b["verdict"] = "ahead" if b["ahead"] > b["behind"] and b["ahead"] * 2 >= b["of"] else "behind" if b["behind"] > b["ahead"] else "mixed"
+    beaten = [b for b in baselines if b["verdict"] == "ahead"]
     xs = list(seen.values())
     ahead, behind = [x for x in xs if x["state"] == "ahead"], [x for x in xs if x["state"] == "behind"]
     started = [r for r in rows if r["started"]]
@@ -153,9 +176,11 @@ def build(E, store, days=30, now=None):
         {"k": "moving", "q": "Any new results in %s?" % period, "help": "A question counts when one of its experiments got a new result file in this period.", "verdict": "none" if not started else "yes" if len(moved) * 2 >= len(rows) else "partly" if moved else "no",
          "line": "No experiment yet" if not started else "%d of %d questions moved in %s" % (len(moved), len(rows), span),
          "rows": [r["id"] for r in rows if r["trend"] != "moved"]},
-        {"k": "ahead", "q": "Does %s beat %s?" % (ours, extends["name"] if extends else "the other methods"),
-         "help": "Counts the experiments where %s scores better than %s on the experiment's metric." % (ours, vs), "verdict": "none" if not xs else "yes" if ahead and not behind else "partly" if ahead else "no",
-         "line": "Nothing to compare yet" if not xs else "Ahead of %s in %d of %d%s" % (vs, len(ahead), len(xs), ", behind in %d" % len(behind) if behind else ""),
+        {"k": "ahead", "q": "How does %s compare with the baselines?" % ours,
+         "help": "For each baseline: the experiments where %s scores better on that experiment's metric. Ahead of a baseline means better in more than half of them." % ours,
+         "verdict": "none" if not baselines else "yes" if len(beaten) == len(baselines) else "partly" if beaten else "no",
+         "line": "Nothing to compare yet" if not baselines else "Ahead of %d of %d baselines%s" % (len(beaten), len(baselines),
+                 (" · %s %s" % ("ahead of" if baselines[0]["verdict"] == "ahead" else "not ahead of", baselines[0]["name"])) if extends and baselines[0]["base"] else ""),
          "rows": sorted({x["question_id"] for x in behind}), "behind": behind},
         {"k": "paper", "q": "Is the evidence enough to write the paper now?",
          "help": "A claim is fully backed when every item of its checklist is done: more than one run, a baseline, an ablation, a matching paper table, confounds checked.", "verdict": "none" if not rows else "yes" if len(complete) == len(rows) else "partly" if complete else "no",
@@ -165,7 +190,7 @@ def build(E, store, days=30, now=None):
     return {"schema": SCHEMA, "days": days, "windows": list(WINDOWS), "checks": checks, "questions": rows, "hoped": store["hoped"],
             "supported": [{"label": r["label"], "text": r["text"]} for r in complete],
             "not_yet": [{"label": r["label"], "text": r["text"], "missing": [c["label"] for c in r["checklist"] if c["state"] in ("todo", "stale")]} for r in rows if not r["complete"]],
-            "extends": E.get("extends"), "mapped": bool(E.get("unmapped") is not None)}
+            "baselines": baselines, "ours": ours, "extends": E.get("extends"), "mapped": bool(E.get("unmapped") is not None)}
 
 
 # ------------------------------------------------------------------ the agent's confound report

@@ -165,7 +165,8 @@ def summarise(table, ours, col, lower):
     gap = None if best is None else round((best[1] - mine) if lower else (mine - best[1]), 10)
     row = next(r for r in table["rows"] if r["label"] == ours)
     return {"ours": mine, "std": row["std"].get(col), "n": row["n"].get(col, 1), "best": {"label": best[0], "value": best[1]} if best else None,
-            "gap": gap, "rank": rank, "of": len(vals), "order": [l for l, _ in order]}
+            "gap": gap, "rank": rank, "of": len(vals), "order": [l for l, _ in order],
+            "vs": [{"label": l, "value": v, "gap": round((v - mine) if lower else (mine - v), 10)} for l, v in others[:40]]}
 
 
 # ------------------------------------------------------------------ the paper's table, cell by cell

@@ -779,9 +779,20 @@ function pageReview() {
     h('div', { class: 'rx-rv-pane' }, h('div', { class: 'rx-label' }, 'Supported today'),
       R.supported.length ? R.supported.map(c => h('div', { class: 'serif rx-rv-s' }, h('b', null, c.label + ' '), rxMath(trunc(c.text, 140)))) : h('div', { class: 'muted' }, 'No claim is fully backed yet.'),
       R.not_yet.length ? h('details', { class: 'rx-rv-ny' }, h('summary', null, plural(R.not_yet.length, 'claim') + ' not yet'), R.not_yet.map(c => h('div', { class: 'serif rx-rv-s no', title: 'Missing: ' + c.missing.join(', ') }, h('b', null, c.label + ' '), h('s', null, rxMath(trunc(c.text, 140)))))) : null)));
+  // ours against each baseline
+  if (R.baselines && R.baselines.length) { const BV = { ahead: ['▲', 'Ahead', 'fine'], behind: ['▼', 'Behind', 'fix'], mixed: ['=', 'Mixed', 'look'] };
+    const sec = h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-rv-b head' }, h('span', null, R.ours + ' against'), h('span', null, 'Experiments'), h('span', null, ''), h('span', null, 'Overall')));
+    for (const b of (RX.rvAllB ? R.baselines : R.baselines.slice(0, 6))) { const open = RX.rvB === b.name, v = BV[b.verdict];
+      sec.append(h('button', { class: 'rx-rv-b' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: () => { RX.rvB = open ? null : b.name; renderPage(true); } },
+        h('span', null, h('b', null, b.name), b.base ? h('span', { class: 'tag', title: 'The method this work extends' }, 'base') : null),
+        h('span', { class: 'rx-m-meter', title: b.ahead + ' ahead, ' + b.tie + ' level, ' + b.behind + ' behind' }, ['ahead', 'tie', 'behind'].map(k => b[k] ? h('span', { class: 'm-' + k, style: 'flex:' + b[k] }) : null)),
+        h('span', { class: 'muted small' }, b.ahead + ' of ' + b.of + ' ahead'), h('span', { class: 'rx-rv-tr ' + v[2] }, v[0] + ' ' + v[1])));
+      if (open) sec.append(h('div', { class: 'rx-rv-bd' }, b.experiments.map(x => h('button', { class: 'chip-btn x-' + x.state, title: (x.question ? x.question + ' · ' : '') + (x.metric || '') + ' · open this experiment', onclick: () => { RX.exView = 'map'; RX.mapSel = 'x:' + x.id; openTab('experiments'); } },
+        (x.state === 'ahead' ? '▲ ' : x.state === 'behind' ? '▼ ' : '= ') + x.name + ' ' + (x.gap > 0 ? '+' : x.gap < 0 ? '−' : '') + rxFmt(Math.abs(x.gap))))));
+    }
+    if (R.baselines.length > 6) sec.append(h('div', { class: 'rx-x-none' }, h('button', { class: 'linkbtn small', onclick: () => { RX.rvAllB = !RX.rvAllB; renderPage(true); } }, RX.rvAllB ? 'Show fewer' : 'Show all ' + R.baselines.length + ' baselines')));
+    root.append(sec); }
   // behind list for the "ahead" check
-  if (fc && fc.k === 'ahead' && fc.behind.length) root.append(h('div', { class: 'rx-rv-behind' }, fc.behind.map(x => h('button', { class: 'chip-btn', title: 'Open this experiment', onclick: () => { RX.exView = 'map'; RX.mapSel = 'x:' + x.id; openTab('experiments'); } },
-    '▼ ' + x.name + ' · ' + x.question + (x.since ? ' · since ' + dmon(x.since) : ''))))) ;
   // questions
   const TREND = { moved: ['↗', 'Moved', 'fine'], stalled: ['–', 'Stalled', 'ign'], none: ['○', 'Not started', 'ign'] };
   const rows = R.questions.filter(q => !fc || fc.rows.includes(q.id));
