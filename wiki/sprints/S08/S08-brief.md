@@ -22,6 +22,11 @@ last_reviewed: 2026-11-11
 - **Interaction.** Hover lights up everything a node rests on and everything resting on it. Click a claim for its card (confirm, link evidence, reword). Click a root to open the file or the lines. Tree / List switch keeps the S07 list.
 - **Timeline.** The same tree with a time slider, play button and step buttons. Positions never move; pieces appear. Ticks under the slider are the steps from the S07 timeline; decisions are taller.
 
+## Added the same day (founder, 13:34 KST): pictures and an evidence card
+- Figures in the tree show the actual picture. PNG, JPG and SVG are served as they are; a PDF figure is turned into a PNG of its first page with `pdftoppm` if installed, otherwise macOS `sips`, and cached in `.lemmata/thumbs`. This means the hub now runs a PDF converter on files from users' repositories (25 s limit, 20 MB cap). On a public site that is new attack surface; the CTO should review it against the threat model.
+- Clicking a figure, table or result file opens a card: the picture (or the table's cells), the caption, the claims it backs, "Connected / Not connected" with each file behind it linked to GitHub at the commit Lemmata read, and two notes the researcher writes: "Meant to show" and "Caveat". A caveat puts a ! on the node. Notes are stored in `.lemmata/notes.json`.
+- Correction to S07: a figure whose only link is its own image file used to count as traced. Now traced needs a script, a run or a result file.
+
 ## Known limits (tell users)
 - Dates: a file is dated by its first commit; a paper item by `git blame` of its lines, which is when those lines were **last written**, not first written. A paper uploaded as a zip has no dates, so its claims are shown from the start and only the roots grow.
 - The slider shows when pieces appeared. It does not replay past **status** (whether a claim was supported on a given day).

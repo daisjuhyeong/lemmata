@@ -298,6 +298,13 @@ class Engine:
     def tree(self):
         s = self._ensure()
         t = claimsmod.tree(self.claims(), s["G"], self._born())
+        notes = self._notes()["notes"]
+        for n in t["nodes"]:
+            nid = n.get("node_id")
+            if nid:
+                n["caveat"] = bool((notes.get(nid) or {}).get("caveat"))
+                if n["kind"] in ("figure", "asset"):
+                    n["img"] = self.asset_of(nid) is not None
         tl = self.timeline()
         t["marks"] = [{"time": st["end"], "title": st["title"], "summary": st["summary"], "decision": st["decision"], "id": st["id"]}
                       for st in tl["steps"] if st.get("end")]
@@ -305,6 +312,113 @@ class Engine:
             ts = sorted([m["time"] for m in t["marks"]] + ([t["span"]["start"], t["span"]["end"]] if t["span"] else []), key=processmod._t)
             t["span"] = {"start": ts[0], "end": ts[-1]}
         return t
+
+    # ------------------------------------------------------------------ evidence (one figure, table or file)
+    def _notes(self):
+        d = self.hub.read_json("notes.json", None)
+        return d if isinstance(d, dict) and isinstance(d.get("notes"), dict) else {"schema": "lemmata.notes/1", "notes": {}}
+
+    def asset_of(self, node_id):
+        """-> (repo id, path) of the picture behind a figure or asset node, or None."""
+        s = self._ensure()
+        n = s["G"].nodes.get(node_id)
+        if not n:
+            raise NotFound("unknown item %r" % node_id)
+        cands = []
+        if n["kind"] == "asset":
+            cands.append(n)
+        for e in s["G"].edges.values():
+            if e["from"] == node_id and e["kind"] == "includes" and e["to"] in s["G"].nodes:
+                cands.append(s["G"].nodes[e["to"]])
+        for a in cands:
+            ext = (a["loc"]["path"].rsplit(".", 1)[-1] if "." in a["loc"]["path"] else "").lower()
+            if ext in ("png", "jpg", "jpeg", "svg", "pdf"):
+                return a["repo"], a["loc"]["path"]
+        return None
+
+    def _github(self):
+        """repo id -> 'https://github.com/owner/name/blob/<commit>/<folder>' (no credentials), where the origin is GitHub."""
+        s = self._ensure()
+        cache = getattr(self, "_gh_cache", None)
+        if cache is None or cache[0] is not s["G"]:
+            out = {}
+            for rid, i in s["infos"].items():
+                if i.get("vcs") != "git" or not i.get("head"):
+                    continue
+                p = treemod.run_git(i["abs_path"], ["remote", "get-url", "origin"], check=False)
+                url = p.stdout.decode("utf-8", "replace").strip() if p.returncode == 0 else ""
+                import re as _re
+                m = _re.match(r"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$", url)
+                if m:
+                    out[rid] = "https://github.com/%s/%s/blob/%s/%s" % (m.group(1), m.group(2), i["head"], treemod.show_prefix(i["abs_path"]))
+            cache = (s["G"], out)
+            self._gh_cache = cache
+        return cache[1]
+
+    def evidence(self, node_id):
+        s = self._ensure()
+        G = s["G"]
+        n = G.nodes.get(node_id)
+        if not n:
+            raise NotFound("unknown item %r" % node_id)
+        gh = self._github()
+        last = {}
+        for ev in s["events"]:
+            if ev.get("kind") == "commit":
+                for f in ev.get("files", []):
+                    last["file:%s/%s" % (ev["repo"], f["path"])] = {"time": ev.get("time"), "short": ev.get("short"), "subject": ev.get("subject")}
+
+        def link(x):
+            m = G.nodes[x]
+            path = (m.get("loc") or {}).get("path")
+            return {"node_id": x, "name": m["name"], "kind": m["kind"], "repo": m["repo"],
+                    "github": gh[m["repo"]] + path if m["repo"] in gh and path and m["kind"] != "run" else None, "last": last.get(x)}
+        ctx = claimsmod._Ctx(G, s["alarms"], s["findings"])
+        ch = ctx.chain(node_id)
+        chain = [link(x) for x in ch["results"] + ch["code"] + ch["settings"] + ch["runs"]]
+        doc = self.claims()
+        backs = []
+        for c in doc["claims"]:
+            if c["state"] == "rejected":
+                continue
+            for sup in c["support"]:
+                ids = [sup.get("node_id")] + [x for v in (sup.get("chain") or {}).values() for x in v]
+                if node_id in ids and sup["how"] != "suggested":
+                    backs.append({"id": c["id"], "label": c["label"], "text": c["text"][:200], "status": c["status"]})
+                    break
+        stale = next((r for r in self.ledger()["rows"] if r["status"] == "stale" and (r["node_id"] == node_id or r["node_id"] in ch["results"])), None)
+        a = n.get("attrs") or {}
+        out = {"schema": "lemmata.evidence/1", "node": {"id": node_id, "name": n["name"], "kind": n["kind"], "repo": n["repo"], "loc": n.get("loc")},
+               "caption": a.get("caption") or n.get("detail") or "", "image": self.asset_of(node_id) is not None,
+               "self": link(node_id) if n["kind"] in ("result", "asset", "code", "config", "data") else None,
+               "chain": chain, "connected": bool(ch["code"] or ch["runs"] or any(G.nodes[x]["kind"] != "asset" for x in ch["results"]))
+               or n["kind"] in ("code", "config", "run", "data"),
+               "typed_by_hand": bool(a.get("manual")), "backs": backs,
+               "stale": {"file": stale["name"], "newer": stale["newer"][:3]} if stale else None,
+               "note": self._notes()["notes"].get(node_id, {}), "table": None}
+        if n["kind"] == "table" and G.paper is not None:
+            out["table"] = claimsmod.table_rows(G.paper, node_id)
+        return out
+
+    def set_note(self, node_id, caveat=None, purpose=None):
+        s = self._ensure()
+        if node_id not in s["G"].nodes:
+            raise NotFound("unknown item %r" % node_id)
+        d = self._notes()
+        e = dict(d["notes"].get(node_id, {}))
+        for k, v in (("caveat", caveat), ("purpose", purpose)):
+            if v is not None:
+                if not isinstance(v, str) or len(v) > 2000:
+                    raise BadRequest("%s must be at most 2000 characters" % k)
+                e[k] = v.strip()
+        e = {k: v for k, v in e.items() if v}
+        if e:
+            e["updated"] = now_iso()
+            d["notes"][node_id] = e
+        else:
+            d["notes"].pop(node_id, None)
+        self.hub.write_json("notes.json", d)
+        return self.evidence(node_id)
 
     def _claim_ids(self):
         d = self.claims()

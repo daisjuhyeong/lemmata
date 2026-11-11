@@ -268,7 +268,8 @@ def _support_for_node(ctx, nid, relation, how, score=None):
     if n["kind"] in ("figure", "table", "section", "equation", "item"):
         ch = ctx.chain(nid)
         s["chain"] = ch
-        s["traced"] = bool(ch["results"] or ch["code"] or ch["runs"])
+        # a figure's own image file is not evidence of where it came from: traced means a script, a run or a result file is behind it
+        s["traced"] = bool(ch["code"] or ch["runs"] or any(ctx.nodes[x]["kind"] != "asset" for x in ch["results"]))
         for x in [nid] + ch["results"] + ch["code"] + ch["runs"] + ch["settings"]:
             if x in ctx.stale:
                 s["stale"] = ctx.stale[x]
@@ -504,6 +505,28 @@ def build(G, alarms, findings, store):
     return {"schema": SCHEMA, "has_paper": G.paper is not None, "core": core, "claims": rest, "counts": counts}
 
 
+def table_rows(P, node_id, max_rows=14, max_cols=9):
+    """Cells of the first tabular in a table float, as plain text. Best effort; None when it cannot be read."""
+    u = next((x for x in P.units if x.get("id") == node_id), None)
+    if not u:
+        return None
+    body = "\n".join(l.code for l in P.lines[u["begin"]:u["end"] + 1])
+    m = re.search(r"\\begin\{(tabular[x*]?|tabu|longtable)\}(.*?)\\end\{\1\}", body, re.S)
+    if not m:
+        return None
+    inner = re.sub(r"^\s*(?:\{[^{}]*\}|\[[^\]]*\])*(?:\{(?:[^{}]|\{[^{}]*\})*\})", "", m.group(2), count=1)
+    inner = re.sub(r"\\(?:hline|toprule|midrule|bottomrule|centering|small|footnotesize|scriptsize)\b|\\(?:cline|cmidrule)(?:\([^)]*\))?\{[^}]*\}", " ", inner)
+    rows = []
+    for raw in re.split(r"\\\\(?:\[[^\]]*\])?", inner):
+        if not raw.strip():
+            continue
+        cells = [detex(re.sub(r"\\multi(?:column|row)\{[^}]*\}\{[^}]*\}\{((?:[^{}]|\{[^{}]*\})*)\}", r"\1", c)).replace("$", "") for c in re.split(r"(?<!\\)&", raw)]
+        rows.append([c[:40] for c in cells[:max_cols]])
+        if len(rows) >= max_rows:
+            break
+    return rows or None
+
+
 # ------------------------------------------------------------------ tree (crown = what the paper says, roots = what backs it)
 BAND = {"proof": 1, "assumption": 1, "definition": 1, "condition": 1, "hypothesis": 1, "table": 1, "figure": 1, "section": 1, "equation": 1,
         "item": 1, "result": 2, "asset": 2, "data": 2, "code": 3, "config": 3, "run": 4}
@@ -580,7 +603,8 @@ def tree(doc, G, born=None):
                 if not sug:
                     real += 1
                     ch = s_.get("chain") or {}
-                    members = [x for x in ch.get("results", []) + ch.get("code", []) + ch.get("runs", []) + ch.get("settings", []) if in_tree(x)]
+                    members = [x for x in ch.get("results", []) + ch.get("code", []) + ch.get("runs", []) + ch.get("settings", []) if in_tree(x)
+                               and not (n["kind"] == "figure" and G.nodes[x]["kind"] == "asset" and G.nodes[x]["repo"] == n["repo"])]
                     for x in members:
                         m = G.nodes[x]
                         add(x, layer="root", band=BAND[m["kind"]], kind=m["kind"], short=m["name"].rsplit("/", 1)[-1][:16], title=m["name"],

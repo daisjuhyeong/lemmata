@@ -144,6 +144,7 @@ function pageClaims() {
     const c = RX.sel && d.claims.find(x => x.id === RX.sel);
     if (c) { RX.open[c.id] = true; root.append(rxClaimCard(c)); }
     else if (RX.sel === 'core' && d.core) root.append(rxCoreCard(d.core));
+    else if (RX.sel && IX.node && IX.node.get(RX.sel)) root.append(rxEvidenceCard(RX.sel));
     rxAddClaimBox(root);
     return root;
   }
@@ -201,12 +202,12 @@ function rxTreeLayout(T) {
   claims.forEach(c => { if (!P[c.id]) P[c.id] = { x: slot++ * CW, y: TOP + DY }; });
   const ground = TOP + maxDepth * DY + 62;
   const up = new Map(); T.edges.forEach(e => { if (N.has(e.to) && N.get(e.to).layer === 'root') { if (!up.has(e.to)) up.set(e.to, []); up.get(e.to).push(e.from); } });
-  const GAP = 78;
+  const pics = T.nodes.some(n => n.img), GAP = pics ? 92 : 78;
   for (let b = 1; b <= 4; b++) {   // roots in bands by kind, each under the middle of what it supports
     const band = roots.filter(r => r.band === b); if (!band.length) continue;
     band.forEach(r => { const ps = (up.get(r.id) || []).filter(p => P[p]); r._want = ps.length ? ps.reduce((a, p) => a + P[p].x, 0) / ps.length : 0; });
     band.sort((a, c) => a._want - c._want || (a.id < c.id ? -1 : 1));
-    let prev = -Infinity; band.forEach(r => { const x = Math.max(r._want, prev + GAP); P[r.id] = { x, y: ground + 52 + (b - 1) * 74 }; prev = x; });
+    let prev = -Infinity; band.forEach(r => { const x = Math.max(r._want, prev + GAP); P[r.id] = { x, y: ground + 58 + (b - 1) * (pics ? 88 : 74) }; prev = x; });
     const shift = band.reduce((a, r) => a + (r._want - P[r.id].x), 0) / band.length; band.forEach(r => { P[r.id].x += shift; });
   }
   let minX = Infinity, maxX = -Infinity, maxY = 0;
@@ -257,14 +258,19 @@ function rxTree(opts) {
         sv('text', { x: r + 7, y: 4, class: 'lab side' }, n.short + (n.state === 'proposed' ? ' ✎' : '')), n.recheck ? sv('text', { x: -r - 14, y: -r + 4, class: 'badge' }, '↻') : null,
         sv('title', null, n.label + ' — ' + RX_STATUS[n.status][1] + (n.recheck ? ', recheck' : '') + (n.state === 'proposed' ? ' (draft)' : '') + '\n' + n.title));
     } else {
-      const miss = n.kind === 'missing';
-      inner.append(sv('rect', { x: -15, y: -12, width: 30, height: 24, rx: n.band === 1 ? 12 : 4, class: 'box' + (miss ? ' miss' : '') + (n.traced === false && !miss ? ' untraced' : '') }),
-        sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind] || '•'), sv('text', { y: 26, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short),
-        n.shared > 1 ? sv('text', { x: 19, y: -8, class: 'badge' }, '×' + n.shared) : null,
+      const miss = n.kind === 'missing', pic = n.img && !READONLY;
+      if (pic) {   // the figure itself
+        const im = sv('image', { x: -32, y: -23, width: 64, height: 46, href: apiUrl('/api/thumb?node=' + encodeURIComponent(n.node_id)), preserveAspectRatio: 'xMidYMid meet' });
+        im.addEventListener('error', () => { im.replaceWith(sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind])); });
+        inner.append(sv('rect', { x: -34, y: -25, width: 68, height: 50, rx: 3, class: 'box pic' + (n.traced === false ? ' untraced' : '') }), im, sv('text', { y: 37, class: 'lab' }, n.short));
+      } else inner.append(sv('rect', { x: -15, y: -12, width: 30, height: 24, rx: n.band === 1 ? 12 : 4, class: 'box' + (miss ? ' miss' : '') + (n.traced === false && !miss ? ' untraced' : '') }),
+        sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind] || '•'), sv('text', { y: 26, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short));
+      inner.append(n.shared > 1 ? sv('text', { x: pic ? 38 : 19, y: pic ? -18 : -8, class: 'badge' }, '×' + n.shared) : null,
+        n.caveat ? sv('g', { transform: 'translate(' + (pic ? -34 : -15) + ',' + (pic ? -25 : -12) + ')' }, sv('circle', { r: 7, class: 'cav' }), sv('text', { y: 3.5, class: 'cavt' }, '!')) : null,
         sv('title', null, (RX_KINDWORD[n.kind] || n.kind) + (miss ? '' : ': ' + n.title) + (n.traced === false && !miss ? '\nNot traced to a result file or script' : '')));
     }
     const pick = () => {
-      if (n.layer === 'root') { if (n.node_id) openNode(n.node_id); else if (n.loc) rxShowLines('paper', n.loc); else if (n.kind === 'missing') { const cid = n.id.slice(8); RX.sel = cid; const c = RX.claims.claims.find(x => x.id === cid); if (c && !READONLY) rxLinkDialog(c); renderPage(true); } return; }
+      if (n.layer === 'root') { if (n.node_id) { RX.sel = RX.sel === n.id ? null : n.id; if (!opts.scrub) renderPage(true); else { RX.view = 'tree'; openTab('claims'); } } else if (n.loc) rxShowLines('paper', n.loc); else if (n.kind === 'missing') { const cid = n.id.slice(8); RX.sel = cid; const c = RX.claims.claims.find(x => x.id === cid); if (c && !READONLY) rxLinkDialog(c); renderPage(true); } return; }
       RX.sel = RX.sel === n.id ? null : n.id; if (!opts.scrub) renderPage(true); else { RX.view = 'tree'; openTab('claims'); }
     };
     g.addEventListener('click', pick); g.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } });
@@ -296,6 +302,38 @@ function rxTree(opts) {
   else setTime(1);
   wrap.append(rxLegend(T));
   return wrap;
+}
+/* One figure, table or file: the picture, what it is for, whether it is connected to the repository, and your caveat. */
+function rxEvidenceCard(nodeId, onChange) {
+  const box = h('article', { class: 'card rx-ev' }, h('div', { class: 'muted' }, '…'));
+  apiGet('/api/evidence?node=' + encodeURIComponent(nodeId)).then(d => paint(d)).catch(e => { clear(box).append(h('div', { class: 'muted' }, e.message)); });
+  function paint(d) {
+    const n = d.node, gh = x => x.github ? h('a', { class: 'ghl', href: x.github, target: '_blank', rel: 'noopener noreferrer', title: 'Open on GitHub at the commit Lemmata read' }, '↗ GitHub') : null;
+    const row = x => h('div', { class: 'rx-ev-row' }, h('span', { class: 'lg-g' }, RX_GLYPH[x.kind] || '•'), rxNodeBtn(x.node_id, x.name), gh(x),
+      x.last ? h('span', { class: 'muted small mono' }, ' ' + x.last.short + ' · ' + dmon(x.last.time)) : null);
+    let pic = null;
+    if (d.image && !READONLY) { const src = apiUrl('/api/thumb?node=' + encodeURIComponent(nodeId)); pic = h('a', { href: src, target: '_blank', rel: 'noopener noreferrer', class: 'rx-ev-pic' }, h('img', { src, alt: n.name, onerror: ev => { ev.target.closest('a').replaceWith(h('div', { class: 'rx-ev-nopic muted' }, 'No preview')); } })); }
+    else if (d.table) pic = h('div', { class: 'rx-ev-tablewrap' }, h('table', { class: 'tbl rx-ev-table' }, h('tbody', null, d.table.map((r, i) => h('tr', null, r.map(c => h(i ? 'td' : 'th', null, c)))))));
+    const cav = h('textarea', { rows: '2', class: 'rx-ta', 'aria-label': 'Caveat', placeholder: 'Caveat: what a reader must keep in mind' }); cav.value = d.note.caveat || '';
+    const pur = h('textarea', { rows: '2', class: 'rx-ta', 'aria-label': 'Meant to show', placeholder: 'Meant to show: the one thing this is in the paper for' }); pur.value = d.note.purpose || '';
+    const linked = d.connected;
+    clear(box).append(
+      h('div', { class: 'rx-ev-h' }, h('span', { class: 'rx-label' }, n.name), linked ? plainChip('✓', 'Connected', 'fine') : plainChip('✕', 'Not connected', 'fix'),
+        d.stale ? plainChip('↻', 'Out of date', 'look') : null, d.note.caveat ? plainChip('!', 'Caveat', 'look') : null, h('span', { class: 'grow' }),
+        d.self ? gh(d.self) : null, rxWhere(n.loc, n.repo), h('button', { class: 'linkbtn small', onclick: () => openNode(nodeId) }, 'Open')),
+      h('div', { class: 'rx-ev-b' }, pic, h('div', { class: 'rx-ev-r' },
+        d.caption ? h('div', { class: 'serif rx-ev-cap' }, d.caption) : null,
+        d.backs.length ? h('div', { class: 'rx-ev-backs' }, d.backs.map(b => h('button', { class: 'chip-btn st-' + b.status, title: b.text, onclick: () => { RX.sel = b.id; RX.view = 'tree'; openTab('claims'); renderPage(true); } }, '◆ ' + b.label))) : h('div', { class: 'muted small' }, 'Backs no claim yet.'),
+        d.chain.length ? h('div', { class: 'rx-ev-chain' }, d.chain.map(row))
+          : !linked ? h('div', { class: 'rx-warn' }, d.typed_by_hand || n.kind === 'table' ? 'No result file found behind it. Put “% source: code:results/file.csv” above it in the LaTeX.' : 'No script or result file found that makes it.') : null,
+        d.stale ? h('div', { class: 'rx-warn' }, '↻ ' + d.stale.newer.map(x => x.name).join(', ') + ' changed after ' + d.stale.file + ' was written.') : null,
+        READONLY ? [d.note.purpose ? h('div', { class: 'rx-note' }, h('b', null, 'Meant to show: '), d.note.purpose) : null, d.note.caveat ? h('div', { class: 'rx-note' }, h('b', null, 'Caveat: '), d.note.caveat) : null]
+          : [pur, cav, h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: async () => {
+            const r = await rxPost('/api/note', { node: nodeId, caveat: cav.value, purpose: pur.value }, 'Saved.');
+            if (r) { try { RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } if (onChange) onChange(); else renderPage(true); }
+          } }, 'Save'))])));
+  }
+  return box;
 }
 function kidsCount(T, id) { return T.nodes.filter(n => n.parent === id).length; }
 function rxLegend(T) {
@@ -391,12 +429,13 @@ function pageExperiments() {
   const stChip = r => r.status === 'stale' ? plainChip('↻', 'Out of date', 'look') : r.status === 'current' ? plainChip('✓', 'Current', 'fine') : plainChip('?', 'No known source', 'ign');
   for (const r of rows) {
     root.append(h('article', { class: 'card rx-ex st-' + r.status },
-      h('div', { class: 'rx-ex-h' }, rxNodeBtn(r.node_id, r.name), stChip(r), h('span', { class: 'grow' }), r.made ? h('span', { class: 'muted small' }, 'written ' + absTime(r.made.time) + ' · ', mono(r.made.short)) : null),
+      h('div', { class: 'rx-ex-h' }, h('button', { class: 'linkbtn', 'aria-expanded': String(RX.exSel === r.node_id), onclick: () => { RX.exSel = RX.exSel === r.node_id ? null : r.node_id; renderPage(true); } }, h('b', null, r.name)), stChip(r), h('span', { class: 'grow' }), r.made ? h('span', { class: 'muted small' }, 'written ' + absTime(r.made.time) + ' · ', mono(r.made.short)) : null),
       h('dl', { class: 'rx-dl' },
         r.code.length || r.runs.length ? [h('dt', null, 'Made by'), h('dd', null, r.runs.map(x => [rxNodeBtn(x.node_id, x.name), x.command ? h('span', { class: 'muted mono small' }, ' ' + trunc(x.command, 70)) : null, ' ']), r.code.map((x, i) => [i || r.runs.length ? ', ' : null, rxNodeBtn(x.node_id, x.name)]))] : [h('dt', null, 'Made by'), h('dd', { class: 'muted' }, 'Unknown. No script writes a file with this name.')],
         r.settings.length ? [h('dt', null, 'Settings'), h('dd', null, r.settings.map((x, i) => [i ? ', ' : null, rxNodeBtn(x.node_id, x.name)]))] : null,
         h('dt', null, 'Used in'), h('dd', null, r.used_by.length ? r.used_by.map((x, i) => [i ? ', ' : null, rxNodeBtn(x.node_id, x.name)]) : h('span', { class: 'muted' }, 'Nothing in the paper.')),
         r.claims.length ? [h('dt', null, 'Backs'), h('dd', null, r.claims.map((x, i) => [i ? ', ' : null, h('button', { class: 'linkbtn', onclick: () => { RX.open[x.id] = true; RX.filter = 'all'; openTab('claims'); } }, x.label)]))] : null),
+      RX.exSel === r.node_id ? rxEvidenceCard(r.node_id) : null,
       r.newer.length ? h('div', { class: 'rx-warn' }, '↻ Changed after this file was written: ', r.newer.slice(0, 3).map((x, i) => [i ? '; ' : null, h('b', null, x.name), ' on ' + dmon(x.time) + ' (“' + trunc(x.subject || '', 60) + '”)']), '. Rerun it, or check that the change does not affect the output.') : null));
   }
   if (!rows.length) root.append(h('div', { class: 'muted' }, 'None with this filter.'));

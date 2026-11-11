@@ -399,3 +399,21 @@ table.tbl { width:100%; border-collapse:collapse; } table.tbl th { text-align:le
 @media (prefers-reduced-motion: reduce) { .rx-tree .sprout,.rx-tree .n,.rx-tree .e { transition:none; } }
 .rx-legend .lg-draft { color:var(--muted); }
 .rx-tree .hit { fill:transparent; stroke:none; }
+
+/* S08b: pictures in the tree, evidence card */
+.rx-tree .box.pic { fill:#fff; }
+.rx-tree .cav { fill:var(--amber); } .rx-tree .cavt { font:700 10px var(--font-sans); fill:#fff; text-anchor:middle; pointer-events:none; }
+.rx-ev { border-left:3px solid #8a7a66; }
+.rx-ev-h { display:flex; align-items:center; gap:var(--s-2); flex-wrap:wrap; margin-bottom:var(--s-3); }
+.rx-ev-b { display:flex; gap:var(--s-4); flex-wrap:wrap; align-items:flex-start; }
+.rx-ev-pic img { max-width:280px; max-height:240px; border:1px solid var(--border); border-radius:var(--r-sm); background:#fff; display:block; }
+.rx-ev-nopic { width:200px; height:120px; border:1px dashed var(--border-strong); border-radius:var(--r-sm); display:flex; align-items:center; justify-content:center; }
+.rx-ev-tablewrap { max-width:360px; overflow:auto; } .rx-ev-table { font-size:var(--fs-11); }
+.rx-ev-r { flex:1; min-width:240px; display:flex; flex-direction:column; gap:var(--s-2); }
+.rx-ev-cap { font-size:var(--fs-14); line-height:1.45; }
+.rx-ev-row { display:flex; align-items:center; gap:var(--s-2); font-size:var(--fs-13); flex-wrap:wrap; }
+.rx-ev-backs { display:flex; gap:6px; flex-wrap:wrap; }
+.chip-btn { border:1px solid var(--border-strong); background:var(--surface); border-radius:999px; padding:1px 10px; font-size:var(--fs-12); cursor:pointer; }
+.chip-btn.st-supported { color:var(--verify); border-color:var(--verify); } .chip-btn.st-partial { color:var(--amber-text); border-color:var(--amber); } .chip-btn.st-unsupported { color:var(--red); border-color:var(--red); }
+.ghl { font-size:var(--fs-12); white-space:nowrap; }
+.rx-ev .rx-ta { margin-bottom:0; }

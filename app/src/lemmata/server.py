@@ -84,6 +84,47 @@ class App:
             raise ApiError(404, "not_found", "file not found")
         return p
 
+    def thumb(self, node_id):
+        """Picture of a figure: the image file itself, or the first page of a PDF turned into a PNG (cached in .lemmata/thumbs)."""
+        fn = getattr(self.engine, "asset_of", None)
+        if fn is None:
+            raise ApiError(404, "not_found", "no picture")
+        with self.lock:
+            hit = fn(node_id)
+        if not hit:
+            raise ApiError(404, "not_found", "no picture")
+        p = self.safe_path(hit[0], hit[1])
+        if p.stat().st_size > 4 * MAX_RAW:
+            raise ApiError(404, "not_found", "picture too large")
+        ext = p.suffix.lower()
+        if ext in IMAGE_TYPES:
+            return p.read_bytes(), IMAGE_TYPES[ext]
+        import hashlib
+        import shutil
+        import subprocess
+        import tempfile
+        st = p.stat()
+        key = hashlib.sha256(("%s|%d|%d" % (p, st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:24]
+        cache = self.engine.hub.path("thumbs")
+        out = cache / (key + ".png")
+        if not out.is_file():
+            cache.mkdir(parents=True, exist_ok=True)
+            env = {"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "HOME": tempfile.gettempdir()}
+            with tempfile.TemporaryDirectory() as td:
+                tmp = Path(td) / "t.png"
+                try:
+                    if shutil.which("pdftoppm", path=env["PATH"]):
+                        subprocess.run(["pdftoppm", "-png", "-r", "110", "-f", "1", "-l", "1", "-singlefile", str(p), str(tmp)[:-4]],
+                                       capture_output=True, timeout=25, env=env)
+                    elif shutil.which("sips", path=env["PATH"]):   # built into macOS
+                        subprocess.run(["sips", "-s", "format", "png", "-Z", "1400", str(p), "--out", str(tmp)], capture_output=True, timeout=25, env=env)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                if not tmp.is_file() or tmp.stat().st_size == 0 or tmp.stat().st_size > 4 * MAX_RAW:
+                    raise ApiError(404, "not_found", "this PDF figure could not be turned into a picture")
+                shutil.copyfile(tmp, out)
+        return out.read_bytes(), "image/png"
+
     def read_lines(self, repo, rel, start=1, end=None, cap=400):
         p = self.safe_path(repo, rel)
         if p.suffix.lower() in BINARY_EXT or p.stat().st_size > MAX_FILE:
@@ -359,6 +400,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not ct or p.stat().st_size > MAX_RAW:
                     raise ApiError(404, "not_found", "not an image")
                 return self._send(200, p.read_bytes(), ct)
+            if r == "/thumb":
+                data, ct = self.app.thumb(q.get("node", ""))
+                return self._send(200, data, ct, {"Cache-Control": "private, max-age=300", "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'"})
+            if r == "/evidence":
+                with self.app.lock:
+                    return self._json(need("evidence")(q.get("node", "")))
             if r == "/export":
                 with self.app.lock:
                     html, name = self.app.export_html()
@@ -369,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks")
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -395,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("add_claim")(txt("text", True), txt("kind") or "claim"), 201)
                 if r == "/claims/remove":
                     return self._json(need("remove_claim")(txt("id", True)))
+                if r == "/note":
+                    return self._json(need("set_note")(txt("node", True), txt("caveat"), txt("purpose")))
                 if r == "/feedback":
                     return self._json(need("add_feedback")(txt("text", True), txt("source")), 201)
                 return self._json(need("set_task")(txt("id", True), txt("state"), txt("note"), txt("add_target"), txt("remove_target"), txt("text")))
