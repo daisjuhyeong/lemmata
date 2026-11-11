@@ -103,6 +103,16 @@ def ours_of(table, method, spec, chosen, bold=()):
     return pick_ours(table, [], bold)
 
 
+def names_match(labels, who, skip=None):
+    names = [norm(n) for n in ([who["name"]] + who.get("aliases", []) if who else []) if norm(n)]
+    cands = [l for l in labels if l != skip]
+    exact = [l for l in cands if norm(l) in names]
+    if exact:
+        return exact[0]
+    loose = [l for l in cands if any(len(n) >= 3 and n in norm(l) for n in names)]
+    return min(loose, key=len) if loose else None
+
+
 def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=None, detail=None, state=None):
     """-> the Experiments document driven by the map; with detail=<'map:id'>, that one experiment in full."""
     P, github = G.paper, github or {}
@@ -110,7 +120,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
     ents = (store or {}).get("entries", {})
     led = {r["node_id"]: r for r in ledger["rows"]}
     files = und.result_files(G)
-    method = m.get("method")
+    method, base = m.get("method"), m.get("base")
     qs = {q["id"]: q for q in m["questions"]}
 
     def experiment(spec, full=False):
@@ -153,6 +163,11 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             else:
                 ours, how = ours_of(tab, method, spec, e.get("ours"), bold)
                 s = summarise(tab, ours, col, lower)
+                bl = names_match([r["label"] for r in tab["rows"]], base, ours) if base else None
+                if s and bl:
+                    bv = next((r["values"].get(col) for r in tab["rows"] if r["label"] == bl), None)
+                    if bv is not None:
+                        s["base"] = {"label": bl, "value": bv, "gap": round((bv - s["ours"]) if lower else (s["ours"] - bv), 10)}
             x["summary"] = dict(s or {"ours": None, "gap": None, "best": None}, ours_label=ours, ours_by=how, metric=col, measure=tab["metric"] if target is None else "|%s − %g|" % (tab["metric"], target), measures=tab["measures"],
                                 lower=lower, target=target, metric_by=tab["metric_by"] if not e.get("metric") else "you", methods=[r["label"] for r in tab["rows"]],
                                 baselines=[] if tuning else [r["label"] for r in tab["rows"] if r["label"] != ours], cols=tab["cols"], datasets=tab["datasets"])
@@ -243,8 +258,10 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
         exps = sorted((built[x["id"]] for x in m["experiments"] if q["id"] in x["tests"]), key=key)
         real = [x for x in exps if x["type"] != "tuning"]
         status = "unsupported" if not real else "partial" if any(x["attention"] for x in real) else "supported"
-        sections.append({"id": q["id"], "claim_id": q.get("claim_id"), "kind": q["kind"], "source": q.get("source", "paper"), "label": q["label"], "text": q["text"], "status": status,
+        sections.append({"id": q["id"], "claim_id": q.get("claim_id"), "kind": q["kind"], "source": q.get("source", "paper"), "scope": q.get("scope"), "label": q["label"], "text": q["text"], "status": status,
                          "state": "confirmed", "recheck": any(x["stale"] for x in exps), "experiments": exps, "suggested": [], "evidence": q["evidence"][:2]})
+    if base:     # the extension's own questions first, then the original paper's claims it re-checks
+        sections.sort(key=lambda s_: {"extension": 0, None: 1, "base": 2}.get(s_.get("scope"), 1))
     rest = sorted((built[x["id"]] for x in m["experiments"] if not x["tests"]), key=key)
     if rest:
         sections.append({"id": "other", "claim_id": None, "kind": "other", "label": "Other", "text": "Experiments the map ties to no question", "status": "partial",
@@ -252,6 +269,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
     cov = und.coverage(m, G, trees)
     allx = list(built.values())
     return {"schema": SCHEMA, "sections": sections, "unassigned": [], "unmapped": cov,
+            "extends": {"base": base, "goal": m.get("goal")} if base else None,
             "map": {"state": state or "confirmed", "method": method, "questions": len(m["questions"]), "experiments": len(m["experiments"])},
             "counts": {"questions": len(m["questions"]), "untested": sum(1 for s in sections if s["kind"] != "other" and s["status"] == "unsupported"),
                        "experiments": len(allx), "attention": sum(1 for x in allx if x["attention"]), "versions": sum(x["history_n"] for x in allx),

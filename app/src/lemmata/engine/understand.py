@@ -231,10 +231,13 @@ Read the brief (and, if you have the repository open, the paper and the code the
 {
   "method": {"name": "<the name the paper gives its own method>", "aliases": ["<other spellings used in result files or code>"],
              "evidence": [{"path": "main.tex", "line": 12, "quote": "<a few words copied from that line>"}]},
+  "base": {"name": "<only for an extension: the method of the paper being extended>", "aliases": [], "evidence": []},
+  "goal": "<only for an extension: one sentence, the new target the extension aims at>",
   "questions": [
     {"id": "q1", "kind": "question" | "hypothesis", "label": "RQ1",
      "text": "<one full sentence: what the paper sets out to show>",
      "claim": "<optional: the 'claim' id from the brief when the paper already states it>",
+     "scope": "base | extension (only with a base: does it check the original paper's claim, or the extension's new one?)",
      "evidence": [{"path": "main.tex", "line": 40, "quote": "<words copied from the paper>"}]}
   ],
   "experiments": [
@@ -253,8 +256,10 @@ Rules Lemmata enforces (anything that fails is dropped and reported back to you)
   researcher's own notes (.md, .txt, .rst, .tex, .org anywhere in the repositories). Prefer the paper.
 - When neither direction is right ("close to 0 is best"), set "target" to that value; lower/higher is then ignored.
 - The method name or an alias must appear in the paper or in the result files (file names, columns or cells).
-- If the paper is an earlier version (for example the paper being extended), say so in the method's note and name
-  "ours" as it appears in the result files; aliases may name variants such as an extension.
+- Extending an earlier paper: when the linked paper describes the method being extended (not the new work), set
+  "method" to the extension as it is named in the result files, "base" to the original method, and "goal" to the new
+  target. Questions quoted from the paper are the original's claims (scope "base", to reproduce); questions from the
+  notes are the extension's (scope "extension"). Experiments then compare ours with the base as well as the others.
 - An experiment's files are patterns: * within a folder, ** across folders, {dataset} {method} {seed} or any other
   {field} for the part of a file name that encodes it. Each pattern must match at least one existing file.
 - "metric" must be a real column of those files. "paper" lists table or figure labels (or ids from the brief).
@@ -335,24 +340,37 @@ def verify(doc, G, trees, infos, claims_doc):
             note("dropped", where, "only the first %d %s are kept; %d more were ignored" % (n, what, len(items) - n))
         return items[:n]
 
-    out = {"schema": SCHEMA, "method": None, "questions": [], "experiments": [], "ignore": []}
-    # method
-    m = doc.get("method")
-    if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"].strip():
-        hay = _squash(" ".join(l.code for l in G.paper.lines)) if G.paper is not None else ""
-        labels = _names_in(files, trees)
-        seen = lambda name: (" " + _squash(name) + " ") in (" " + hay + " ") or norm(name) in labels
-        name = _text(m["name"], 60, "method name")
-        als = [a for a in dict.fromkeys(_text(a, 60, "alias") for a in capped(m.get("aliases") or [], 8, "method", "aliases") if isinstance(a, str) and a.strip()) if a != name]
+    out = {"schema": SCHEMA, "method": None, "base": None, "goal": None, "questions": [], "experiments": [], "ignore": []}
+    # method (ours) and, for an extension, the method of the paper being extended (base)
+    hay = _squash(" ".join(l.code for l in G.paper.lines)) if G.paper is not None else ""
+    labels = _names_in(files, trees)
+    seen = lambda name: (" " + _squash(name) + " ") in (" " + hay + " ") or norm(name) in labels
+
+    def named(m, where):
+        if not (isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"].strip()):
+            return None
+        name = _text(m["name"], 60, "%s name" % where)
+        als = [a for a in dict.fromkeys(_text(a, 60, "alias") for a in capped(m.get("aliases") or [], 8, where, "aliases") if isinstance(a, str) and a.strip()) if a != name]
         for a in [a for a in als if not seen(a)]:
-            note("dropped", "method", "the alias %r appears neither in the paper nor in the result files" % a)
+            note("dropped", where, "the alias %r appears neither in the paper nor in the result files" % a)
         als = [a for a in als if seen(a)]
         if seen(name) or als:
-            out["method"] = {"name": name, "aliases": als, "evidence": evidence(m.get("evidence"), "method")}
-        else:
-            note("dropped", "method", "the name %r appears neither in the paper nor in the result files" % name)
-    else:
+            return {"name": name, "aliases": als, "evidence": evidence(m.get("evidence"), where)}
+        note("dropped", where, "the name %r appears neither in the paper nor in the result files" % name)
+        return None
+
+    out["method"] = named(doc.get("method"), "method")
+    if out["method"] is None and not (isinstance(doc.get("method"), dict) and doc["method"].get("name")):
         note("warning", "method", "no method name given: “ours” will be guessed for every experiment")
+    if doc.get("base") is not None:
+        out["base"] = named(doc.get("base"), "base")
+        if out["base"] and out["method"] and norm(out["base"]["name"]) == norm(out["method"]["name"]):
+            note("dropped", "base", "the base method has the same name as ours")
+            out["base"] = None
+    if isinstance(doc.get("goal"), str) and doc["goal"].strip():
+        out["goal"] = " ".join(doc["goal"].split())[:300]
+        if not out.get("base"):
+            note("warning", "goal", "a goal is set but no base method: the goal is kept, nothing is compared with a base")
     # questions and hypotheses
     claim_ids = {c["id"] for c in claims_doc.get("claims", [])}
     qids = set()
@@ -372,8 +390,9 @@ def verify(doc, G, trees, infos, claims_doc):
                 note("warning", where, "the claim id %r does not exist; treated as a new statement" % q.get("claim"))
             n_same = sum(1 for x in out["questions"] if x["kind"] == kind) + 1
             label = _text(q["label"], 24, "label") if isinstance(q.get("label"), str) and q["label"].strip() else ("RQ%d" if kind == "question" else "H%d") % n_same
-            out["questions"].append({"id": qid, "kind": kind, "label": label, "text": text, "claim": claim, "evidence": ev,
-                                     "source": "paper" if any(e["source"] == "paper" for e in ev) else "notes"})
+            source = "paper" if any(e["source"] == "paper" for e in ev) else "notes"
+            scope = q.get("scope") if q.get("scope") in ("base", "extension") else ("base" if source == "paper" else "extension") if out.get("base") else None
+            out["questions"].append({"id": qid, "kind": kind, "label": label, "text": text, "claim": claim, "evidence": ev, "source": source, "scope": scope})
             qids.add(qid)
         except (BadRequest, AttributeError) as e:
             note("dropped", where, str(e) if isinstance(e, BadRequest) else "not an object")
@@ -533,6 +552,28 @@ def edit(m, patch):
         old = m.get("method") or {}
         m["method"] = {"name": name.strip(), "aliases": [a for a in [old.get("name")] + (old.get("aliases") or []) if a and a != name.strip()],
                        "evidence": old.get("evidence") or []} if name.strip() else None
+    if "base" in patch:
+        name = patch["base"]
+        if not isinstance(name, str) or len(name) > 60:
+            raise BadRequest("the base method name must be text")
+        old = m.get("base") or {}
+        m["base"] = {"name": name.strip(), "aliases": [a for a in [old.get("name")] + (old.get("aliases") or []) if a and a != name.strip()],
+                     "evidence": old.get("evidence") or []} if name.strip() else None
+        if m["base"] is None:
+            for q in m["questions"]:
+                q["scope"] = None
+    if "goal" in patch:
+        if not isinstance(patch["goal"], str) or len(patch["goal"]) > 300:
+            raise BadRequest("the goal must be at most 300 characters")
+        m["goal"] = patch["goal"].strip() or None
+    if "question" in patch:
+        p = patch["question"]
+        q = next((q for q in m["questions"] if isinstance(p, dict) and q["id"] == p.get("id")), None)
+        if q is None:
+            raise NotFound("unknown question")
+        if p.get("scope") not in ("base", "extension", None):
+            raise BadRequest("scope must be base or extension")
+        q["scope"] = p.get("scope")
     if "remove" in patch:
         kind, _, rid = str(patch["remove"]).partition(":")
         if kind not in ("experiment", "question") or not any(x["id"] == rid for x in m[kind + "s"]):

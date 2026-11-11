@@ -42,4 +42,10 @@ Source: Claude Code transcript the founder pasted in chat, 2026-11-11 15:31 KST.
 - **Questions had to quote the paper**, but the extension's questions live in the repository's notes (`RESEARCH_QUESTIONS.md`). Questions may now quote notes (.md, .txt, .rst, .tex, .org); they carry a "notes" tag in the map and on the Experiments page.
 - **"Close to 0 is best"** (excess false alarms) was treated as lower-is-better. An experiment can now set `target`; ranking uses the distance to it, the paper check still compares raw values, and the bold check is skipped.
 
-Open: the paper repository linked to this project is the original MCD-DD paper (KDD 2024), not the extension, so "MCD" in the paper means MCD-DD. Founder to decide which paper the project should track.
+Decision (founder, chat 2026-11-11 15:34 KST): keep the original MCD-DD paper (KDD 2024) as the linked paper, and "build a way so that I can extend the original paper for another target".
+
+## Extension mode (built after the first run)
+- The map can say what the work extends: `base` (the original method, checked like ours: it must appear in the paper or the results) and `goal` (one sentence, the new target).
+- Each question has a scope: `base` (a claim of the original paper, re-checked) or `extension` (a new question). Default: quoted from the paper → base; quoted from notes → extension. Editable in the map review.
+- Experiments page: a line "ours extends base → goal"; the extension's questions first, then "The original paper's claims, re-checked"; each row shows ours against the base method instead of against the best other ("no base" when the base is not in those results); the base row is tagged in the detail.
+- An experiment may set its own "ours" (for example the original method when reproducing the original paper's table).

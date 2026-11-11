@@ -235,6 +235,43 @@ class MapTest(unittest.TestCase):
         subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
         subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "undo"], check=True, capture_output=True)
 
+    def test_extension_of_the_paper(self):
+        """The linked paper is the original; ours is a variant named in the results; the map says what it extends and why."""
+        R = self.tmp
+        with open(R + "/code/NOTES.md", "w") as f:
+            f.write("Goal: generalise MCD to unseen streams.\nE1: Does the variant beat the original under drift?\n")
+        with open(R + "/code/results/ext.csv", "w") as f:
+            f.write("method,dataset,fp\nADWIN,Electricity,41\nMCD,Electricity,30\nMCD_EXT,Electricity,27\n")
+        subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "ext"], check=True, capture_output=True)
+        e = Engine(R)
+        e.scan()
+        doc = {"method": {"name": "MCD_EXT"}, "base": {"name": "MCD", "aliases": ["Monte Carlo Dropout"]}, "goal": "Generalise MCD to unseen streams.",
+               "questions": [agent["questions"][0], {"id": "e1", "text": "Does the variant beat the original under drift?", "evidence": [{"path": "NOTES.md", "line": 2, "quote": "Does the variant beat the original"}]}],
+               "experiments": [{"id": "ext", "name": "Extension vs original", "type": "main", "tests": ["e1"], "files": ["results/ext.csv"], "metric": "fp", "lower": True},
+                               dict(agent["experiments"][0], ours="MCD")]}
+        d = e.propose_map(doc)
+        m = d["proposed"]
+        self.assertEqual((m["method"]["name"], m["base"]["name"], m["goal"]), ("MCD_EXT", "MCD", "Generalise MCD to unseen streams."))
+        self.assertEqual([(q["id"], q["scope"]) for q in m["questions"]], [("q1", "base"), ("e1", "extension")])
+        self.assertEqual(e.edit_map({"question": {"id": "q1", "scope": "extension"}})["proposed"]["questions"][0]["scope"], "extension")
+        e.edit_map({"question": {"id": "q1", "scope": "base"}})
+        e.confirm_map()
+        x = e.experiments()
+        self.assertEqual(x["extends"]["base"]["name"], "MCD")
+        self.assertEqual([(s["id"], s["scope"]) for s in x["sections"]], [("e1", "extension"), ("q1", "base")])           # the extension comes first
+        sm = x["sections"][0]["experiments"][0]["summary"]
+        self.assertEqual((sm["ours_label"], sm["base"]), ("MCD_EXT", {"label": "MCD", "value": 30.0, "gap": 3.0}))
+        self.assertEqual(x["sections"][1]["experiments"][0]["summary"]["ours_label"], "MCD")                            # re-checking the original: ours is MCD there
+        self.assertEqual(e.edit_map({"base": ""})["proposed"]["base"], None)
+        bad = e.propose_map(dict(doc, base={"name": "MCD_EXT"}))
+        self.assertIn("the base method has the same name as ours", [r["why"] for r in bad["report"]])
+        e.discard_map()
+        for f in ("NOTES.md", "results/ext.csv"):
+            os.remove(R + "/code/" + f)
+        subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "undo"], check=True, capture_output=True)
+
     def test_mcp_tools(self):
         ctx = mcp.LocalCtx(self.tmp)
         pid = ctx.list_projects()[0]["id"]

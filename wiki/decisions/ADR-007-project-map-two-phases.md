@@ -27,6 +27,8 @@ Status: **proposed** (Juhyeong approved the design in chat; this page is the wri
 6. **Confirming** turns the map's questions into claims (reusing ones the paper already states) and links each to the tables its experiments feed, so the Claims tree and the Experiments page agree.
 7. **Drift.** Files and main-text tables the map does not cover are listed as "Not in the map"; they are never guessed into a question.
 
+8. **Extending a paper.** The map may name a base method and a goal; questions are scoped as the original's claims or the extension's. Founder decision, chat 2026-11-11 15:34 KST.
+
 ## Consequences
 - The Experiments page shows one row per experiment (a group of runs), "ours" is set once, tuning runs collapse into one row.
 - Quality of Phase 1 depends on the agent the researcher uses; the checker stops invented quotes and files, not a wrong reading of a real quote. The researcher's confirmation is the safeguard.
