@@ -10,6 +10,7 @@ import { isPrivateHost, normalizeServerUrl } from './core/url';
 import { oneLine } from './core/text';
 import { DEFAULT_URL, TOKEN_PREFIX, serverFromInspect, tokenFor, tokenKey } from './core/settings';
 import { HubProject, TriageState } from './core/types';
+import { RunCapture } from './runs';
 
 const WHY_SCHEME = 'lemmata-why';
 
@@ -73,6 +74,11 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
   serverSetting() { return serverFromInspect(this.cfg().inspect<string>('serverUrl')); }
   serverBase(): string { return this.serverUrl; }
   clientOrNull(): HubClient | null { return this.client; }
+  /** Runs are sent to the project whose code repository this workspace folder is. */
+  projectFor(folderKey: string): { client: HubClient; pid: string } | null {
+    const b = this.client && this.status === 'ok' ? this.bound.find(x => x.binding.folders.code === folderKey) : undefined;
+    return b && this.client ? { client: this.client, pid: b.binding.project.id } : null;
+  }
   resetClient() { this.client = null; }
 
   refresh(): Promise<void> {
@@ -408,7 +414,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ctx.secrets.onDidChange(e => { if (e.key.startsWith(TOKEN_PREFIX)) { CTRL.resetClient(); void CTRL.refresh(); } }),
     { dispose: () => CTRL.dispose() },
   );
+  const runs = new RunCapture(ctx, CTRL);
+  runs.register();
   await CTRL.start();
+  await runs.start();
 }
 
 export function deactivate() { /* disposables are registered on the context */ }

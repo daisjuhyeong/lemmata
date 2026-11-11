@@ -10,6 +10,7 @@ import { loadModel } from '../../src/core/load';
 import { matchProjects, parseGitConfigRemotes } from '../../src/core/remotes';
 import { toDiagnostics, Diag } from '../../src/core/model';
 import { formatWhy } from '../../src/core/why';
+import { RunManifest, addArtifact, asManifest, isoLocal, parseMetrics, runId, sha256 } from '../../src/core/runs';
 
 const REPO = path.resolve(__dirname, '../../../..');
 let proc: ChildProcess; let fx: any; let tmp: string; let client: HubClient;
@@ -149,6 +150,29 @@ test('paper inside the code repo (subdir): paper/<rel> lands in <code folder>/<s
   const tex = d.find(x => x.rel === 'docs/paper/main.tex');
   assert.ok(tex, 'Table 2 maps to docs/paper/main.tex');
   assert.match(fs.readFileSync(path.join(wsMono, tex!.rel), 'utf8').split('\n')[tex!.line0], /\\begin\{table/);
+});
+
+test('runs: a run made in the checkout reaches the hub with its commit, numbers and the tracked file it wrote', async () => {
+  const head = git(wsCode, 'rev-parse', 'HEAD').trim();
+  const started = new Date();
+  const man: RunManifest = { run_id: runId(started, 'python train.py --seed 2', wsCode), source: 'terminal', command: 'python train.py --seed 2', cwd: wsCode, host: 'test',
+    git_sha: head, dirty: false, diff_hash: null, configs: [{ path: 'configs/default.yaml', hash: sha256(fs.readFileSync(path.join(wsCode, 'configs/default.yaml'))) }],
+    metrics: {}, artifacts: [], started: isoLocal(started), ended: null, exit_code: null };
+  assert.deepEqual(await client.postRuns(fx.pid, [man]), { added: 1, updated: 0, total: 1 });
+  // the run ends and has written a metrics file the hub already tracks
+  const text = fs.readFileSync(path.join(wsCode, 'results/metrics.json'), 'utf8');
+  const done = { ...addArtifact(man, 'results/metrics.json', sha256(text), parseMetrics('results/metrics.json', text)), ended: isoLocal(new Date()), exit_code: 0 };
+  assert.ok(Object.keys(done.metrics).length > 0, 'numbers were read from the metrics file');
+  assert.deepEqual(await client.postRuns(fx.pid, [done, { ...done, run_id: runId(started, 'other', wsCode), git_sha: 'abcdef1234', dirty: true, artifacts: [] }]), { added: 1, updated: 1, total: 2 });
+  const got = await client.runs(fx.pid);
+  assert.equal(got.counts.total, 2);
+  const mine = (got.runs as any[]).find(r => r.run_id === man.run_id);
+  assert.deepEqual([mine.state, mine.in_github, mine.exit_code, mine.tracked.map((t: any) => t.path)], ['in github', true, 0, ['results/metrics.json']]);
+  assert.deepEqual(mine.metrics, done.metrics);
+  assert.ok(asManifest(mine), 'what the hub returns is still a valid manifest');
+  assert.equal((got.runs as any[]).find(r => r.run_id !== man.run_id).state, 'uncommitted');
+  await assert.rejects(client.postRuns(fx.pid, [{ ...man, source: 'web' }]), (e: unknown) => e instanceof HubError && e.status === 400);
+  await assert.rejects(new HubClient(fx.url, 'lmt_wrong').postRuns(fx.pid, [man]), (e: unknown) => e instanceof HubError && e.unauthorized);
 });
 
 test('sync works and returns code/paper results; checkpoint resets the alarms', async () => {

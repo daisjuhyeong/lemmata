@@ -1,16 +1,26 @@
 {
   "name": "lemmata",
   "displayName": "Lemmata",
-  "description": "Lemmata alarms and findings for your ML paper and code, shown as VS Code diagnostics.",
-  "version": "0.1.1",
+  "description": "Lemmata in your editor: alarms and findings for your ML paper and code, and a log of the experiments you run (terminal, results folders, coding agent).",
+  "version": "0.2.0",
   "publisher": "lemmata-local",
   "license": "UNLICENSED",
   "private": true,
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Linters", "Other"],
-  "repository": { "type": "git", "url": "https://github.com/lemmata-local/lemmata.git" },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lemmata-local/lemmata.git"
+  },
   "main": "./out/src/extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "configuration": {
       "title": "Lemmata",
@@ -33,52 +43,254 @@
           "default": 30,
           "minimum": 10,
           "description": "How often to fetch alarms and findings from the hub (also on window focus and file save)."
+        },
+        "lemmata.runs.capture": {
+          "type": "boolean",
+          "scope": "window",
+          "default": true,
+          "markdownDescription": "Log experiments run in the integrated terminal and result files that appear in the results folders into `.lemmata/runs/` (git-ignored), and send those run records to your hub. Only the command, commit, hashes, numbers and file paths are recorded: never code, data or weights."
+        },
+        "lemmata.runs.commandPattern": {
+          "type": "string",
+          "scope": "window",
+          "default": "",
+          "markdownDescription": "Regular expression for the commands that count as experiments. Empty uses the built-in pattern (python, accelerate launch, torchrun, sbatch, srun, `bash x.sh`, `./x.sh`, optionally behind `uv run`, env assignments or `nohup`)."
+        },
+        "lemmata.runs.resultFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "scope": "window",
+          "default": [],
+          "markdownDescription": "Globs (relative to the repository) of the folders your runs write results to. Empty uses `results/**`, `outputs/**`, `output/**`, `runs/**`, `logs/**`, `experiments/**`, `exp/**`, `checkpoints/**`."
+        },
+        "lemmata.runs.metricFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "scope": "window",
+          "default": [],
+          "markdownDescription": "File-name globs of metrics files inside those folders. Empty uses `*metric*`, `*result*`, `*score*`, `*eval*` as `.json`/`.csv`, `summary.json` and `*metric*.jsonl`."
         }
       }
     },
     "commands": [
-      { "command": "lemmata.connect", "title": "Connect to Server", "category": "Lemmata" },
-      { "command": "lemmata.disconnect", "title": "Disconnect (forget token)", "category": "Lemmata" },
-      { "command": "lemmata.refresh", "title": "Refresh", "category": "Lemmata", "icon": "$(refresh)" },
-      { "command": "lemmata.sync", "title": "Sync now", "category": "Lemmata", "icon": "$(sync)" },
-      { "command": "lemmata.checkpoint", "title": "Set checkpoint", "category": "Lemmata", "icon": "$(bookmark)" },
-      { "command": "lemmata.showPanel", "title": "Show panel", "category": "Lemmata" },
-      { "command": "lemmata.openItem", "title": "Open in editor", "category": "Lemmata" },
-      { "command": "lemmata.markReviewed", "title": "Mark Reviewed", "category": "Lemmata" },
-      { "command": "lemmata.markNeedsFixing", "title": "Needs fixing", "category": "Lemmata" },
-      { "command": "lemmata.markIgnored", "title": "Ignore", "category": "Lemmata" },
-      { "command": "lemmata.why", "title": "Why?", "category": "Lemmata" },
-      { "command": "lemmata.openInLemmata", "title": "Open in Lemmata", "category": "Lemmata" }
+      {
+        "command": "lemmata.connect",
+        "title": "Connect to Server",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.disconnect",
+        "title": "Disconnect (forget token)",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.refresh",
+        "title": "Refresh",
+        "category": "Lemmata",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lemmata.sync",
+        "title": "Sync now",
+        "category": "Lemmata",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "lemmata.checkpoint",
+        "title": "Set checkpoint",
+        "category": "Lemmata",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "lemmata.showPanel",
+        "title": "Show panel",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.openItem",
+        "title": "Open in editor",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.markReviewed",
+        "title": "Mark Reviewed",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.markNeedsFixing",
+        "title": "Needs fixing",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.markIgnored",
+        "title": "Ignore",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.why",
+        "title": "Why?",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.openInLemmata",
+        "title": "Open in Lemmata",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.runs.sync",
+        "title": "Send runs to the hub now",
+        "category": "Lemmata",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "lemmata.runs.refresh",
+        "title": "Refresh runs",
+        "category": "Lemmata",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lemmata.runs.show",
+        "title": "Show runs",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.runs.open",
+        "title": "Open the run record",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.setupAgent",
+        "title": "Set up coding agent (Claude Code)",
+        "category": "Lemmata",
+        "icon": "$(hubot)"
+      }
     ],
     "viewsContainers": {
-      "activitybar": [ { "id": "lemmata", "title": "Lemmata", "icon": "media/lemmata.svg" } ]
+      "activitybar": [
+        {
+          "id": "lemmata",
+          "title": "Lemmata",
+          "icon": "media/lemmata.svg"
+        }
+      ]
     },
     "views": {
-      "lemmata": [ { "id": "lemmata.panel", "name": "Alarms and findings" } ]
+      "lemmata": [
+        {
+          "id": "lemmata.panel",
+          "name": "Alarms and findings"
+        },
+        {
+          "id": "lemmata.runs",
+          "name": "Runs"
+        }
+      ]
     },
     "viewsWelcome": [
-      { "view": "lemmata.panel", "contents": "Not connected to a Lemmata server yet.\n[Connect to Server](command:lemmata.connect)", "when": "!lemmata.connected" }
+      {
+        "view": "lemmata.panel",
+        "contents": "Not connected to a Lemmata server yet.\n[Connect to Server](command:lemmata.connect)",
+        "when": "!lemmata.connected"
+      },
+      {
+        "view": "lemmata.runs",
+        "contents": "No runs logged yet.\nRun an experiment in the integrated terminal (for example `python train.py`) and it appears here with its commit and numbers. Jobs started elsewhere are picked up when they write a metrics file into a results folder.\n[Set up coding agent](command:lemmata.setupAgent)",
+        "when": "!lemmata.hasRuns"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "lemmata.refresh", "when": "view == lemmata.panel", "group": "navigation@1" },
-        { "command": "lemmata.sync", "when": "view == lemmata.panel", "group": "navigation@2" },
-        { "command": "lemmata.checkpoint", "when": "view == lemmata.panel", "group": "navigation@3" }
+        {
+          "command": "lemmata.refresh",
+          "when": "view == lemmata.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lemmata.sync",
+          "when": "view == lemmata.panel",
+          "group": "navigation@2"
+        },
+        {
+          "command": "lemmata.checkpoint",
+          "when": "view == lemmata.panel",
+          "group": "navigation@3"
+        },
+        {
+          "command": "lemmata.runs.refresh",
+          "when": "view == lemmata.runs",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lemmata.runs.sync",
+          "when": "view == lemmata.runs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "lemmata.setupAgent",
+          "when": "view == lemmata.runs",
+          "group": "navigation@3"
+        }
       ],
       "view/item/context": [
-        { "command": "lemmata.markReviewed", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@1" },
-        { "command": "lemmata.markNeedsFixing", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@2" },
-        { "command": "lemmata.markIgnored", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "1_triage@3" },
-        { "command": "lemmata.why", "when": "view == lemmata.panel && viewItem =~ /why/", "group": "2_inspect@1" },
-        { "command": "lemmata.openInLemmata", "when": "view == lemmata.panel && viewItem =~ /triageable/", "group": "2_inspect@2" }
+        {
+          "command": "lemmata.markReviewed",
+          "when": "view == lemmata.panel && viewItem =~ /triageable/",
+          "group": "1_triage@1"
+        },
+        {
+          "command": "lemmata.markNeedsFixing",
+          "when": "view == lemmata.panel && viewItem =~ /triageable/",
+          "group": "1_triage@2"
+        },
+        {
+          "command": "lemmata.markIgnored",
+          "when": "view == lemmata.panel && viewItem =~ /triageable/",
+          "group": "1_triage@3"
+        },
+        {
+          "command": "lemmata.why",
+          "when": "view == lemmata.panel && viewItem =~ /why/",
+          "group": "2_inspect@1"
+        },
+        {
+          "command": "lemmata.openInLemmata",
+          "when": "view == lemmata.panel && viewItem =~ /triageable/",
+          "group": "2_inspect@2"
+        }
       ],
       "commandPalette": [
-        { "command": "lemmata.openItem", "when": "false" },
-        { "command": "lemmata.markReviewed", "when": "false" },
-        { "command": "lemmata.markNeedsFixing", "when": "false" },
-        { "command": "lemmata.markIgnored", "when": "false" },
-        { "command": "lemmata.why", "when": "false" },
-        { "command": "lemmata.openInLemmata", "when": "false" }
+        {
+          "command": "lemmata.openItem",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.markReviewed",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.markNeedsFixing",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.markIgnored",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.why",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.openInLemmata",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.runs.open",
+          "when": "false"
+        }
       ]
     }
   },
@@ -92,9 +304,12 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "~1.93.0",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.0.0",
     "typescript": "^5.5.0"
-  }
+  },
+  "extensionKind": [
+    "workspace"
+  ]
 }

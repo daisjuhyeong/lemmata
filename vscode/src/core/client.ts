@@ -44,6 +44,8 @@ export class HubClient {
     this.req<Analysis>('GET', this.p(pid, 'analyze?group=' + encodeURIComponent(group) + '&node=' + encodeURIComponent(node)));
   setTriage = (pid: string, type: 'node' | 'finding', id: string, state: string, note: string) =>
     this.req<unknown>('POST', this.p(pid, 'triage'), { target_type: type, target_id: id, state, note });
+  runs = (pid: string) => this.req<{ runs: unknown[]; counts: Record<string, number> }>('GET', this.p(pid, 'runs'));
+  postRuns = (pid: string, runs: unknown[]) => this.req<{ added: number; updated: number; total: number }>('POST', this.p(pid, 'runs'), { runs });
   checkpoint = (pid: string, note: string) => this.req<unknown>('POST', this.p(pid, 'checkpoints'), { note, at: null });
   sync = (pid: string) => this.req<{ changed?: boolean; code?: { changed: boolean }; paper?: { changed: boolean; error?: string } }>('POST', '/api/hub/projects/' + encodeURIComponent(pid) + '/sync', {});
 }

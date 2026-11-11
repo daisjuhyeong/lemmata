@@ -34,7 +34,8 @@ TRIAGE_STATES = ("reviewed", "needs_fixing", "ignored", "unreviewed")
 INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code and results agree. Start with list_projects, "
                 "then alarms (what to re-check after changes) and findings (integrity problems with file:line evidence). "
                 "Paths are repo-relative; the paper repo is 'paper' and the code repo is 'code'. To help Lemmata understand a project (what the method "
-                "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map.")
+                "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map. "
+                "For experiments that were never committed, use runs.")
 
 E_PARSE, E_REQUEST, E_METHOD, E_PARAMS, E_INTERNAL = -32700, -32600, -32601, -32602, -32603
 
@@ -547,6 +548,53 @@ def t_experiments(ctx, args):
     return head + "\n" + "\n".join(lines), d, "Use node(project, node) for one file."
 
 
+def _run_line(r):
+    nums = ", ".join("%s=%s" % (k, ("%.4g" % v)) for k, v in list(r["metrics"].items())[:6])
+    bits = [(r.get("time") or "")[:16].replace("T", " "), r["state"].upper(), (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else ""),
+            _short(r.get("command") or "(seen by the results watcher)", 140)]
+    if nums:
+        bits.append(nums)
+    if r["tracked"]:
+        bits.append("wrote " + ", ".join(t["name"] for t in r["tracked"][:3]))
+    return "%s · %s" % (r["run_id"], " · ".join(bits))
+
+
+def t_runs(ctx, args):
+    pid, eng = _project(ctx, args)
+    limit = args.get("limit", 30)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
+        raise _Fail("Argument 'limit' must be a number from 1 to 200.")
+    d = eng.runs(1000)
+    rows = d["runs"]
+    q = args.get("contains")
+    if q is not None:
+        if not isinstance(q, str):
+            raise _Fail("Argument 'contains' must be text.")
+        low = q.lower()
+        rows = [r for r in rows if low in (r.get("command") or "").lower() or low in r["run_id"].lower() or (r.get("git_sha") or "").startswith(low)
+                or any(low in a["path"].lower() for a in r["artifacts"]) or any(low in k.lower() for k in r["metrics"])]
+    c = d["counts"]
+    head = ("%d runs logged from the editor or a coding agent: %d on uncommitted code, %d on commits not in GitHub, %d failed, %d with numbers."
+            % (c["total"], c["uncommitted"], c["not_in_github"], c["failed"], c["with_numbers"]))
+    body = _quote([_run_line(r) for r in rows[:limit]]) if rows else "No runs match."
+    return head + "\n" + NOTICE + "\n" + body, {"counts": c, "runs": rows[:limit]}, "Pass contains=<part of the command, a file path, a metric name or a commit> or a smaller limit."
+
+
+def t_log_run(ctx, args):
+    pid, eng = _project(ctx, args)
+    run = args.get("run")
+    if not isinstance(run, dict):
+        raise _Fail("Argument 'run' must be an object (run_id, command, git_sha, dirty, metrics, artifacts, started, ended, exit_code).")
+    run = dict(run, source="agent")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            out = eng.add_runs([run], by="mcp:%s" % (getattr(ctx, "device_id", None) or "local"))
+    else:
+        out = eng.add_runs([run], by="mcp:local")
+    return "Logged run %s (%d runs in the ledger)." % (run.get("run_id"), out["total"]), out, "Nothing to narrow."
+
+
 def t_tasks(ctx, args):
     pid, eng = _project(ctx, args)
     d = eng.tasks()
@@ -766,6 +814,18 @@ TOOLS = [
      "description": "One line per result file: what produced it (script, settings, run), when it was last written, which paper items and "
                     "claims rely on it, and whether it is out of date because the code or settings behind it changed afterwards.",
      "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "runs", "fn": t_runs, "title": "Runs outside GitHub",
+     "description": "Runs logged from the researcher's editor terminal, results folder or a coding agent, newest first: the command, the commit "
+                    "it ran on (and whether there were uncommitted changes), the numbers it wrote and which tracked result files it wrote. "
+                    "Use it to answer 'which run produced this number?' and 'what did I run last week?' instead of guessing from logs.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "contains": {"type": "string", "description": "Filter: part of the command, a file path, a metric name or a commit hash."},
+                             "limit": {"type": "integer", "description": "How many runs (default 30, at most 200)."}}, ["project"]), "annotations": dict(_RO)},
+    {"name": "log_run", "fn": t_log_run, "title": "Log a run",
+     "description": "Record one experiment run you just executed for the user: run_id (date-time plus a short suffix), command, git_sha, dirty, "
+                    "metrics (name to number), artifacts ([{path}] of files written), started, ended, exit_code. Only log runs that really "
+                    "happened, with the numbers the run printed or wrote. Skip it when the project has the Lemmata hook, which logs runs itself.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "run": {"type": "object", "description": "The run manifest."}}, ["project", "run"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "tasks", "fn": t_tasks, "title": "Tasks from feedback",
      "description": "Open tasks made from advisor or reviewer feedback, with the paper items and files each one points at and what else to "
                     "recheck when it is done. Pass all=true to include finished tasks.",

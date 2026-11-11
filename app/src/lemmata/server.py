@@ -360,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/map": need("project_map"), "/brief": need("brief")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -430,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(404, "not_found", "unknown route")
         # POST
         RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review")
-        if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
+        if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
             raise ApiError(404, "not_found", "unknown route")
@@ -438,6 +438,9 @@ class Handler(BaseHTTPRequestHandler):
         if r == "/ask":
             with self.app.lock:
                 return self._json(need("ask")(body.get("question")))
+        if r == "/runs":     # run manifests from the VS Code extension or a coding agent's hook (no code, data or weights)
+            with self.app.lock:
+                return self._json(need("add_runs")(body.get("runs"), getattr(self, "triage_by", None)), 201)
         if r in RESEARCH:
             def txt(k, req=False):
                 v = body.get(k)

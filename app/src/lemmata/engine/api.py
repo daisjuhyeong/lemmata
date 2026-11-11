@@ -1,7 +1,7 @@
 """Engine facade: the only module server.py and cli.py import (data-model 13)."""
 import copy
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import alarms as alarmsmod
@@ -19,6 +19,7 @@ from . import store
 from . import track as trackmod
 from . import tree as treemod
 from . import review as reviewmod
+from . import runs as runsmod
 from . import triage as triagemod
 from . import understand as undmod
 from .errors import BadRequest, NotFound
@@ -644,8 +645,27 @@ class Engine:
         s = self._ensure()
         if not isinstance(days, int) or not 1 <= days <= 90:
             raise BadRequest("days must be 1 to 90")
-        return processmod.digest(s["man"].get("name", self.root.name), self.timeline(), self.ledger(), self.claims(), self.tasks(),
-                                 s["alarms"], now_iso(), days)
+        d = processmod.digest(s["man"].get("name", self.root.name), self.timeline(), self.ledger(), self.claims(), self.tasks(),
+                              s["alarms"], now_iso(), days)
+        rows = self.runs(1000)["runs"]
+        since = (datetime.now().astimezone() - timedelta(days=days)).replace(microsecond=0).isoformat()
+        line = runsmod.digest_line(rows, since)
+        if line:
+            d["text"] += "\n" + line
+            d["numbers"]["runs"] = sum(1 for r in rows if runsmod.newer(r.get("time"), since))
+        return d
+
+    # ------------------------------------------------------------------ runs logged outside GitHub (editor, agent)
+    def runs(self, limit=200):
+        s = self._ensure()
+        return runsmod.view(runsmod.load(self.hub), s["G"].nodes, s["events"], self._roles(), limit)
+
+    def add_runs(self, runs, by=None):
+        self._ensure()
+        st = runsmod.load(self.hub)
+        out = runsmod.add(st, runs, by, now_iso())
+        self.hub.write_json("runs.json", st)
+        return out
 
     def ask(self, question):
         s = self._ensure()
