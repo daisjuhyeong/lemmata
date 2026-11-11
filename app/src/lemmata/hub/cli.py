@@ -127,6 +127,44 @@ def cmd_install(args):
     return 0
 
 
+def cmd_update(args):
+    from . import update
+    d = _data(args)
+    return 0 if update.run(d, Config(d), force=args.force) in ("none", "updated") else 1
+
+
+def cmd_autoupdate(args):
+    from . import update
+    d = _data(args)
+    cfg = Config(d)
+    if args.action == "install":
+        kw = {}
+        if args.notify is not None:
+            from .projects import SLACK_RE
+            if args.notify and not SLACK_RE.match(args.notify):
+                raise SystemExit("lemmata: --notify must be a Slack incoming-webhook URL (https://hooks.slack.com/services/...).")
+            kw["update_webhook"] = args.notify or None
+        if args.on_failure is not None:
+            kw["update_on_failure"] = args.on_failure or None
+        if kw:
+            cfg.update(**kw)
+        update.setup(d, cfg, branch=args.branch, every=args.every)
+    elif args.action == "uninstall":
+        update.remove()
+    else:
+        c, st = cfg.load(), update.state(d)
+        on = update.plist_path().exists()
+        print("self-update: %s" % ("on, following %s every %s s" % (c.get("update_branch"), c.get("update_every")) if on else "off"))
+        print("checkout: %s" % update.deploy_dir(d))
+        print("Slack reports: %s · on failure: %s" % ("yes" if c.get("update_webhook") else "no", c.get("update_on_failure") or "nothing"))
+        if st:
+            print("last change: %s %s %s -> %s%s" % (st.get("time"), st.get("result"), (st.get("from") or "")[:7], (st.get("to") or "")[:7],
+                                                   "\n  " + "\n  ".join(st.get("subjects") or []) if st.get("subjects") else ""))
+            if st.get("detail"):
+                print("  " + st["detail"].replace("\n", "\n  "))
+    return 0
+
+
 def cmd_uninstall(args):
     from . import launchd
 
@@ -268,6 +306,11 @@ def cmd_status(args):
             print("running: yes (version %s)" % json.loads(r.read())["version"])
     except Exception:
         print("running: no")
+    from . import update
+    st = update.state(d)
+    if update.plist_path().exists():
+        print("self-update: on, following %s%s" % (c.get("update_branch"), " · last: %s %s -> %s (%s)" % (st.get("result"), (st.get("from") or "")[:7],
+                                                   (st.get("to") or "")[:7], st.get("time")) if st else ""))
     return 0
 
 
@@ -290,6 +333,18 @@ def add_parser(sub):
     p.set_defaults(fn=cmd_install)
     p = hs.add_parser("uninstall")
     p.set_defaults(fn=cmd_uninstall)
+    p = hs.add_parser("update", help="one self-update pass: pull the followed branch, check it starts, restart, roll back if needed")
+    data(p)
+    p.add_argument("--force", action="store_true", help="restart even when nothing new was pushed")
+    p.set_defaults(fn=cmd_update)
+    p = hs.add_parser("autoupdate", help="keep the hub up to date with a GitHub branch, on its own")
+    p.add_argument("action", choices=["install", "uninstall", "status"])
+    data(p)
+    p.add_argument("--branch", help="branch to follow (default: the branch of this checkout)")
+    p.add_argument("--every", type=int, default=300, help="seconds between checks (default 300)")
+    p.add_argument("--notify", help="Slack incoming-webhook URL for update reports ('' to clear)")
+    p.add_argument("--on-failure", help="shell command to run when an update fails or is rolled back ('' to clear)")
+    p.set_defaults(fn=cmd_autoupdate)
     p = hs.add_parser("status")
     data(p)
     p.set_defaults(fn=cmd_status)

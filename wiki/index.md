@@ -20,6 +20,7 @@ last_reviewed: 2026-11-02
   - S07 public site + claim map: [brief](sprints/S07/S07-brief.md) · setup: `docs/PUBLIC-SITE.md`
   - S08 research tree: [brief](sprints/S08/S08-brief.md)
   - S09 math and notation: [brief](sprints/S09/S09-brief.md)
+  - S10 self-updating hub: [brief](sprints/S10/S10-brief.md) · setup: `docs/AUTO-UPDATE.md`
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

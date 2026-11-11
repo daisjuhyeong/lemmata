@@ -25,6 +25,8 @@ DEFAULTS = {
     "allowed_users": [],         # GitHub logins admitted when signup = invite
     "max_users": 50,
     "max_projects_per_user": 5,
+    # self-update (S10). Set only by `lemmata hub autoupdate install` on the Mac mini, never over HTTP.
+    "update_branch": None, "update_every": 300, "update_webhook": None, "update_on_failure": None,
 }
 
 
@@ -106,6 +108,6 @@ class Config:
 
     def update(self, **kw):
         c = read_json(self.data.config_path, {}) or {}
-        c.update({k: v for k, v in kw.items() if v is not None or k in ("owner", "public_url")})
+        c.update({k: v for k, v in kw.items() if v is not None or k in ("owner", "public_url", "update_webhook", "update_on_failure")})
         write_private(self.data.config_path, json.dumps(c, indent=1) + "\n")
         return self.load()
