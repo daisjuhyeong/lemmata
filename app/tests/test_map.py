@@ -290,6 +290,15 @@ class MapTest(unittest.TestCase):
         self.assertIn("Only the researcher can confirm", text)
         self.assertIn("Map state: proposed", call("project_map", {})[1])
         self.assertTrue(call("propose_map", {"map": "x"})[0])
+        _, out = mcp.handle(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_brief", "arguments": {"project": pid, "part": "files"}}}), ctx)
+        self.assertEqual(json.loads(out)["result"]["structuredContent"]["result_files"]["total"], 33)      # clients that read structured content see the data
+        _, out = mcp.handle(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "project_brief", "arguments": {"project": pid}}}), ctx)
+        self.assertIn("propose_map", json.loads(out)["result"]["structuredContent"]["how_to_write_a_map"])
+        rep = self.e.propose_map(dict(agent, method={"name": "MCD", "base": {"name": "DDM"}}, goal={"text": "x"}, extra=1))["report"]
+        whys = [r["why"] for r in rep]
+        self.assertIn("unknown field 'extra' (the map has: method, base, goal, questions, experiments, ignore)", whys)
+        self.assertIn("unknown field 'base' inside method; base and goal go at the top level of the map", whys)
+        self.assertIn("the goal must be one sentence of plain text", whys)
 
 
 if __name__ == "__main__":

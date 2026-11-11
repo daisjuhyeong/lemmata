@@ -341,6 +341,10 @@ def verify(doc, G, trees, infos, claims_doc):
         return items[:n]
 
     out = {"schema": SCHEMA, "method": None, "base": None, "goal": None, "questions": [], "experiments": [], "ignore": []}
+    for k in sorted(set(doc) - {"schema", "method", "base", "goal", "questions", "experiments", "ignore", "proposed_by"}):
+        note("dropped", "map", "unknown field %r (the map has: method, base, goal, questions, experiments, ignore)" % str(k)[:30])
+    for k in sorted(set(doc.get("method") or {}) - {"name", "aliases", "evidence", "note"} if isinstance(doc.get("method"), dict) else []):
+        note("dropped", "method", "unknown field %r inside method%s" % (str(k)[:30], "; base and goal go at the top level of the map" if k in ("base", "goal") else ""))
     # method (ours) and, for an extension, the method of the paper being extended (base)
     hay = _squash(" ".join(l.code for l in G.paper.lines)) if G.paper is not None else ""
     labels = _names_in(files, trees)
@@ -367,6 +371,8 @@ def verify(doc, G, trees, infos, claims_doc):
         if out["base"] and out["method"] and norm(out["base"]["name"]) == norm(out["method"]["name"]):
             note("dropped", "base", "the base method has the same name as ours")
             out["base"] = None
+    if doc.get("goal") is not None and not isinstance(doc.get("goal"), str):
+        note("dropped", "goal", "the goal must be one sentence of plain text")
     if isinstance(doc.get("goal"), str) and doc["goal"].strip():
         out["goal"] = " ".join(doc["goal"].split())[:300]
         if not out.get("base"):

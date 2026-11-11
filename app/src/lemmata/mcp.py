@@ -611,15 +611,18 @@ def t_project_brief(ctx, args):
         text = (und.GUIDE + "\nThe brief comes in parts. Call project_brief again with part='paper' (stated questions and contributions, tables, "
                 "figures), part='files' (result files grouped by shape) and part='code' (scripts, options, settings, history) before proposing.\n\n"
                 + _quote([json.dumps(body, ensure_ascii=False, indent=1)]))
+        data = dict(body, part="overview", how_to_write_a_map=und.GUIDE, next="Call project_brief with part='paper', then 'files', then 'code'.")
     elif part == "paper":
-        text = _quote([json.dumps({"stated": b["paper"]["stated"], "floats": b["paper"]["floats"]}, ensure_ascii=False, indent=1)])
+        data = {"part": "paper", "stated": b["paper"]["stated"], "floats": b["paper"]["floats"]}
     elif part == "files":
-        text = _quote([json.dumps(b["result_files"], ensure_ascii=False, indent=1)])
+        data = {"part": "files", "result_files": b["result_files"]}
     elif part == "code":
-        text = _quote([json.dumps({k: b[k] for k in ("scripts", "settings", "history")}, ensure_ascii=False, indent=1)])
+        data = dict({k: b[k] for k in ("scripts", "settings", "history")}, part="code")
     else:
         raise _Fail("part must be one of overview, paper, files, code.")
-    return text, b if part == "overview" else {"part": part}, "Ask for one part at a time; read the files themselves for more."
+    if part != "overview":
+        text = _quote([json.dumps(data, ensure_ascii=False, indent=1)])
+    return text, data, "Ask for one part at a time; read the files themselves for more."
 
 
 def _map_text(d):
