@@ -73,7 +73,7 @@ function rxSupportRow(c, s) {
     h('div', { class: 'rx-sup-h' },
       h('span', { class: 'rx-rel' }, suggested ? 'Suggested' : rel), name,
       s.detail ? h('span', { class: 'muted' }, ' · ', rxMath(s.detail)) : null, h('span', { class: 'grow' }), rxWhere(s.loc),
-      suggested ? [h('button', { class: 'btn sm primary', disabled: READONLY, onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: true }); if (r) { RX.claims = r; rxTrack('claim_linked'); renderPage(true); renderLeft(); } } }, 'Yes, this backs it'),
+      suggested ? [h('button', { class: 'btn sm primary', disabled: READONLY, onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: true }); if (r) { RX.claims = r; rxTrack('claim_linked'); renderPage(true); renderLeft(); } } }, '✓ Yes'),
         h('button', { class: 'btn sm', disabled: READONLY, onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: false }); if (r) { RX.claims = r; renderPage(true); } } }, 'No')]
         : (s.how === 'manual' || s.node_id) && !READONLY ? h('button', { class: 'linkbtn small', title: 'Remove this link', onclick: async () => { const r = await rxPost('/api/claims/link', { id: c.id, target: key, on: false }); if (r) { RX.claims = r; renderPage(true); renderLeft(); } } }, 'Unlink') : null),
     rxChain(s),
@@ -120,9 +120,9 @@ function rxClaimCard(c) {
       sug.map(s => rxSupportRow(c, s)),
       c.note ? h('div', { class: 'rx-note' }, h('b', null, 'Your note: '), c.note) : null,
       READONLY ? null : h('div', { class: 'btnrow' },
-        c.state !== 'confirmed' ? h('button', { class: 'btn primary', onclick: () => setState('confirmed') }, 'Yes, this is a claim of the paper') : h('button', { class: 'btn', onclick: () => setState('proposed') }, 'Back to draft'),
-        h('button', { class: 'btn', onclick: () => rxLinkDialog(c) }, 'Link evidence…'),
-        h('button', { class: 'btn', onclick: () => rxEditDialog(c) }, 'Edit wording / note'),
+        c.state !== 'confirmed' ? h('button', { class: 'btn primary', onclick: () => setState('confirmed') }, 'Confirm') : h('button', { class: 'btn', onclick: () => setState('proposed') }, 'Back to draft'),
+        h('button', { class: 'btn', onclick: () => rxLinkDialog(c) }, '+ Evidence'),
+        h('button', { class: 'btn', onclick: () => rxEditDialog(c) }, 'Edit'),
         h('span', { class: 'grow' }),
         c.manual ? h('button', { class: 'linkbtn', onclick: async () => { const r = await rxPost('/api/claims/remove', { id: c.id }); if (r) { RX.claims = r; renderPage(true); renderLeft(); } } }, 'Delete')
           : c.state !== 'rejected' ? h('button', { class: 'linkbtn', onclick: () => setState('rejected') }, 'Not a claim') : h('button', { class: 'linkbtn', onclick: () => setState('proposed') }, 'Bring back'))) : null);
@@ -142,6 +142,7 @@ function pageClaims() {
     READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/claims.md'), title: 'Download claims.md to commit to your repository' }, '↓ .md')));
   if (!d.has_paper) root.append(emptyState('◆', 'No paper connected', 'Connect a paper repository or upload the LaTeX source as a zip from the project menu (⋯).'));
   if (RX.view === 'tree' && RX.tree) {
+    root.classList.add('wide');
     root.append(rxTree({ scrub: false }));
     const c = RX.sel && d.claims.find(x => x.id === RX.sel);
     if (c) { RX.open[c.id] = true; root.append(rxClaimCard(c)); }
@@ -154,7 +155,7 @@ function pageClaims() {
   const live = d.claims.filter(c => c.state !== 'rejected'), gone = d.claims.filter(c => c.state === 'rejected');
   const F = RX.filter;
   const pass = c => F === 'all' || (F === 'draft' ? c.state === 'proposed' : F === 'recheck' ? !!c.recheck : c.status === F);
-  const chips = [['all', 'All', live.length], ['unsupported', 'Not supported', cc.unsupported], ['partial', 'Partly', cc.partial], ['supported', 'Supported', cc.supported], ['recheck', 'Recheck', cc.recheck], ['draft', 'Drafts to confirm', cc.proposed]];
+  const chips = [['all', 'All', live.length], ['unsupported', 'Not supported', cc.unsupported], ['partial', 'Partly', cc.partial], ['supported', 'Supported', cc.supported], ['recheck', 'Recheck', cc.recheck], ['draft', 'Drafts', cc.proposed]];
   root.append(h('div', { class: 'fchips' }, chips.map(([k, l, n]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.filter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, n)))));
   const groups = [['What the paper contributes', c => c.kind === 'contribution' || c.kind === 'claim'], ['Questions it asks', c => c.kind === 'question'], ['Formal statements', c => !!c.formal]];
   for (const [title, fn] of groups) {
@@ -192,7 +193,7 @@ function rxTreeLayout(T) {
   const N = new Map(T.nodes.map(n => [n.id, n]));
   const claims = T.nodes.filter(n => n.layer === 'claim'), roots = T.nodes.filter(n => n.layer === 'root');
   const kids = new Map(); claims.forEach(c => { const p = c.parent || 'core'; if (!kids.has(p)) kids.set(p, []); kids.get(p).push(c.id); });
-  const CW = 96, TOP = 132, DY = 86, P = {};
+  const CW = 112, TOP = 132, DY = 100, P = {};
   let slot = 0, maxDepth = 1;
   const place = (id, depth) => {   // tidy tree: leaves take the next slot, a parent sits over the middle of its children
     const ch = kids.get(id) || []; maxDepth = Math.max(maxDepth, depth);
@@ -209,7 +210,7 @@ function rxTreeLayout(T) {
     const band = roots.filter(r => r.band === b); if (!band.length) continue;
     band.forEach(r => { const ps = (up.get(r.id) || []).filter(p => P[p]); r._want = ps.length ? ps.reduce((a, p) => a + P[p].x, 0) / ps.length : 0; });
     band.sort((a, c) => a._want - c._want || (a.id < c.id ? -1 : 1));
-    let prev = -Infinity; band.forEach(r => { const x = Math.max(r._want, prev + GAP); P[r.id] = { x, y: ground + 58 + (b - 1) * (pics ? 88 : 74) }; prev = x; });
+    let prev = -Infinity; band.forEach(r => { const x = Math.max(r._want, prev + GAP); P[r.id] = { x, y: ground + 58 + (b - 1) * (pics ? 92 : 84) }; prev = x; });
     const shift = band.reduce((a, r) => a + (r._want - P[r.id].x), 0) / band.length; band.forEach(r => { P[r.id].x += shift; });
   }
   let minX = Infinity, maxX = -Infinity, maxY = 0;
@@ -223,7 +224,11 @@ function rxTree(opts) {
   const T = RX.tree, L = rxTreeLayout(T), { P, N } = L;
   const wrap = h('div', { class: 'rx-treewrap' });
   const svg = sv('svg', { viewBox: '0 0 ' + L.W + ' ' + L.H, class: 'rx-tree', role: 'img', 'aria-label': 'Research tree: the core message at the top, the claims under it, and the evidence behind them as roots' });
-  svg.style.minWidth = Math.round(L.W * 0.66) + 'px';
+  const zoomTo = z => { RX.zoom = z; const fit = Math.min(1.6, Math.max(1, (wrap.clientWidth || 900) / L.W)); const k = z === 'fit' || z == null ? fit : Math.min(2.4, Math.max(0.6, z)); svg.style.width = Math.round(L.W * k) + 'px'; svg.dataset.k = k; };
+  const zbar = h('div', { class: 'rx-zoom', role: 'group', 'aria-label': 'Zoom' }, h('button', { class: 'btn sm', title: 'Smaller', onclick: () => zoomTo((+svg.dataset.k || 1) / 1.2) }, '−'), h('button', { class: 'btn sm', title: 'Fit the page', onclick: () => zoomTo('fit') }, 'Fit'), h('button', { class: 'btn sm', title: 'Larger', onclick: () => zoomTo((+svg.dataset.k || 1) * 1.2) }, '+'));
+  const scroller = h('div', { class: 'rx-treescroll' });
+  requestAnimationFrame(() => zoomTo(RX.zoom == null ? 'fit' : RX.zoom));
+  if (window.ResizeObserver) new ResizeObserver(() => { if (RX.zoom == null || RX.zoom === 'fit') zoomTo('fit'); }).observe(wrap);
   const nRoots = new Map(); T.edges.forEach(e => { if (e.kind === 'support' && e.how !== 'suggested') nRoots.set(e.from, (nRoots.get(e.from) || 0) + 1); });
   // soil, ground line, crown glow
   svg.append(sv('rect', { x: 0, y: L.ground, width: L.W, height: L.H - L.ground, class: 'soil' }), sv('line', { x1: 0, x2: L.W, y1: L.ground, y2: L.ground, class: 'ground' }),
@@ -238,7 +243,7 @@ function rxTree(opts) {
     const a = P[e.from], b = P[e.to]; if (!a || !b) continue;
     const to = N.get(e.to), fromRoot = N.get(e.from) && N.get(e.from).layer === 'root';
     let cls = 'e e-' + e.kind + (e.how === 'suggested' ? ' sug' : '') + (e.stale ? ' stale' : ''), w = 1.6, d;
-    if (e.kind === 'branch') { cls += ' st-' + to.status; w = 3 + Math.min(6, (nRoots.get(e.to) || 0) * 1.5 + (kidsCount(T, e.to)) * 1.5); d = curve(a, b); }
+    if (e.kind === 'branch') { cls += ' st-' + to.status; w = 2 + Math.min(4, (nRoots.get(e.to) || 0) + kidsCount(T, e.to)); d = curve(a, b); }
     else if (e.kind === 'uses') { const mx = (a.x + b.x) / 2, my = Math.min(a.y, b.y) - 30; d = 'M' + a.x + ',' + a.y + ' Q' + mx + ',' + my + ' ' + b.x + ',' + b.y; }
     else d = curve(a, b, !fromRoot);
     const p = sv('path', { d, class: cls, 'stroke-width': w, fill: 'none' }); gE.append(p); edgeEls.push({ e, el: p });
@@ -254,8 +259,8 @@ function rxTree(opts) {
       fo.append(h('div', { class: 'rx-coretext serif', title: READONLY ? '' : 'Click to reword' }, h('span', null, rxMath(n.title || 'No core message found. Click to write it.'))));
       inner.append(fo, sv('circle', { r: 13, class: 'dot' }), n.status === 'partial' ? sv('path', { d: half(13), class: 'halfdot' }) : null, n.recheck ? sv('circle', { r: 18, class: 'ring' }) : null);
     } else if (n.layer === 'claim') {
-      const r = n.depth > 1 ? 11 : 14;
-      inner.append(sv('circle', { r: r + 9, class: 'hit' }), n.recheck ? sv('circle', { r: r + 5, class: 'ring' }) : null, n.formal ? sv('rect', { x: -r, y: -r, width: 2 * r, height: 2 * r, rx: 3, class: 'dot' }) : sv('circle', { r, class: 'dot' }),
+      const r = n.depth > 1 ? 12 : 16;
+      inner.append(sv('circle', { r: r + 12, class: 'hit' }), n.recheck ? sv('circle', { r: r + 5, class: 'ring' }) : null, n.formal ? sv('rect', { x: -r, y: -r, width: 2 * r, height: 2 * r, rx: 3, class: 'dot' }) : sv('circle', { r, class: 'dot' }),
         n.status === 'partial' ? (n.formal ? sv('rect', { x: -r, y: -r, width: r, height: 2 * r, class: 'halfdot' }) : sv('path', { d: half(r), class: 'halfdot' })) : null,
         sv('text', { x: r + 7, y: 4, class: 'lab side' }, n.short + (n.state === 'proposed' ? ' ✎' : '')), n.recheck ? sv('text', { x: -r - 14, y: -r + 4, class: 'badge' }, '↻') : null,
         sv('title', null, n.label + ' — ' + RX_STATUS[n.status][1] + (n.recheck ? ', recheck' : '') + (n.state === 'proposed' ? ' (draft)' : '') + '\n' + n.title));
@@ -265,8 +270,8 @@ function rxTree(opts) {
         const im = sv('image', { x: -32, y: -23, width: 64, height: 46, href: apiUrl('/api/thumb?node=' + encodeURIComponent(n.node_id)), preserveAspectRatio: 'xMidYMid meet' });
         im.addEventListener('error', () => { im.replaceWith(sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind])); });
         inner.append(sv('rect', { x: -34, y: -25, width: 68, height: 50, rx: 3, class: 'box pic' + (n.traced === false ? ' untraced' : '') }), im, sv('text', { y: 37, class: 'lab' }, n.short));
-      } else inner.append(sv('rect', { x: -15, y: -12, width: 30, height: 24, rx: n.band === 1 ? 12 : 4, class: 'box' + (miss ? ' miss' : '') + (n.traced === false && !miss ? ' untraced' : '') }),
-        sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind] || '•'), sv('text', { y: 26, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short));
+      } else inner.append(sv('rect', { x: -18, y: -14, width: 36, height: 28, rx: n.band === 1 ? 14 : 6, class: 'box' + (miss ? ' miss' : '') + (n.traced === false && !miss ? ' untraced' : '') }),
+        sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind] || '•'), sv('text', { y: 30, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short));
       inner.append(n.shared > 1 ? sv('text', { x: pic ? 38 : 19, y: pic ? -18 : -8, class: 'badge' }, '×' + n.shared) : null,
         n.caveat ? sv('g', { transform: 'translate(' + (pic ? -34 : -15) + ',' + (pic ? -25 : -12) + ')' }, sv('circle', { r: 7, class: 'cav' }), sv('text', { y: 3.5, class: 'cavt' }, '!')) : null,
         sv('title', null, (RX_KINDWORD[n.kind] || n.kind) + (miss ? '' : ': ' + n.title) + (n.traced === false && !miss ? '\nNot traced to a result file or script' : '')));
@@ -288,7 +293,7 @@ function rxTree(opts) {
     els.forEach((el, k) => el.classList.toggle('on', !!on && on.has(k)));
     edgeEls.forEach(({ e, el }) => el.classList.toggle('on', !!on && on.has(e.from) && on.has(e.to)));
   }
-  wrap.append(svg);
+  scroller.append(svg); wrap.append(zbar, scroller);
   // time: positions never move; pieces only appear
   const t0 = T.span ? Date.parse(T.span.start) : 0, t1 = T.span ? Date.parse(T.span.end) : 0;
   const born = new Map(T.nodes.map(n => [n.id, n.born ? Date.parse(n.born) : null]));
@@ -302,7 +307,7 @@ function rxTree(opts) {
   }
   if (opts.scrub && T.span && t1 > t0) wrap.append(rxScrubber(T, t0, t1, setTime));
   else setTime(1);
-  wrap.append(rxLegend(T));
+  wrap.append(h('details', { class: 'rx-legend-d' }, h('summary', null, 'Legend'), rxLegend(T)));
   return wrap;
 }
 /* One figure, table or file: the picture, what it is for, whether it is connected to the repository, and your caveat. */
@@ -388,7 +393,7 @@ function pageTimeline() {
   const root = doc(h('h1', { class: 'ptitle' }, 'Timeline'));
   if (RX.tree && RX.tree.nodes.length) {
     root.append(rxTree({ scrub: true }));
-    if (RX.tree.undated) root.append(h('div', { class: 'muted small' }, RX.tree.dated ? 'Pieces without a date in git are shown from the start.' : 'No dates found in git for this tree.'));
+    if (RX.tree.undated) root.append(h('div', { class: 'muted small' }, RX.tree.dated ? '' : 'No dates in git'));
   }
   const host = root; const stepsBox = h('details', { class: 'details' }, h('summary', null, 'Steps (' + tl.steps.length + ')'));
   root.append(stepsBox);
@@ -562,16 +567,16 @@ function rxMapCard() {
   const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
   const name = S.project ? S.project.name : 'this project';
   if (M.state === 'none') return h('section', { class: 'rx-map none' },
-    h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Lemmata has not read this project yet'), h('span', { class: 'grow' }),
+    h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Not mapped yet'), h('span', { class: 'grow' }),
       READONLY ? null : h('button', { class: 'btn sm', title: 'A rough map from file names and columns, no AI', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules')),
-    READONLY ? null : h('div', { class: 'rx-map-ask' }, h('span', { class: 'muted small' }, 'Better: ask your Claude Code'), h('code', { class: 'rx-map-p' }, RX_MAP_PROMPT(name)), h('button', { class: 'btn sm', onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy')));
+    READONLY ? null : h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code to map this project: ' + RX_MAP_PROMPT(name), onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy prompt for Claude Code')));
   const m = M.proposed || M.confirmed, prop = M.state === 'proposed', cov = M.coverage || { n_files: 0, files: [], paper: [], total: 0 };
   const dropped = (M.report || []).filter(r => r.level === 'dropped'), warns = (M.report || []).filter(r => r.level !== 'dropped');
   const qOpts = m.questions.map(q => [q.id, q.label]);
   const head = h('div', { class: 'rx-map-h' }, h('span', { class: 'sg ' + (prop ? 'look' : 'fine') }, prop ? '◐' : '✓'),
-    h('b', null, prop ? 'Proposed map' : 'Project map'), h('span', { class: 'muted small' }, prop ? 'by ' + (M.proposed_by || 'agent') + ' · not used until you confirm' : M.confirmed_at ? 'confirmed ' + dmon(M.confirmed_at) : ''),
+    h('b', { title: prop ? 'Not used until you confirm' : null }, prop ? 'Proposed map' : 'Project map'), h('span', { class: 'muted small' }, prop ? 'by ' + (M.proposed_by || 'agent') : M.confirmed_at ? dmon(M.confirmed_at) : ''),
     h('span', { class: 'grow' }),
-    h('span', { class: 'rx-map-n' }, h('span', { title: 'What “ours” is called' }, 'ours = ', h('b', null, m.method ? m.method.name : '?')), m.base ? h('span', null, 'extends ', h('b', null, m.base.name)) : null, h('span', null, h('b', null, m.questions.length), ' questions'), h('span', null, h('b', null, m.experiments.length), ' experiments'),
+    h('span', { class: 'rx-map-n' }, h('span', { title: 'Our method' }, h('b', null, m.method ? m.method.name : '?')), m.base ? h('span', { title: 'Extends' }, '↳ ', h('b', null, m.base.name)) : null, h('span', { title: 'Questions' }, '◆ ', h('b', null, m.questions.length)), h('span', { title: 'Experiments' }, '▦ ', h('b', null, m.experiments.length)),
       cov.n_files ? h('span', { class: 'warn' }, h('b', null, cov.n_files), ' files unmapped') : null, dropped.length ? h('span', { class: 'bad' }, h('b', null, dropped.length), ' dropped') : null),
     prop && !READONLY ? [h('button', { class: 'btn sm', onclick: () => act('/api/map/discard', {}, 'Proposal discarded') }, 'Discard'), h('button', { class: 'btn sm primary', disabled: !m.experiments.length, onclick: () => act('/api/map/confirm', {}, 'Map confirmed') }, 'Confirm')] : null);
   const edit = change => act('/api/map/edit', { change });
@@ -596,7 +601,7 @@ function rxMapCard() {
     m.ignore.length ? h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ignored'), m.ignore.map(p => h('span', { class: 'rx-code mono' }, p))) : null,
     dropped.length ? h('div', { class: 'rx-map-rep' }, h('b', null, 'Dropped by the checker'), dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why))) : null,
     warns.length ? h('div', { class: 'rx-map-rep' }, warns.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))) : null,
-    !READONLY ? h('div', { class: 'rx-map-ask' }, h('span', { class: 'muted small' }, 'Redo with your Claude Code'), h('code', { class: 'rx-map-p' }, RX_MAP_PROMPT(name)), h('button', { class: 'btn sm', onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy'),
+    !READONLY ? h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm', title: 'Paste it into your Claude Code to redo the map: ' + RX_MAP_PROMPT(name), onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy prompt for Claude Code'),
       !prop ? h('button', { class: 'btn sm', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules') : null) : null);
   return h('section', { class: 'rx-map ' + M.state }, head, body);
 }
@@ -609,23 +614,81 @@ function rxUnmapped(U) {
       READONLY ? null : h('button', { class: 'linkbtn small', title: 'Never show files like these', onclick: () => post(c.pattern) }, 'Ignore'))),
       U.paper.map(p => h('div', { class: 'rx-um-r' }, rxNodeBtn(p.node_id, p.name), h('span', { class: 'muted small' }, trunc(p.caption, 80)), h('span', { class: 'grow' }), h('span', { class: 'rx-tl bad' }, '? no experiment')))));
 }
+/* The map: ours on the left, the questions it must answer, and the experiments behind each. Click a question for its
+   progress, an experiment for its detail. Positions are computed, never dragged. */
+function rxExpState(x, X) {
+  const sm = x.summary; if (x.tuning || !sm) return { k: 'none', g: null };
+  const g = X ? (sm.base ? sm.base.gap : null) : sm.gap;
+  return { k: g == null ? 'none' : g > 0 ? 'ahead' : g < 0 ? 'behind' : 'tie', g };
+}
+const RX_XSTATE = { ahead: ['▲', 'Ahead'], behind: ['▼', 'Behind'], tie: ['=', 'Level'], none: ['·', 'No comparison'] };
+function rxExpMap(E, renderSec) {
+  const X = E.extends, secs = E.sections, vs = X ? X.base.name : 'the best other method';
+  const exps = [], seen = new Map();
+  secs.forEach(s => s.experiments.forEach(x => { if (!seen.has(x.id)) { seen.set(x.id, x); exps.push(x); } }));
+  const RH = 44, QH = 108, GAP = 14, CX = [0, 225, 555], CW = [195, 290, 245], W = CX[2] + CW[2];
+  const ey = new Map(exps.map((x, i) => [x.id, i * RH]));
+  const qy = new Map(); let bottom = 0, sc0;
+  secs.forEach(s => { if (X && s.kind !== 'other' && s.scope !== sc0) { sc0 = s.scope; bottom += 26; } const ys = s.experiments.map(x => ey.get(x.id) + RH / 2); const want = ys.length ? ys.reduce((a, c) => a + c, 0) / ys.length - QH / 2 : bottom; const y = Math.max(bottom, want); qy.set(s.id, y); bottom = y + QH + GAP; });
+  const H = Math.max(bottom - GAP, exps.length * RH, 200), rootY = H / 2 - 70;
+  const sel = RX.mapSel || '', selQ = sel.startsWith('q:') ? sel.slice(2) : null, selX = sel.startsWith('x:') ? sel.slice(2) : null;
+  const litX = new Set(), litQ = new Set();
+  if (selQ) { litQ.add(selQ); (secs.find(s => s.id === selQ) || { experiments: [] }).experiments.forEach(x => litX.add(x.id)); }
+  if (selX) { litX.add(selX); secs.forEach(s => { if (s.experiments.some(x => x.id === selX)) litQ.add(s.id); }); }
+  const dim = (set, id) => sel && !set.has(id) ? ' dim' : '';
+  const pick = k => { RX.mapSel = RX.mapSel === k ? null : k; RX.exOpen = null; renderPage(true); };
+  const svg = sv('svg', { class: 'rx-m-edges', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'aria-hidden': 'true' });
+  const curve = (x1, y1, x2, y2) => 'M' + x1 + ',' + y1 + ' C' + (x1 + x2) / 2 + ',' + y1 + ' ' + (x1 + x2) / 2 + ',' + y2 + ' ' + x2 + ',' + y2;
+  const box = h('div', { class: 'rx-m', style: 'width:' + W + 'px;height:' + H + 'px' }, svg);
+  // tally
+  const tally = list => { const t = { ahead: 0, behind: 0, tie: 0, none: 0, check: 0 }; list.forEach(x => { t[rxExpState(x, X).k]++; if (x.attention) t.check++; }); return t; };
+  const meter = (list, big) => { const t = tally(list), n = list.length || 1; return h('span', { class: 'rx-m-meter' + (big ? ' big' : ''), title: t.ahead + ' ahead, ' + t.behind + ' behind, ' + t.tie + ' level, ' + t.none + ' without a comparison' },
+    ['ahead', 'tie', 'behind', 'none'].map(k => t[k] ? h('span', { class: 'm-' + k, style: 'flex:' + t[k] }) : null)); };
+  const all = tally(exps), cmp = all.ahead + all.behind + all.tie;
+  box.append(h('button', { class: 'rx-m-root' + (sel ? ' dim' : ''), style: 'left:0;top:' + rootY + 'px;width:' + CW[0] + 'px', onclick: () => { RX.mapSel = null; renderPage(true); }, title: 'Show everything' },
+    h('span', { class: 'rx-m-ours' }, (E.map && E.map.method ? E.map.method.name : null) || 'Ours'), X ? h('span', { class: 'rx-m-sub' }, 'extends ' + X.base.name) : null,
+    X && X.goal ? h('span', { class: 'rx-m-goal serif' }, trunc(X.goal, 90)) : null, meter(exps, true),
+    h('span', { class: 'rx-m-sub' }, cmp ? 'Ahead of ' + trunc(vs, 18) + ' in ' + all.ahead + ' of ' + cmp : 'Nothing to compare yet'), all.check ? h('span', { class: 'rx-m-chk' }, '! ' + all.check + ' to check') : null));
+  let lastScope;
+  secs.forEach(s => {
+    const y = qy.get(s.id), t = tally(s.experiments), c = t.ahead + t.behind + t.tie, st = RX_STATUS[s.status];
+    svg.append(sv('path', { d: curve(CW[0], rootY + 70, CX[1], y + QH / 2), class: 'me' + dim(litQ, s.id) }));
+    if (X && s.scope !== lastScope && s.kind !== 'other') { box.append(h('span', { class: 'rx-m-scope', style: 'left:' + CX[1] + 'px;top:' + (y - 24) + 'px' }, s.scope === 'extension' ? 'Extension' : s.scope === 'base' ? 'Original paper' : '')); lastScope = s.scope; }
+    box.append(h('button', { class: 'rx-m-q st-' + s.status + (selQ === s.id ? ' sel' : '') + dim(litQ, s.id), style: 'left:' + CX[1] + 'px;top:' + y + 'px;width:' + CW[1] + 'px;height:' + QH + 'px', 'aria-pressed': String(selQ === s.id), onclick: () => pick('q:' + s.id) },
+      h('span', { class: 'rx-m-qh' }, h('b', null, s.label), s.source === 'notes' ? h('span', { class: 'tag', title: 'From your notes, not stated in the paper' }, 'notes') : null, h('span', { class: 'grow' }), h('span', { class: 'sg ' + st[2], title: s.experiments.length ? (s.status === 'supported' ? 'Tested, nothing to check' : 'Something to check') : 'Not tested' }, st[0])),
+      h('span', { class: 'rx-m-qt serif' }, rxMath(trunc(s.text, 96))),
+      s.experiments.length ? h('span', { class: 'rx-m-qf' }, meter(s.experiments), h('span', { class: 'rx-m-sub' }, c ? t.ahead + ' of ' + c + ' ahead' : plural(s.experiments.length, 'experiment'))) : h('span', { class: 'rx-m-qf' }, h('span', { class: 'rx-m-chk bad' }, 'Not tested yet'))));
+    s.experiments.forEach(x => { const es = rxExpState(x, X); svg.append(sv('path', { d: curve(CX[1] + CW[1], y + QH / 2, CX[2], ey.get(x.id) + RH / 2), class: 'me x-' + es.k + (sel && !(litQ.has(s.id) && litX.has(x.id)) ? ' dim' : '') })); });
+  });
+  exps.forEach(x => { const es = rxExpState(x, X), g = RX_XSTATE[es.k];
+    box.append(h('button', { class: 'rx-m-x x-' + es.k + (selX === x.id ? ' sel' : '') + dim(litX, x.id), style: 'left:' + CX[2] + 'px;top:' + (ey.get(x.id) + 4) + 'px;width:' + CW[2] + 'px;height:' + (RH - 8) + 'px', 'aria-pressed': String(selX === x.id), onclick: () => pick('x:' + x.id),
+      title: x.name + ' · ' + (x.tuning ? 'Search: best of ' + x.tuning.runs : g[1] + (es.g != null ? ' of ' + vs + ' by ' + rxFmt(Math.abs(es.g)) : '')) + (x.attention ? ' · something to check' : '') },
+      h('span', { class: 'rx-m-g' }, g[0]), h('span', { class: 'rx-m-xn' }, x.name), x.attention ? h('span', { class: 'rx-m-chk' }, '!') : null,
+      h('span', { class: 'rx-m-xv mono' }, x.tuning ? 'best of ' + x.tuning.runs : es.g != null ? (es.g > 0 ? '+' : es.g < 0 ? '−' : '') + rxFmt(Math.abs(es.g)) : ''))); });
+  const out = [h('div', { class: 'rx-m-wrap' }, box),
+    h('div', { class: 'rx-legend' }, Object.keys(RX_XSTATE).map(k => h('span', null, h('span', { class: 'rx-m-g x-' + k }, RX_XSTATE[k][0]), ' ' + RX_XSTATE[k][1] + (k === 'ahead' || k === 'behind' ? ' ' + (k === 'ahead' ? 'of ' : '') + trunc(vs, 22) : ''))), h('span', null, '! to check'))];
+  if (selQ) { const s = secs.find(q => q.id === selQ); if (s) out.push(renderSec(s)); }
+  else if (selX && seen.has(selX)) { const x = seen.get(selX); out.push(h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-x-h' }, h('b', null, x.name), x.caption ? h('span', { class: 'muted' }, trunc(x.caption, 110)) : null), h('div', { class: 'rx-m-detail' }, rxExpDetail(x.id)))); }
+  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a question or an experiment.'));
+  return out;
+}
 function pageExperiments() {
   const nr = rxNotReady('Experiments'); if (nr) return nr;
   S.outline = [];
-  const E = RX.experiments, root = doc(h('h1', { class: 'ptitle' }, 'Experiments'));
+  const E = RX.experiments;
+  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['map', 'Map'], ['table', 'Table']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'map') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)));
+  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Experiments'), E ? seg : null));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
   const c = E.counts, mapped = !!E.unmapped;
   root.append(rxMapCard());
   const X = E.extends;
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
-    X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal set. Add one in the map.')));
-  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), mapped ? h('span', null, h('b', null, c.files), ' result files') : null, h('span', null, h('b', null, c.versions), ' result versions'),
+    X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal')));
+  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), 
     c.untested ? h('span', { class: 'bad' }, h('b', null, c.untested), ' not tested') : null, c.attention ? h('span', { class: 'warn' }, h('b', null, c.attention), ' to check') : null));
   const head = () => h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, X ? 'Ours vs ' + trunc(X.base.name, 12) : 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
   const WORD = { supported: 'Tested, nothing to check', partial: 'Something to check', unsupported: 'Not tested' };
-  let lastScope;
-  for (const s of E.sections) {
-    if (X && s.scope !== lastScope && s.kind !== 'other') { root.append(h('h2', { class: 'rx-ext-h' }, s.scope === 'extension' ? 'The extension' : s.scope === 'base' ? 'The original paper’s claims, re-checked' : 'Other questions')); lastScope = s.scope; }
+  const renderSec = s => {
     const st = RX_STATUS[s.status], cid = mapped ? s.claim_id : s.id;
     const sec = h('section', { class: 'rx-x-sec st-' + s.status },
       h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
@@ -635,7 +698,15 @@ function pageExperiments() {
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
     else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),
       READONLY ? null : s.suggested.map(g => h('button', { class: 'chip-btn', title: 'Link this as the experiment for it', onclick: async () => { const r = await rxPost('/api/claims/link', { id: s.id, target: g.node_id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } } }, g.name + '?'))));
-    root.append(sec);
+    return sec;
+  };
+  if (RX.exView !== 'table') { root.classList.add('wide'); root.append(rxExpMap(E, renderSec)); }
+  else {
+    let lastScope;
+    for (const s of E.sections) {
+      if (X && s.scope !== lastScope && s.kind !== 'other') { root.append(h('h2', { class: 'rx-ext-h' }, s.scope === 'extension' ? 'The extension' : s.scope === 'base' ? 'The original paper’s claims, re-checked' : 'Other questions')); lastScope = s.scope; }
+      root.append(renderSec(s));
+    }
   }
   if (mapped) root.append(rxUnmapped(E.unmapped));
   else if (E.unassigned.length) {
@@ -687,7 +758,7 @@ function pageTasks() {
   S.outline = [];
   const T2 = RX.tasks;
   const root = doc(h('h1', { class: 'ptitle' }, 'Tasks'),
-    h('p', { class: 'muted' }, 'Paste feedback. Lemmata turns it into linked tasks.'));
+    null);
   if (!READONLY) {
     const ta = h('textarea', { rows: '5', class: 'rx-ta', id: 'fb-text', 'aria-label': 'Feedback', placeholder: 'One point per line, for example:\n- Table 2 should include a second baseline\n- The proof of Theorem 1 does not use Assumption 2\n- Rerun evaluate.py with a longer window' });
     const src = h('input', { type: 'text', id: 'fb-source', 'aria-label': 'Where it came from', placeholder: 'Where it came from, e.g. Advisor meeting 10 Nov' });
@@ -755,7 +826,7 @@ function pageAsk() {
   };
   input.addEventListener('keydown', ev => { if (ev.key === 'Enter') run(); });
   const root = doc(h('h1', { class: 'ptitle' }, 'Ask'),
-    h('p', { class: 'muted' }, 'Looks things up in your paper and repository. Rules, not an AI model.'),
+
     h('div', { class: 'rx-askbar' }, input, h('button', { class: 'btn primary', id: 'ask-go', disabled: A.busy || READONLY, onclick: () => run() }, A.busy ? 'Looking…' : 'Ask')),
     h('div', { class: 'rx-ex-q' }, RX_EXAMPLES.concat(['What depends on ' + (basename(((S.graph.nodes.find(n => n.kind === 'code') || {}).name) || 'train.py')) + '?']).map(q => h('button', { class: 'fchip', onclick: () => run(q) }, q))));
   if (A.res && A.res.error) root.append(h('div', { class: 'rx-warn' }, A.res.error));

@@ -578,7 +578,7 @@ SHORT = {"contribution": "C", "question": "Q", "theorem": "Thm", "lemma": "Lem",
 def _short(c):
     m = re.search(r"(\d+)", c["label"])
     if c.get("manual"):
-        return "+" + c["id"].split(":")[1]
+        return c["label"][:8] if c["label"] != "Your claim" else "+" + c["id"].split(":")[1]
     if c["kind"] == "question":
         return c["label"][:6]
     return "%s%s%s" % (SHORT.get(c["kind"], "C"), "" if len(SHORT.get(c["kind"], "C")) == 1 else " ", m.group(1) if m else "")

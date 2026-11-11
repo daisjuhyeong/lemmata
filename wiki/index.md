@@ -23,6 +23,7 @@ last_reviewed: 2026-11-02
   - S10 self-updating hub: [brief](sprints/S10/S10-brief.md) · setup: `docs/AUTO-UPDATE.md`
   - S11 experiments by question: [brief](sprints/S11/S11-brief.md)
   - S12 project map (understand with an agent, track with rules): [brief](sprints/S12/S12-brief.md)
+  - S13 experiments map, clean UI, resizable tree: [brief](sprints/S13/S13-brief.md) · spec: [S13 clean UI](design/screens/S13-clean-ui.md) — proposed
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

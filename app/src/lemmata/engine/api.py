@@ -524,6 +524,9 @@ class Engine:
                 cid = claimsmod.add_manual(st, q["text"], "question" if q["kind"] == "question" else "contribution")["id"]
                 ids.add(cid)
             q["claim_id"] = cid
+            for mm in st["manual"]:      # a claim made from the map carries the map's label (RQ1, E1 ...)
+                if mm["id"] == cid:
+                    mm["label"] = q["label"]
             for x in m["experiments"]:
                 if q["id"] in x["tests"]:
                     for p in x["paper"]:
