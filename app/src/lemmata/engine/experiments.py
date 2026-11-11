@@ -51,8 +51,8 @@ def num(s):
 
 
 # ------------------------------------------------------------------ result files
-def parse_result(path, data):
-    """A result file -> {"cols": [...], "rows": [{"label", "values": {col: v}, "std": {col: s}, "n": {col: n}}], "seeds": bool} or None."""
+def records(path, data):
+    """A result file -> its raw records [{column: value}], or None when it is not a table."""
     if data is None or len(data) > MAX_BYTES:
         return None
     text = data.decode("utf-8", "replace")
@@ -80,6 +80,12 @@ def parse_result(path, data):
             head = [h.strip() for h in rows[0]]
             if all(num(h) is None for h in head if h):
                 recs = [dict(zip(head, [c.strip() for c in r])) for r in rows[1:500]]
+    return recs or None
+
+
+def parse_result(path, data):
+    """A result file -> {"cols": [...], "rows": [{"label", "values": {col: v}, "std": {col: s}, "n": {col: n}}], "seeds": bool} or None."""
+    recs = records(path, data)
     if not recs:
         return None
     keys = []
@@ -193,7 +199,7 @@ def paper_cells(P, node_id):
     return out or None
 
 
-def align(cells, table):
+def align(cells, table, lower=None):
     """Compare each number in the paper's table with the result file. -> (grid with status per cell, tally, problems)"""
     if not cells:
         return None, None, []
@@ -251,7 +257,7 @@ def align(cells, table):
         bold = [c for _, c in colcells if c["bold"]]
         if not bold or len(colcells) < 2:
             continue
-        low = lower_better(head[j]["text"] if j < len(head) else "")
+        low = lower_better(head[j]["text"] if j < len(head) else "") if lower is None else lower
         best = (min if low else max)(c["value"] for _, c in colcells)
         for c in bold:
             if abs(c["value"] - best) > 1e-12:
@@ -294,21 +300,29 @@ def _config_diff(root, rid, rev, paths):
     return out[:8]
 
 
-def history(events, infos, nodes, rid, path, ours, col, lower):
+def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, table_at=None, versions=None):
     """Every committed version of a result file, with the changes made between versions.
-    -> [{time, short, rev, ours, best, best_label, rank, ruler, delta, changes: [...], attribution, cats}]"""
+    -> [{time, short, rev, ours, best, best_label, rank, ruler, delta, changes: [...], attribution, cats}]
+    A group of result files (a project-map experiment) passes is_result(path) and table_at(event) instead of one path,
+    and may pass versions(touching commits) to thin them out."""
     info = infos.get(rid) or {}
     if info.get("vcs") != "git":
         return []
+    if is_result is None:
+        is_result = lambda p: p == path
     kinds = {n["loc"]["path"]: n["kind"] for n in nodes.values() if n.get("repo") == rid and n.get("loc")}
     commits = [e for e in events if e.get("kind") == "commit" and e.get("rev")]
-    touching = [e for e in commits if e["repo"] == rid and any(f["path"] == path for f in e.get("files", []))][-MAX_VERSIONS:]
+    touching = [e for e in commits if e["repo"] == rid and any(is_result(f["path"]) for f in e.get("files", []))]
+    touching = (versions(touching) if versions else touching)[-MAX_VERSIONS:]
     out, prev_cols, prev_time, prev = [], None, None, None
     for ev in touching:
         try:
-            t = GitTree(info["abs_path"], rid, ev["rev"])
-            tab = parse_result(path, t.read(path))
-            t.close()
+            if table_at is not None:
+                tab = table_at(ev)
+            else:
+                t = GitTree(info["abs_path"], rid, ev["rev"])
+                tab = parse_result(path, t.read(path))
+                t.close()
         except Exception:
             tab = None
         s = summarise(tab, ours, col, lower) if tab and col in tab["cols"] else None
@@ -320,7 +334,7 @@ def history(events, infos, nodes, rid, path, ours, col, lower):
         cats = set()
         for c in commits:
             if c["time"] and (prev_time is None or c["time"] > prev_time) and c["time"] <= ev["time"] and infos.get(c["repo"], {}).get("role") != "paper":
-                paths = [f["path"] for f in c.get("files", []) if f["path"] != path]
+                paths = [f["path"] for f in c.get("files", []) if not (c["repo"] == rid and is_result(f["path"]))]
                 ck = {p: (kinds.get(p) if c["repo"] == rid else None) or ("config" if p.endswith((".yaml", ".yml", ".toml", ".json", ".cfg", ".ini")) and "result" not in p
                           else "code" if p.endswith((".py", ".sh", ".ipynb", ".jl", ".r", ".R", ".cpp", ".c", ".rs")) else None) for p in paths}
                 cc = _category([p for p in paths if ck.get(p)], ck)

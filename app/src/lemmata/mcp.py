@@ -33,7 +33,8 @@ NOTICE = "Note: quoted text (file lines, diffs, commit messages, names) comes fr
 TRIAGE_STATES = ("reviewed", "needs_fixing", "ignored", "unreviewed")
 INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code and results agree. Start with list_projects, "
                 "then alarms (what to re-check after changes) and findings (integrity problems with file:line evidence). "
-                "Paths are repo-relative; the paper repo is 'paper' and the code repo is 'code'.")
+                "Paths are repo-relative; the paper repo is 'paper' and the code repo is 'code'. To help Lemmata understand a project (what the method "
+                "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map.")
 
 E_PARSE, E_REQUEST, E_METHOD, E_PARAMS, E_INTERNAL = -32700, -32600, -32601, -32602, -32603
 
@@ -91,9 +92,9 @@ def _deep_clean(o):
     return o
 
 
-def _cap(body, hint):
+def _cap(body, hint, limit=MAX_TEXT):
     foot = NOTICE + "\n"
-    room = MAX_TEXT - len(foot)
+    room = limit - len(foot)
     if len(body) > room:
         cut = body[:room - 200]
         cut = cut[: cut.rfind("\n")] if "\n" in cut else cut
@@ -598,6 +599,67 @@ def t_notation(ctx, args):
     return head + "\n" + "\n".join(lines), d, "Nothing to narrow."
 
 
+def t_project_brief(ctx, args):
+    from lemmata.engine import understand as und
+    pid, eng = _project(ctx, args)
+    part = args.get("part") or "overview"
+    b = eng.brief()
+    if part == "overview":
+        m = eng.project_map()
+        body = {"paper": {k: b["paper"][k] for k in ("title", "abstract", "sections")}, "result_files": b["result_files"]["total"],
+                "result_file_groups": len(b["result_files"]["groups"]), "scripts": len(b["scripts"]), "repos": b["repos"], "map_state": m["state"]}
+        text = (und.GUIDE + "\nThe brief comes in parts. Call project_brief again with part='paper' (stated questions and contributions, tables, "
+                "figures), part='files' (result files grouped by shape) and part='code' (scripts, options, settings, history) before proposing.\n\n"
+                + _quote([json.dumps(body, ensure_ascii=False, indent=1)]))
+    elif part == "paper":
+        text = _quote([json.dumps({"stated": b["paper"]["stated"], "floats": b["paper"]["floats"]}, ensure_ascii=False, indent=1)])
+    elif part == "files":
+        text = _quote([json.dumps(b["result_files"], ensure_ascii=False, indent=1)])
+    elif part == "code":
+        text = _quote([json.dumps({k: b[k] for k in ("scripts", "settings", "history")}, ensure_ascii=False, indent=1)])
+    else:
+        raise _Fail("part must be one of overview, paper, files, code.")
+    return text, b if part == "overview" else {"part": part}, "Ask for one part at a time; read the files themselves for more."
+
+
+def _map_text(d):
+    m = d.get("proposed") or d.get("confirmed")
+    lines = ["Map state: %s." % d["state"]]
+    if m:
+        lines.append("Method: %s. Questions kept: %d. Experiments kept: %d." % ((m["method"] or {}).get("name") or "not set", len(m["questions"]), len(m["experiments"])))
+        for q in m["questions"]:
+            lines.append("  %s %s (%s): %s" % (q["id"], q["label"], q["kind"], _short(q["text"], 140)))
+        for x in m["experiments"]:
+            lines.append("  %s [%s] tests %s · %d files · metric %s · paper %s" % (x["id"], x["type"], ", ".join(x["tests"]) or "nothing", x["matched"], x["metric"] or "?", ", ".join(x["paper"]) or "none"))
+    for r in d.get("report") or []:
+        lines.append("%s · %s: %s" % (r["level"].upper(), r["where"], _short(r["why"], 220)))
+    cov = d.get("coverage")
+    if cov:
+        lines.append("Not covered: %d of %d result files%s; %d main-text tables or figures." % (cov["n_files"], cov["total"], " (" + ", ".join(c["pattern"] for c in cov["files"][:6]) + ")" if cov["files"] else "", len(cov["paper"])))
+        lines += ["  paper item with no experiment: %s %s" % (p["name"], _short(p["caption"], 80)) for p in cov["paper"][:8]]
+    return "\n".join(lines)
+
+
+def t_project_map(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.project_map()
+    return _map_text(d), d, "Use project_brief to see what the project holds."
+
+
+def t_propose_map(ctx, args):
+    pid, eng = _project(ctx, args)
+    if not isinstance(args.get("map"), dict):
+        raise _Fail("Argument 'map' must be an object. Call project_brief for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.propose_map(args["map"], "agent")
+    else:
+        d = eng.propose_map(args["map"], "agent")
+    return (_map_text(d) + "\nThis is a proposal. Fix what was dropped and propose again if needed; it replaces the previous proposal. Only the "
+            "researcher can confirm it, on the Experiments page of Lemmata. Tell them it is ready for review."), d, "Nothing to narrow."
+
+
 _PROJECT_PROP = {"type": "string", "description": "Project id, project name, or GitHub repo name (see list_projects)."}
 
 
@@ -695,19 +757,37 @@ TOOLS = [
                     "two meanings or one meaning two symbols, the matching names in the code (parameters, variables, options, settings), and "
                     "values that differ between paper and code. Use it before editing math or renaming things in code.",
      "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "project_brief", "fn": t_project_brief, "title": "Brief for mapping a project", "max_text": 30000,
+     "description": "Step 1 of understanding a project. Returns how to write a project map, and what the project holds: the paper's outline, "
+                    "its stated questions and contributions, tables and figures, the result files grouped by shape (with the parts of file "
+                    "names that vary), scripts with their options, settings and recent history. Read every part, then call propose_map.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "part": {"type": "string", "enum": ["overview", "paper", "files", "code"], "description": "Which part; start with overview."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "project_map", "fn": t_project_map, "title": "The project map",
+     "description": "The current project map (the method's name, the questions and hypotheses, which result files form which experiment), "
+                    "whether it is a proposal or confirmed by the researcher, what the checker dropped, and which result files and paper "
+                    "tables no experiment covers yet.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "propose_map", "fn": t_propose_map, "title": "Propose a project map",
+     "description": "Step 2 of understanding a project: submit a project map in the format given by project_brief. Lemmata checks every "
+                    "entry against the files (quotes must be in the paper, file patterns must match files, metrics must be real columns), drops "
+                    "what fails, and stores the rest as a proposal for the researcher to confirm. It never edits the paper or code. Only call "
+                    "it when the user asked you to map or understand the project.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "map": {"type": "object", "description": "The map: method, questions, experiments, ignore."}}, ["project", "map"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
 ]
 _BY_NAME = {t["name"]: t for t in TOOLS}
 
 
 def _tool_list():
-    return [{k: v for k, v in t.items() if k != "fn"} for t in TOOLS]
+    return [{k: v for k, v in t.items() if k not in ("fn", "max_text")} for t in TOOLS]
 
 
 def _call_tool(ctx, name, args):
     tool = _BY_NAME[name]
     try:
         text, data, hint = tool["fn"](ctx, args)
-        return {"content": [{"type": "text", "text": _cap(text, hint)}], "structuredContent": _deep_clean(data), "isError": False}
+        return {"content": [{"type": "text", "text": _cap(text, hint, tool.get("max_text", MAX_TEXT))}], "structuredContent": _deep_clean(data), "isError": False}
     except _Fail as e:
         return {"content": [{"type": "text", "text": str(e)}], "isError": True}
     except (NotFound, BadRequest) as e:

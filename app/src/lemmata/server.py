@@ -152,11 +152,11 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
-        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments"):   # research views (absent on fixture data)
+        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "project_map"):   # research views (absent on fixture data)
             fn = getattr(e, name, None)
             if fn is not None:
                 try:
-                    snap[name] = fn()
+                    snap["map" if name == "project_map" else name] = fn()
                 except Exception:
                     pass
         n = 0
@@ -360,7 +360,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/map": need("project_map"), "/brief": need("brief")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -421,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment")
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -447,11 +447,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("add_claim")(txt("text", True), txt("kind") or "claim"), 201)
                 if r == "/claims/remove":
                     return self._json(need("remove_claim")(txt("id", True)))
+                if r == "/map":
+                    if not isinstance(body.get("map"), dict):
+                        raise ApiError(400, "bad_request", "map must be an object")
+                    return self._json(need("propose_map")(body["map"], "you"), 201)
+                if r == "/map/edit":
+                    return self._json(need("edit_map")(body.get("change")))
+                if r in ("/map/draft", "/map/confirm", "/map/discard"):
+                    return self._json(need(r[5:] + "_map")())
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):
                         raise ApiError(400, "bad_request", "lower must be true or false")
-                    return self._json(need("set_experiment")(txt("id", True), txt("ours"), txt("metric"), lo))
+                    return self._json(need("set_experiment")(txt("id", True), txt("ours"), txt("metric"), lo, txt("measure")))
                 if r == "/notation":
                     ig = body.get("ignore")
                     if ig is not None and not isinstance(ig, bool):

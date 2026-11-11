@@ -19,7 +19,8 @@ async function rxLoad() {
   try {
     const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
     let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, loaded: true, error: null });
+    let map = null; try { map = await apiGet('/api/map'); } catch (e) { /* older data has no map */ }
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -444,14 +445,15 @@ function rxTally(x) {
   const t = x.tally, part = (k, cls) => t[k] ? h('span', { class: 'rx-tl ' + cls, title: RX_CELL[k][1] }, RX_CELL[k][0] + t[k]) : null;
   return h('span', { class: 'rx-tally' }, part('match', 'ok'), part('rounding', 'warn'), part('differs', 'bad'), part('loose', 'warn'), part('untraced', 'bad'));
 }
+const RX_XTYPE = { main: 'Main', ablation: 'Ablation', sensitivity: 'Sensitivity', tuning: 'Search', efficiency: 'Cost', analysis: 'Analysis', other: '' };
 function rxExpRow(x, sec) {
-  const key = (sec ? sec.id : '-') + '|' + x.id, open = RX.exOpen === key;
+  const key = (sec ? sec.id : '-') + '|' + x.id, open = RX.exOpen === key, tu = x.tuning;
   const glyph = x.attention ? ['!', 'look'] : x.connected ? ['✓', 'fine'] : ['?', 'ign'];
   const row = h('div', { class: 'rx-x-r' + (open ? ' open' : '') + (x.attention ? ' att' : '') },
     h('button', { class: 'rx-x-main', 'aria-expanded': String(open), onclick: () => { RX.exOpen = open ? null : key; renderPage(true); } },
-      h('span', { class: 'sg ' + glyph[1] }, glyph[0]), h('span', { class: 'rx-x-name' }, h('b', null, x.name), h('span', { class: 'muted' }, x.caption ? ' ' : ''), x.caption ? h('span', { class: 'muted' }, rxMath(trunc(x.caption, 60))) : null)),
-    h('span', { class: 'rx-x-metric small muted' }, x.summary ? trunc(x.summary.metric, 16) + (x.summary.lower ? ' ↓' : ' ↑') : ''),
-    rxGapBar(x.summary), rxSpark(x.spark), rxTally(x),
+      h('span', { class: 'sg ' + glyph[1] }, glyph[0]), h('span', { class: 'rx-x-name' }, x.map && RX_XTYPE[x.type] ? h('span', { class: 'tag rx-x-ty t-' + x.type }, RX_XTYPE[x.type]) : null, h('b', null, x.name), x.map ? h('span', { class: 'muted small' }, ' · ' + plural(x.files_n, 'file')) : null, h('span', { class: 'muted' }, x.caption ? ' ' : ''), x.caption ? h('span', { class: 'muted' }, rxMath(trunc(x.caption, 60))) : null)),
+    h('span', { class: 'rx-x-metric small muted', title: x.summary ? (x.summary.measure || x.summary.metric) + (x.summary.measure && x.summary.measure !== x.summary.metric ? ' · ' + x.summary.metric : '') : null }, x.summary ? trunc(x.summary.measure || x.summary.metric, 16) + (x.summary.lower ? ' ↓' : ' ↑') : ''),
+    tu ? h('span', { class: 'small', title: tu.best ? 'Best setting: ' + tu.best.label : null }, tu.best ? [h('b', { class: 'mono' }, rxFmt(tu.best.value)), h('span', { class: 'muted' }, ' best of ' + tu.runs)] : '') : rxGapBar(x.summary), rxSpark(x.spark), rxTally(x),
     h('span', { class: 'muted small' }, x.stale ? h('span', { class: 'rx-tl warn', title: 'The code or settings changed after this result was written' }, '↻ old') : x.last ? dmon(x.last) : ''));
   if (open) row.append(rxExpDetail(x.id));
   return row;
@@ -502,18 +504,22 @@ function rxExpDetail(id) {
       const rows = x.table.rows.filter(r => r.values[sm.metric] != null), vs = rows.map(r => r.values[sm.metric]), hi = Math.max(...vs.map(Math.abs)) || 1;
       const sorted = rows.slice().sort((a, b) => sm.lower ? a.values[sm.metric] - b.values[sm.metric] : b.values[sm.metric] - a.values[sm.metric]);
       const sel = (cur, opts, fn, label) => { const s = h('select', { 'aria-label': label, disabled: READONLY }, opts.map(o => h('option', { value: o, selected: o === cur }, o))); s.addEventListener('change', () => fn(s.value)); return s; };
-      out.push(blk('Result', h('div', { class: 'rx-x-ctl' }, sel(sm.metric, sm.cols, v => post({ metric: v }), 'Metric'),
+      out.push(blk('Result', h('div', { class: 'rx-x-ctl' }, x.map && sm.measures && sm.measures.length > 1 ? sel(sm.measure, sm.measures, v => post({ measure: v }), 'Measure') : null,
+        sm.cols.length > 1 || !x.map ? sel(sm.metric, sm.cols, v => post({ metric: v }), x.map ? 'Dataset' : 'Metric') : null,
         h('button', { class: 'btn sm', disabled: READONLY, title: 'Switch which direction is better', onclick: () => post({ lower: !sm.lower }) }, sm.lower ? '↓ lower is better' : '↑ higher is better'),
-        h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
-        sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, sm.ours_by === 'paper' || sm.ours_by === 'name' ? '' : '(guessed)') : null),
+        x.tuning ? null : [h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
+        sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, ['paper', 'name', 'map'].includes(sm.ours_by) ? '' : '(guessed)') : null]),
         h('div', { class: 'rx-bars' }, sorted.map((r, i) => { const v = r.values[sm.metric], me = r.label === sm.ours_label; return h('div', { class: 'rx-bar' + (me ? ' me' : '') },
           h('span', { class: 'bl' }, r.label), h('span', { class: 'bt' }, h('span', { class: 'bf', style: 'width:' + Math.max(1, Math.abs(v) / hi * 100) + '%' })),
           h('span', { class: 'bv mono' }, rxFmt(v) + (r.std[sm.metric] != null ? ' ±' + rxFmt(r.std[sm.metric]) : '')), h('span', { class: 'muted small' }, i === 0 ? '★' : '')); }))));
-    } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
+    } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.map ? (x.connected ? 'These files could not be read as tables with the map’s metric.' : 'No file matches this experiment’s patterns any more.') : x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
     // design
     const d = x.design || { scripts: [], settings: [], runs: [], values: [] };
     out.push(blk('Design', h('dl', { class: 'rx-dl' },
-      x.result ? [h('dt', null, 'Result file'), h('dd', null, rxNodeBtn(x.result.node_id, x.result.path), ' ', gh(x.result.github))] : null,
+      x.map && x.result ? [h('dt', null, 'Files'), h('dd', null, h('span', { class: 'rx-code mono' }, x.result.path), ' ', h('details', { class: 'rx-x-files' }, h('summary', null, plural(x.files_n, 'file')),
+        (d.files || []).map(f => h('div', null, rxNodeBtn(f.node_id, f.path), Object.keys(f.fields).length ? h('span', { class: 'muted small' }, ' ' + Object.entries(f.fields).map(e => e[0] + ' ' + e[1]).join(' · ')) : null)), x.files_n > (d.files || []).length ? h('div', { class: 'muted small' }, '…') : null))] : null,
+      x.map && x.paper.length ? [h('dt', null, 'In the paper'), h('dd', null, x.paper.map((p, i) => [i ? ', ' : null, rxNodeBtn(p.node_id, p.name)]))] : null,
+      !x.map && x.result ? [h('dt', null, 'Result file'), h('dd', null, rxNodeBtn(x.result.node_id, x.result.path), ' ', gh(x.result.github))] : null,
       d.scripts.length || d.runs.length ? [h('dt', null, 'Made by'), h('dd', null, d.runs.map(r => [rxNodeBtn(r.node_id, r.name), r.command ? h('span', { class: 'muted mono small' }, ' ' + trunc(r.command, 60)) : null, ' ']), d.scripts.map((s, i) => [i ? ', ' : null, rxNodeBtn(s.node_id, s.name), ' ', gh(s.github)]))] : null,
       sm && sm.baselines.length ? [h('dt', null, 'Compared with'), h('dd', null, sm.baselines.map(b => h('span', { class: 'rx-code' }, b)))] : null,
       sm && sm.cols.length ? [h('dt', null, sm.datasets && sm.datasets.length ? 'Datasets' : 'Columns'), h('dd', null, (sm.datasets && sm.datasets.length ? sm.datasets : sm.cols).map(b => h('span', { class: 'rx-code' }, b)))] : null,
@@ -544,29 +550,82 @@ function rxExpDetail(id) {
   load();
   return box;
 }
+const RX_MAP_PROMPT = name => 'Use Lemmata to understand the project "' + name + '": call project_brief (every part), read the paper and code if you have them, then propose_map. Fix whatever the checker drops and propose again.';
+function rxMapCard() {
+  const M = RX.map, E = RX.experiments; if (!M) return null;
+  const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
+  const name = S.project ? S.project.name : 'this project';
+  if (M.state === 'none') return h('section', { class: 'rx-map none' },
+    h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Lemmata has not read this project yet'), h('span', { class: 'grow' }),
+      READONLY ? null : h('button', { class: 'btn sm', title: 'A rough map from file names and columns, no AI', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules')),
+    READONLY ? null : h('div', { class: 'rx-map-ask' }, h('span', { class: 'muted small' }, 'Better: ask your Claude Code'), h('code', { class: 'rx-map-p' }, RX_MAP_PROMPT(name)), h('button', { class: 'btn sm', onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy')));
+  const m = M.proposed || M.confirmed, prop = M.state === 'proposed', cov = M.coverage || { n_files: 0, files: [], paper: [], total: 0 };
+  const dropped = (M.report || []).filter(r => r.level === 'dropped'), warns = (M.report || []).filter(r => r.level !== 'dropped');
+  const qOpts = m.questions.map(q => [q.id, q.label]);
+  const head = h('div', { class: 'rx-map-h' }, h('span', { class: 'sg ' + (prop ? 'look' : 'fine') }, prop ? '◐' : '✓'),
+    h('b', null, prop ? 'Proposed map' : 'Project map'), h('span', { class: 'muted small' }, prop ? 'by ' + (M.proposed_by || 'agent') + ' · not used until you confirm' : M.confirmed_at ? 'confirmed ' + dmon(M.confirmed_at) : ''),
+    h('span', { class: 'grow' }),
+    h('span', { class: 'rx-map-n' }, h('span', { title: 'What “ours” is called' }, 'ours = ', h('b', null, m.method ? m.method.name : '?')), h('span', null, h('b', null, m.questions.length), ' questions'), h('span', null, h('b', null, m.experiments.length), ' experiments'),
+      cov.n_files ? h('span', { class: 'warn' }, h('b', null, cov.n_files), ' files unmapped') : null, dropped.length ? h('span', { class: 'bad' }, h('b', null, dropped.length), ' dropped') : null),
+    prop && !READONLY ? [h('button', { class: 'btn sm', onclick: () => act('/api/map/discard', {}, 'Proposal discarded') }, 'Discard'), h('button', { class: 'btn sm primary', disabled: !m.experiments.length, onclick: () => act('/api/map/confirm', {}, 'Map confirmed') }, 'Confirm')] : null);
+  const edit = change => act('/api/map/edit', { change });
+  const body = h('details', { class: 'rx-map-d', open: prop || RX.mapOpen ? '' : null, ontoggle: ev => { if (!prop) RX.mapOpen = ev.target.open; } }, h('summary', null, prop ? 'Review' : 'Show map'),
+    h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ours'), READONLY ? h('b', null, m.method ? m.method.name : '?') : (() => { const i = h('input', { class: 'rx-map-in', value: m.method ? m.method.name : '', 'aria-label': 'Name of our method', placeholder: 'Method name' }); i.addEventListener('change', () => edit({ method: i.value })); return i; })(),
+      m.method && m.method.aliases.length ? h('span', { class: 'muted small' }, 'also ' + m.method.aliases.join(', ')) : null),
+    m.questions.map(q => h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, q.label), h('span', { class: 'serif' }, rxMath(q.text)), q.evidence[0] ? rxWhere(q.evidence[0], q.evidence[0].repo) : null,
+      READONLY ? null : h('button', { class: 'linkbtn small', title: 'Remove this question', onclick: () => edit({ remove: 'question:' + q.id }) }, '✕'))),
+    h('div', { class: 'rx-map-tw' }, h('table', { class: 'tbl rx-map-t' }, h('thead', null, h('tr', null, ['Experiment', 'Kind', 'Tests', 'Files', 'Metric', 'Paper', ''].map(t => h('th', null, t)))),
+      h('tbody', null, m.experiments.map(x => { const ty = h('select', { disabled: READONLY, 'aria-label': 'Kind' }, Object.keys(RX_XTYPE).map(t => h('option', { value: t, selected: t === x.type }, RX_XTYPE[t] || 'Other')));
+        ty.addEventListener('change', () => edit({ experiment: { id: x.id, type: ty.value } }));
+        const ts = h('select', { disabled: READONLY, 'aria-label': 'Which question it tests' }, h('option', { value: '' }, '—'), qOpts.map(o => h('option', { value: o[0], selected: x.tests[0] === o[0] }, o[1] + (x.tests.length > 1 && x.tests[0] === o[0] ? ' +' + (x.tests.length - 1) : ''))));
+        ts.addEventListener('change', () => edit({ experiment: { id: x.id, tests: ts.value ? [ts.value] : [] } }));
+        return h('tr', null, h('td', null, h('b', null, x.name), x.note ? h('div', { class: 'muted small' }, trunc(x.note, 90)) : null), h('td', null, ty), h('td', null, ts),
+          h('td', { class: 'mono small', title: x.files.join('\n') }, h('b', null, x.matched), ' ' + trunc(x.files[0] || '', 30)), h('td', { class: 'mono small' }, x.metric || h('span', { class: 'muted' }, 'guess')),
+          h('td', { class: 'small' }, x.paper.map((p, i) => [i ? ', ' : null, rxNodeBtn(p, ((IX.node && IX.node.get(p)) || {}).name || p)])), h('td', null, READONLY ? null : h('button', { class: 'linkbtn small', title: 'Remove this experiment', onclick: () => edit({ remove: 'experiment:' + x.id }) }, '✕'))); })))),
+    m.ignore.length ? h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ignored'), m.ignore.map(p => h('span', { class: 'rx-code mono' }, p))) : null,
+    dropped.length ? h('div', { class: 'rx-map-rep' }, h('b', null, 'Dropped by the checker'), dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why))) : null,
+    warns.length ? h('div', { class: 'rx-map-rep' }, warns.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))) : null,
+    !READONLY ? h('div', { class: 'rx-map-ask' }, h('span', { class: 'muted small' }, 'Redo with your Claude Code'), h('code', { class: 'rx-map-p' }, RX_MAP_PROMPT(name)), h('button', { class: 'btn sm', onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy'),
+      !prop ? h('button', { class: 'btn sm', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules') : null) : null);
+  return h('section', { class: 'rx-map ' + M.state }, head, body);
+}
+function rxUnmapped(U) {
+  if (!U || (!U.n_files && !U.paper.length)) return null;
+  const post = async p => { const r = await rxPost('/api/map/edit', { change: { ignore: p } }, 'Ignored. Confirm the map to apply.'); if (r) { RX.map = r; renderPage(true); } };
+  return h('section', { class: 'rx-x-sec loose' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ign' }, '○'), h('span', { class: 'rx-x-q static' }, 'Not in the map'),
+    h('span', { class: 'rx-x-qt muted' }, [U.n_files ? plural(U.n_files, 'result file') : null, U.paper.length ? plural(U.paper.length, 'table or figure', 'tables or figures') : null].filter(Boolean).join(' · ')), h('span', { class: 'grow' })),
+    h('div', { class: 'rx-um' }, U.files.map(c => h('div', { class: 'rx-um-r' }, h('span', { class: 'rx-code mono' }, c.pattern), h('span', { class: 'muted small' }, plural(c.n, 'file') + (c.columns.length ? ' · ' + trunc(c.columns.join(', '), 50) : '')), h('span', { class: 'grow' }),
+      READONLY ? null : h('button', { class: 'linkbtn small', title: 'Never show files like these', onclick: () => post(c.pattern) }, 'Ignore'))),
+      U.paper.map(p => h('div', { class: 'rx-um-r' }, rxNodeBtn(p.node_id, p.name), h('span', { class: 'muted small' }, trunc(p.caption, 80)), h('span', { class: 'grow' }), h('span', { class: 'rx-tl bad' }, '? no experiment')))));
+}
 function pageExperiments() {
   const nr = rxNotReady('Experiments'); if (nr) return nr;
   S.outline = [];
   const E = RX.experiments, root = doc(h('h1', { class: 'ptitle' }, 'Experiments'));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
-  const c = E.counts;
-  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.versions), ' result versions'),
+  const c = E.counts, mapped = !!E.unmapped;
+  root.append(rxMapCard());
+  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), mapped ? h('span', null, h('b', null, c.files), ' result files') : null, h('span', null, h('b', null, c.versions), ' result versions'),
     c.untested ? h('span', { class: 'bad' }, h('b', null, c.untested), ' not tested') : null, c.attention ? h('span', { class: 'warn' }, h('b', null, c.attention), ' to check') : null));
   const head = () => h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
+  const WORD = { supported: 'Tested, nothing to check', partial: 'Something to check', unsupported: 'Not tested' };
   for (const s of E.sections) {
-    const st = RX_STATUS[s.status];
+    const st = RX_STATUS[s.status], cid = mapped ? s.claim_id : s.id;
     const sec = h('section', { class: 'rx-x-sec st-' + s.status },
-      h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: st[1] }, st[0]), h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = s.id; RX.view = 'tree'; openTab('claims'); } }, s.kind === 'question' ? s.label : 'H · ' + s.label),
-        h('span', { class: 'rx-x-qt serif' }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
+      h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
+        cid ? h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } }, s.kind === 'question' || mapped ? s.label : 'H · ' + s.label) : h('span', { class: 'rx-x-q static' }, s.label),
+        h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
     else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),
       READONLY ? null : s.suggested.map(g => h('button', { class: 'chip-btn', title: 'Link this as the experiment for it', onclick: async () => { const r = await rxPost('/api/claims/link', { id: s.id, target: g.node_id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } } }, g.name + '?'))));
     root.append(sec);
   }
-  if (E.unassigned.length) {
-    const opts = E.sections.map(s => [s.id, s.label]);
-    root.append(h('section', { class: 'rx-x-sec loose' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ign' }, '○'), h('span', { class: 'rx-x-q static' }, 'No question'), h('span', { class: 'rx-x-qt muted' }, 'Results that no question or hypothesis points to'), h('span', { class: 'grow' })),
-      h('div', { class: 'rx-x-t' }, head(), E.unassigned.map(x => { const row = rxExpRow(x, null);
+  if (mapped) root.append(rxUnmapped(E.unmapped));
+  else if (E.unassigned.length) {
+    const opts = E.sections.map(s => [s.id, s.label]), few = RX.exAll ? E.unassigned : E.unassigned.slice(0, 8);
+    root.append(h('section', { class: 'rx-x-sec loose' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ign' }, '○'), h('span', { class: 'rx-x-q static' }, 'No question'), h('span', { class: 'rx-x-qt muted' }, plural(E.unassigned.length, 'result') + ' no question points to'), h('span', { class: 'grow' }),
+        E.unassigned.length > 8 ? h('button', { class: 'linkbtn small', onclick: () => { RX.exAll = !RX.exAll; renderPage(true); } }, RX.exAll ? 'Show fewer' : 'Show all') : null),
+      h('div', { class: 'rx-x-t' }, head(), few.map(x => { const row = rxExpRow(x, null);
         if (!READONLY && opts.length) { const sel = h('select', { class: 'rx-x-assign', 'aria-label': 'Which question does this test?' }, h('option', { value: '' }, 'Tests…'), opts.map(o => h('option', { value: o[0] }, o[1])));
           sel.addEventListener('change', async () => { if (!sel.value) return; const r = await rxPost('/api/claims/link', { id: sel.value, target: x.id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } }); row.querySelector('.rx-x-main').after(sel); row.classList.add('assign'); }
         return row; }))));

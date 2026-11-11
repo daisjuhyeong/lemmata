@@ -16,8 +16,10 @@ from . import history as historymod
 from . import manifest as manifestmod
 from . import refs as refsmod
 from . import store
+from . import track as trackmod
 from . import tree as treemod
 from . import triage as triagemod
+from . import understand as undmod
 from .errors import BadRequest, NotFound
 
 VERSION = "0.1.0"
@@ -426,8 +428,18 @@ class Engine:
     # ------------------------------------------------------------------ experiments, by question
     def _exp(self, detail=None):
         s = self._ensure()
-        return expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.claims(), self.ledger(),
-                            expmod.load(self.hub), self._github(), detail)
+        d = undmod.load(self.hub)
+        m = d["confirmed"]
+        if detail is not None and str(detail).startswith("map:") and not m:
+            raise NotFound("unknown experiment %r" % detail)
+        if m and (detail is None or str(detail).startswith("map:")):
+            return trackmod.build(m, s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.ledger(),
+                                  expmod.load(self.hub), self._github(), detail, "proposed" if d["proposed"] else "confirmed")
+        doc = expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.claims(), self.ledger(),
+                           expmod.load(self.hub), self._github(), detail)
+        if detail is None:
+            doc["map"] = {"state": "proposed" if d["proposed"] else "none"}
+        return doc
 
     def experiments(self):
         return self._exp()
@@ -435,13 +447,91 @@ class Engine:
     def experiment(self, exp_id):
         return self._exp(exp_id)
 
-    def set_experiment(self, exp_id, ours=None, metric=None, lower=None):
+    def set_experiment(self, exp_id, ours=None, metric=None, lower=None, measure=None):
         s = self._ensure()
         st = expmod.load(self.hub)
-        known = {nid for nid, n in s["G"].nodes.items() if n["kind"] in ("table", "figure", "result", "data")}
+        m = undmod.load(self.hub)["confirmed"]
+        known = {nid for nid, n in s["G"].nodes.items() if n["kind"] in ("table", "figure", "result", "data")} | {"map:" + x["id"] for x in (m or {}).get("experiments", [])}
+        if str(exp_id).startswith("map:") and exp_id in known:      # in a mapped experiment the columns are datasets; the measure is the number read from each file
+            e = st["entries"].setdefault(exp_id, {})
+            for k, v in (("column", metric), ("metric", measure)):
+                if v is not None:
+                    if not isinstance(v, str) or len(v) > 200:
+                        raise BadRequest("%s must be text" % k)
+                    e[k] = v
+                    if not v:
+                        e.pop(k)
+            metric = None
         expmod.decide(st, known, exp_id, ours, metric, lower)
         self.hub.write_json("experiments.json", st)
         return self._exp(exp_id)
+
+    # ------------------------------------------------------------------ project map (phase 1: understand)
+    def brief(self):
+        s = self._ensure()
+        return undmod.brief(s["G"], s["trees"], s["infos"], s["events"], self.claims())
+
+    def project_map(self):
+        s = self._ensure()
+        d = undmod.load(self.hub)
+        shown = d["proposed"] or d["confirmed"]
+        return dict(d, coverage=undmod.coverage(shown, s["G"], s["trees"]) if shown else None,
+                    state="proposed" if d["proposed"] else "confirmed" if d["confirmed"] else "none")
+
+    def _propose(self, doc, by):
+        s = self._ensure()
+        m, report = undmod.verify(doc, s["G"], s["trees"], s["infos"], self.claims())
+        d = undmod.load(self.hub)
+        d.update(proposed=m, report=report, proposed_at=now_iso(), proposed_by=(by or "you")[:60])
+        self.hub.write_json("map.json", d)
+        return self.project_map()
+
+    def propose_map(self, doc, by=None):
+        """A map written by an agent (or by hand). Checked by rules, stored as a proposal; nothing uses it until confirmed."""
+        return self._propose(doc, by or "agent")
+
+    def draft_map(self):
+        """A proposal made by rules alone, for when no agent has read the project."""
+        s = self._ensure()
+        return self._propose(undmod.draft(s["G"], s["trees"], s["infos"], s["events"], self.claims()), "rules")
+
+    def edit_map(self, patch):
+        d = undmod.load(self.hub)
+        return self._propose(undmod.edit(d["proposed"] or d["confirmed"], patch), d.get("proposed_by") if d["proposed"] else "you")
+
+    def discard_map(self):
+        d = undmod.load(self.hub)
+        d.update(proposed=None, report=[])
+        self.hub.write_json("map.json", d)
+        return self.project_map()
+
+    def confirm_map(self):
+        """The researcher accepts the proposal. Its questions become claims (reusing the ones the paper already states)
+        and each question is linked to the tables and figures its experiments feed."""
+        s = self._ensure()
+        d = undmod.load(self.hub)
+        if not d["proposed"]:
+            raise NotFound("there is no proposed map to confirm")
+        m, report = undmod.verify(d["proposed"], s["G"], s["trees"], s["infos"], self.claims())
+        if not m["experiments"]:
+            raise BadRequest("this map has no experiment that passed checking; there is nothing to confirm")
+        prev = {q["text"]: q.get("claim_id") for q in (d["confirmed"] or {}).get("questions", [])}
+        st = claimsmod.load(self.hub)
+        ids = self._claim_ids()
+        for q in m["questions"]:
+            cid = q.get("claim") if q.get("claim") in ids else prev.get(q["text"]) if prev.get(q["text"]) in ids else None
+            if cid is None:
+                cid = claimsmod.add_manual(st, q["text"], "question" if q["kind"] == "question" else "contribution")["id"]
+                ids.add(cid)
+            q["claim_id"] = cid
+            for x in m["experiments"]:
+                if q["id"] in x["tests"]:
+                    for p in x["paper"]:
+                        claimsmod.link(st, ids, s["G"].nodes, cid, p, True)
+        self.hub.write_json("claims.json", st)
+        d.update(confirmed=m, proposed=None, report=report, confirmed_at=now_iso())
+        self.hub.write_json("map.json", d)
+        return self.project_map()
 
     # ------------------------------------------------------------------ notation
     def notation(self):
