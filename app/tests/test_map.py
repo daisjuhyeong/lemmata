@@ -204,6 +204,37 @@ class MapTest(unittest.TestCase):
         with self.assertRaises(BadRequest):
             self.e.confirm_map()
 
+    def test_fixes_from_the_first_real_run(self):
+        """Problems seen on mcd_extension, 2026-11-11: names only in table cells, silent caps, questions in notes, 'close to 0'."""
+        R = self.tmp
+        with open(R + "/code/RESEARCH_QUESTIONS.md", "w") as f:
+            f.write("# Questions\n\nE1: Does the extension generalise better than the original detector?\n")
+        with open(R + "/code/results/excess.csv", "w") as f:
+            f.write("method,dataset,excess\nADWIN,Electricity,-3.0\nMCD_EXT,Electricity,0.4\nDDM,Electricity,1.5\n" + "".join("pad%d,Electricity,9\n" % i for i in range(5)))
+        subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "excess"], check=True, capture_output=True)
+        e = Engine(R)
+        e.scan()
+        doc = dict(agent, method={"name": "MCD", "aliases": ["MCD_EXT"]},
+                   questions=agent["questions"][:1] + [{"id": "e1", "text": "Does the extension generalise better?", "evidence": [{"path": "RESEARCH_QUESTIONS.md", "line": 3, "quote": "Does the extension generalise better"}]}],
+                   experiments=[{"id": "exc", "name": "Calibration", "type": "analysis", "tests": ["e1"], "files": ["results/excess.csv"], "metric": "excess", "target": 0, "ours": "MCD_EXT"},
+                                {"id": "many", "name": "Many", "type": "main", "tests": ["q1"], "files": ["results/main/*.csv"] * 25}])
+        d = e.propose_map(doc)
+        m = d["proposed"]
+        self.assertEqual(m["method"]["aliases"], ["MCD_EXT"])                                        # found in a table cell, not in the first rows' sample
+        self.assertEqual([(q["id"], q["source"]) for q in m["questions"]], [("q1", "paper"), ("e1", "notes")])
+        self.assertIn("only the first 24 file patterns are kept; 1 more were ignored", [r["why"] for r in d["report"]])
+        e.confirm_map()
+        x = e.experiment("map:exc")
+        sm = x["summary"]
+        self.assertEqual((sm["ours_label"], sm["rank"], sm["target"], sm["measure"]), ("MCD_EXT", 1, 0, "|excess − 0|"))   # 0.4 beats -3.0
+        self.assertEqual(x["table"]["rows"][0]["values"]["Electricity"], -3.0)                                    # the raw values are kept for display
+        self.assertEqual(e.experiments()["sections"][1]["source"], "notes")
+        os.remove(R + "/code/RESEARCH_QUESTIONS.md")
+        os.remove(R + "/code/results/excess.csv")
+        subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "undo"], check=True, capture_output=True)
+
     def test_mcp_tools(self):
         ctx = mcp.LocalCtx(self.tmp)
         pid = ctx.list_projects()[0]["id"]

@@ -20,6 +20,7 @@ from .experiments import DATA_COLS, LABEL_COLS, MAX_BYTES, SEED_COLS, norm, num,
 SCHEMA = "lemmata.map/1"
 TYPES = ("main", "ablation", "sensitivity", "tuning", "efficiency", "analysis", "other")
 TABLE_EXT = (".csv", ".tsv", ".json", ".txt")
+NOTE_EXT = (".md", ".txt", ".rst", ".tex", ".org")
 FIELD_RE = re.compile(r"\{([a-z][a-z0-9_]{0,23})\}")
 ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]{0,39}$")
 MAX_READ, MAX_PATTERN = 400, 200
@@ -80,6 +81,25 @@ def match_files(patterns, files):
             if m:
                 out.append((repo, path, nid, m.groupdict()))
                 break
+    return out
+
+
+def _names_in(files, trees, limit=MAX_READ):
+    """Every word that names something in the result files: file-name parts, column names, and text cells of every row."""
+    out = set()
+    for repo, path, _ in files[:limit]:
+        out |= {norm(t) for t in re.split(r"[/,_=. ]", path) if t}
+        out |= {norm(t) for t in re.split(r"[/,_= ]", path) if t}
+        try:
+            recs = records(path, trees[repo].read(path)) if trees[repo].size(path) <= MAX_BYTES else None
+        except Exception:
+            recs = None
+        for r in (recs or [])[:500]:
+            for k, v in r.items():
+                out.add(norm(str(k)))
+                if isinstance(v, str) and num(v) is None:
+                    out.add(norm(v))
+    out.discard("")
     return out
 
 
@@ -221,7 +241,7 @@ Read the brief (and, if you have the repository open, the paper and the code the
     {"id": "main", "name": "<short name>", "type": "main|ablation|sensitivity|tuning|efficiency|analysis|other",
      "tests": ["q1"],
      "files": ["results/{dataset}/{method}_seed{seed}.csv"],
-     "metric": "<column name of the main number>", "lower": false,
+     "metric": "<column name of the main number>", "lower": false, "target": null,
      "method_column": "<optional: column that names the method>", "dataset_column": "<optional>",
      "paper": ["tab:main"], "note": "<one line: what is varied, what is held fixed>"}
   ],
@@ -229,8 +249,12 @@ Read the brief (and, if you have the repository open, the paper and the code the
 }
 
 Rules Lemmata enforces (anything that fails is dropped and reported back to you):
-- Every question needs evidence: a path and line in the paper and a short quote that really is there.
-- The method name or an alias must appear in the paper or in the result files.
+- Every question needs evidence: a path and line and a short quote that really is there, in the paper or in the
+  researcher's own notes (.md, .txt, .rst, .tex, .org anywhere in the repositories). Prefer the paper.
+- When neither direction is right ("close to 0 is best"), set "target" to that value; lower/higher is then ignored.
+- The method name or an alias must appear in the paper or in the result files (file names, columns or cells).
+- If the paper is an earlier version (for example the paper being extended), say so in the method's note and name
+  "ours" as it appears in the result files; aliases may name variants such as an extension.
 - An experiment's files are patterns: * within a folder, ** across folders, {dataset} {method} {seed} or any other
   {field} for the part of a file name that encodes it. Each pattern must match at least one existing file.
 - "metric" must be a real column of those files. "paper" lists table or figure labels (or ids from the brief).
@@ -277,7 +301,7 @@ def verify(doc, G, trees, infos, claims_doc):
 
     def evidence(items, where, need_paper=False):
         ok = []
-        for ev in (items if isinstance(items, list) else [])[:6]:
+        for ev in capped(items, 6, where, "evidence entries"):
             if not isinstance(ev, dict):
                 continue
             path, got = lines_of(str(ev.get("path") or ""))
@@ -287,8 +311,9 @@ def verify(doc, G, trees, infos, claims_doc):
             rid, lines = got
             line = ev.get("line") if isinstance(ev.get("line"), int) and 1 <= ev.get("line") <= len(lines) else None
             quote = " ".join(str(ev.get("quote") or "").split())[:200]
-            if need_paper and (roles.get(rid) != "paper" or not quote):
-                note("dropped", where, "evidence must quote the paper")
+            source = "paper" if roles.get(rid) == "paper" else "notes" if path.lower().endswith(NOTE_EXT) else None
+            if need_paper and (source is None or not quote):
+                note("dropped", where, "evidence must quote the paper or a notes file (%s)" % ", ".join(NOTE_EXT))
                 continue
             if quote:
                 q = _squash(quote)
@@ -301,22 +326,24 @@ def verify(doc, G, trees, infos, claims_doc):
                     continue
                 first = " ".join(q.split()[:3])
                 line = 1 + next((j for j in range(hit, min(hit + 3, len(lines))) if first in _squash(lines[j])), hit)
-            ok.append({"repo": rid, "path": path, "line": line, "quote": quote})
+            ok.append(dict({"repo": rid, "path": path, "line": line, "quote": quote}, **({"source": source} if need_paper else {})))
         return ok
+
+    def capped(items, n, where, what):
+        items = items if isinstance(items, list) else []
+        if len(items) > n:
+            note("dropped", where, "only the first %d %s are kept; %d more were ignored" % (n, what, len(items) - n))
+        return items[:n]
 
     out = {"schema": SCHEMA, "method": None, "questions": [], "experiments": [], "ignore": []}
     # method
     m = doc.get("method")
     if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"].strip():
         hay = _squash(" ".join(l.code for l in G.paper.lines)) if G.paper is not None else ""
-        labels = set()
-        for c in clusters(files, trees):
-            for r in c["rows"]:
-                labels |= {norm(v) for v in r.values()}
-            labels |= {norm(t) for p in c["examples"] for t in re.split(r"[/,_=\-. ]", p)}
+        labels = _names_in(files, trees)
         seen = lambda name: (" " + _squash(name) + " ") in (" " + hay + " ") or norm(name) in labels
         name = _text(m["name"], 60, "method name")
-        als = [a for a in dict.fromkeys(_text(a, 60, "alias") for a in (m.get("aliases") or [])[:8] if isinstance(a, str) and a.strip()) if a != name]
+        als = [a for a in dict.fromkeys(_text(a, 60, "alias") for a in capped(m.get("aliases") or [], 8, "method", "aliases") if isinstance(a, str) and a.strip()) if a != name]
         for a in [a for a in als if not seen(a)]:
             note("dropped", "method", "the alias %r appears neither in the paper nor in the result files" % a)
         als = [a for a in als if seen(a)]
@@ -329,7 +356,7 @@ def verify(doc, G, trees, infos, claims_doc):
     # questions and hypotheses
     claim_ids = {c["id"] for c in claims_doc.get("claims", [])}
     qids = set()
-    for i, q in enumerate((doc.get("questions") if isinstance(doc.get("questions"), list) else [])[:20]):
+    for i, q in enumerate(capped(doc.get("questions"), 20, "questions", "questions")):
         where = "question %s" % (q.get("id") if isinstance(q, dict) else i + 1)
         try:
             qid = q.get("id") if isinstance(q.get("id"), str) and ID_RE.match(q["id"]) else "q%d" % (i + 1)
@@ -338,14 +365,15 @@ def verify(doc, G, trees, infos, claims_doc):
             text = _text(q.get("text"), 500, "text")
             ev = evidence(q.get("evidence"), where, need_paper=True)
             if not ev:
-                raise BadRequest("no evidence in the paper survived checking")
+                raise BadRequest("no evidence in the paper or notes survived checking")
             kind = "question" if q.get("kind") == "question" else "hypothesis"
             claim = q.get("claim") if q.get("claim") in claim_ids else None
             if q.get("claim") and not claim:
                 note("warning", where, "the claim id %r does not exist; treated as a new statement" % q.get("claim"))
             n_same = sum(1 for x in out["questions"] if x["kind"] == kind) + 1
             label = _text(q["label"], 24, "label") if isinstance(q.get("label"), str) and q["label"].strip() else ("RQ%d" if kind == "question" else "H%d") % n_same
-            out["questions"].append({"id": qid, "kind": kind, "label": label, "text": text, "claim": claim, "evidence": ev})
+            out["questions"].append({"id": qid, "kind": kind, "label": label, "text": text, "claim": claim, "evidence": ev,
+                                     "source": "paper" if any(e["source"] == "paper" for e in ev) else "notes"})
             qids.add(qid)
         except (BadRequest, AttributeError) as e:
             note("dropped", where, str(e) if isinstance(e, BadRequest) else "not an object")
@@ -358,14 +386,14 @@ def verify(doc, G, trees, infos, claims_doc):
             if (n.get("attrs") or {}).get("tex_label"):
                 by_label[n["attrs"]["tex_label"].lower()] = n["id"]
     xids, claimed = set(), {}
-    for i, x in enumerate((doc.get("experiments") if isinstance(doc.get("experiments"), list) else [])[:40]):
+    for i, x in enumerate(capped(doc.get("experiments"), 60, "experiments", "experiments")):
         where = "experiment %s" % (x.get("id") if isinstance(x, dict) else i + 1)
         try:
             xid = x.get("id") if isinstance(x.get("id"), str) and ID_RE.match(x["id"]) else "x%d" % (i + 1)
             if xid in xids:
                 raise BadRequest("the id %r is used twice" % xid)
             pats = []
-            for p in (x.get("files") if isinstance(x.get("files"), list) else [])[:8]:
+            for p in capped(x.get("files"), 24, where, "file patterns"):
                 try:
                     compile_pattern(p)
                 except BadRequest as e:
@@ -376,7 +404,7 @@ def verify(doc, G, trees, infos, claims_doc):
                 else:
                     note("dropped", where, "the pattern %r matches no result file" % p[:80])
             paper = []
-            for ref in (x.get("paper") if isinstance(x.get("paper"), list) else [])[:6]:
+            for ref in capped(x.get("paper"), 8, where, "paper items"):
                 nid = by_label.get(str(ref).lower()) or by_label.get("tex:" + str(ref).lower())
                 if nid and nid not in paper:
                     paper.append(nid)
@@ -405,6 +433,7 @@ def verify(doc, G, trees, infos, claims_doc):
             out["experiments"].append({"id": xid, "name": _text(x.get("name") or xid, 60, "name"), "type": x.get("type") if x.get("type") in TYPES else "other",
                                        "tests": list(dict.fromkeys(tests)), "files": pats, "metric": col("metric"),
                                        "lower": x.get("lower") if isinstance(x.get("lower"), bool) else None, "method_column": col("method_column"),
+                                       "target": x.get("target") if isinstance(x.get("target"), (int, float)) and not isinstance(x.get("target"), bool) else None,
                                        "dataset_column": col("dataset_column"),
                                        "ours": _text(x["ours"], 60, "ours") if isinstance(x.get("ours"), str) and x["ours"].strip() else None,
                                        "paper": paper, "note": " ".join(str(x.get("note") or "").split())[:300], "matched": len(hit)})
@@ -414,7 +443,7 @@ def verify(doc, G, trees, infos, claims_doc):
     twice = sorted({", ".join(v) for v in claimed.values() if len(v) > 1})
     for pair in twice[:5]:
         note("warning", "experiments", "some files belong to more than one experiment: %s" % pair)
-    for p in (doc.get("ignore") if isinstance(doc.get("ignore"), list) else [])[:30]:
+    for p in capped(doc.get("ignore"), 40, "ignore", "ignore patterns"):
         try:
             compile_pattern(p)
             out["ignore"].append(p.strip().lstrip("./"))

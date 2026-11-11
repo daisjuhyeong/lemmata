@@ -452,7 +452,7 @@ function rxExpRow(x, sec) {
   const row = h('div', { class: 'rx-x-r' + (open ? ' open' : '') + (x.attention ? ' att' : '') },
     h('button', { class: 'rx-x-main', 'aria-expanded': String(open), onclick: () => { RX.exOpen = open ? null : key; renderPage(true); } },
       h('span', { class: 'sg ' + glyph[1] }, glyph[0]), h('span', { class: 'rx-x-name' }, x.map && RX_XTYPE[x.type] ? h('span', { class: 'tag rx-x-ty t-' + x.type }, RX_XTYPE[x.type]) : null, h('b', null, x.name), x.map ? h('span', { class: 'muted small' }, ' · ' + plural(x.files_n, 'file')) : null, h('span', { class: 'muted' }, x.caption ? ' ' : ''), x.caption ? h('span', { class: 'muted' }, rxMath(trunc(x.caption, 60))) : null)),
-    h('span', { class: 'rx-x-metric small muted', title: x.summary ? (x.summary.measure || x.summary.metric) + (x.summary.measure && x.summary.measure !== x.summary.metric ? ' · ' + x.summary.metric : '') : null }, x.summary ? trunc(x.summary.measure || x.summary.metric, 16) + (x.summary.lower ? ' ↓' : ' ↑') : ''),
+    h('span', { class: 'rx-x-metric small muted', title: x.summary ? (x.summary.measure || x.summary.metric) + (x.summary.measure && x.summary.measure !== x.summary.metric ? ' · ' + x.summary.metric : '') : null }, x.summary ? trunc(x.summary.measure || x.summary.metric, 16) + (x.summary.target != null ? '' : x.summary.lower ? ' ↓' : ' ↑') : ''),
     tu ? h('span', { class: 'small', title: tu.best ? 'Best setting: ' + tu.best.label : null }, tu.best ? [h('b', { class: 'mono' }, rxFmt(tu.best.value)), h('span', { class: 'muted' }, ' best of ' + tu.runs)] : '') : rxGapBar(x.summary), rxSpark(x.spark), rxTally(x),
     h('span', { class: 'muted small' }, x.stale ? h('span', { class: 'rx-tl warn', title: 'The code or settings changed after this result was written' }, '↻ old') : x.last ? dmon(x.last) : ''));
   if (open) row.append(rxExpDetail(x.id));
@@ -502,11 +502,12 @@ function rxExpDetail(id) {
     // result
     if (sm && x.table) {
       const rows = x.table.rows.filter(r => r.values[sm.metric] != null), vs = rows.map(r => r.values[sm.metric]), hi = Math.max(...vs.map(Math.abs)) || 1;
-      const sorted = rows.slice().sort((a, b) => sm.lower ? a.values[sm.metric] - b.values[sm.metric] : b.values[sm.metric] - a.values[sm.metric]);
+      const key = v => sm.target != null ? Math.abs(v - sm.target) : sm.lower ? v : -v;
+      const sorted = rows.slice().sort((a, b) => key(a.values[sm.metric]) - key(b.values[sm.metric]));
       const sel = (cur, opts, fn, label) => { const s = h('select', { 'aria-label': label, disabled: READONLY }, opts.map(o => h('option', { value: o, selected: o === cur }, o))); s.addEventListener('change', () => fn(s.value)); return s; };
       out.push(blk('Result', h('div', { class: 'rx-x-ctl' }, x.map && sm.measures && sm.measures.length > 1 ? sel(sm.measure, sm.measures, v => post({ measure: v }), 'Measure') : null,
         sm.cols.length > 1 || !x.map ? sel(sm.metric, sm.cols, v => post({ metric: v }), x.map ? 'Dataset' : 'Metric') : null,
-        h('button', { class: 'btn sm', disabled: READONLY, title: 'Switch which direction is better', onclick: () => post({ lower: !sm.lower }) }, sm.lower ? '↓ lower is better' : '↑ higher is better'),
+        sm.target != null ? h('span', { class: 'tag' }, '→ ' + sm.target + ' is best') : h('button', { class: 'btn sm', disabled: READONLY, title: 'Switch which direction is better', onclick: () => post({ lower: !sm.lower }) }, sm.lower ? '↓ lower is better' : '↑ higher is better'),
         x.tuning ? null : [h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
         sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, ['paper', 'name', 'map'].includes(sm.ours_by) ? '' : '(guessed)') : null]),
         h('div', { class: 'rx-bars' }, sorted.map((r, i) => { const v = r.values[sm.metric], me = r.label === sm.ours_label; return h('div', { class: 'rx-bar' + (me ? ' me' : '') },
@@ -572,7 +573,7 @@ function rxMapCard() {
   const body = h('details', { class: 'rx-map-d', open: prop || RX.mapOpen ? '' : null, ontoggle: ev => { if (!prop) RX.mapOpen = ev.target.open; } }, h('summary', null, prop ? 'Review' : 'Show map'),
     h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ours'), READONLY ? h('b', null, m.method ? m.method.name : '?') : (() => { const i = h('input', { class: 'rx-map-in', value: m.method ? m.method.name : '', 'aria-label': 'Name of our method', placeholder: 'Method name' }); i.addEventListener('change', () => edit({ method: i.value })); return i; })(),
       m.method && m.method.aliases.length ? h('span', { class: 'muted small' }, 'also ' + m.method.aliases.join(', ')) : null),
-    m.questions.map(q => h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, q.label), h('span', { class: 'serif' }, rxMath(q.text)), q.evidence[0] ? rxWhere(q.evidence[0], q.evidence[0].repo) : null,
+    m.questions.map(q => h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, q.label), q.source === 'notes' ? h('span', { class: 'tag warn', title: 'Taken from your notes, not stated in the paper' }, 'notes') : null, h('span', { class: 'serif' }, rxMath(q.text)), q.evidence[0] ? rxWhere(q.evidence[0], q.evidence[0].repo) : null,
       READONLY ? null : h('button', { class: 'linkbtn small', title: 'Remove this question', onclick: () => edit({ remove: 'question:' + q.id }) }, '✕'))),
     h('div', { class: 'rx-map-tw' }, h('table', { class: 'tbl rx-map-t' }, h('thead', null, h('tr', null, ['Experiment', 'Kind', 'Tests', 'Files', 'Metric', 'Paper', ''].map(t => h('th', null, t)))),
       h('tbody', null, m.experiments.map(x => { const ty = h('select', { disabled: READONLY, 'aria-label': 'Kind' }, Object.keys(RX_XTYPE).map(t => h('option', { value: t, selected: t === x.type }, RX_XTYPE[t] || 'Other')));
@@ -614,6 +615,7 @@ function pageExperiments() {
     const sec = h('section', { class: 'rx-x-sec st-' + s.status },
       h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
         cid ? h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } }, s.kind === 'question' || mapped ? s.label : 'H · ' + s.label) : h('span', { class: 'rx-x-q static' }, s.label),
+        s.source === 'notes' ? h('span', { class: 'tag warn', title: 'Taken from your notes, not stated in the paper' }, 'notes') : null,
         h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
     else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),

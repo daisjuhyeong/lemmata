@@ -79,6 +79,14 @@ def combine(found, read, spec, tuning=False):
             "datasets": datasets, "metrics": [metric], "metric": metric, "measures": measures[:24], "metric_by": metric_by, "files": n_files}
 
 
+def toward(tab, target):
+    """For "closer to <target> is better": the same table with each value replaced by its distance to the target."""
+    if tab is None or target is None:
+        return tab
+    rows = [dict(r, values={c: abs(v - target) for c, v in r["values"].items()}) for r in tab["rows"]]
+    return dict(tab, rows=rows)
+
+
 def ours_of(table, method, spec, chosen, bold=()):
     labels = [r["label"] for r in table["rows"]]
     if chosen in labels:
@@ -134,7 +142,9 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             x["result"] = {"node_id": hit[0][2], "name": ", ".join(spec["files"]), "path": ", ".join(spec["files"]), "repo": repo, "github": None}
         if tab:
             col = e.get("column") if e.get("column") in tab["cols"] else tab["cols"][0]
-            lower = e["lower"] if "lower" in e else spec["lower"] if spec.get("lower") is not None else lower_better(tab["metric"])
+            target = spec.get("target")
+            lower = True if target is not None else e["lower"] if "lower" in e else spec["lower"] if spec.get("lower") is not None else lower_better(tab["metric"])
+            raw, tab = tab, toward(tab, target)
             if tuning:
                 vals = [(r["label"], r["values"][col]) for r in tab["rows"] if col in r["values"]]
                 best = (min if lower else max)(vals, key=lambda v: v[1]) if vals else None
@@ -143,8 +153,8 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             else:
                 ours, how = ours_of(tab, method, spec, e.get("ours"), bold)
                 s = summarise(tab, ours, col, lower)
-            x["summary"] = dict(s or {"ours": None, "gap": None, "best": None}, ours_label=ours, ours_by=how, metric=col, measure=tab["metric"], measures=tab["measures"],
-                                lower=lower, metric_by=tab["metric_by"] if not e.get("metric") else "you", methods=[r["label"] for r in tab["rows"]],
+            x["summary"] = dict(s or {"ours": None, "gap": None, "best": None}, ours_label=ours, ours_by=how, metric=col, measure=tab["metric"] if target is None else "|%s − %g|" % (tab["metric"], target), measures=tab["measures"],
+                                lower=lower, target=target, metric_by=tab["metric_by"] if not e.get("metric") else "you", methods=[r["label"] for r in tab["rows"]],
                                 baselines=[] if tuning else [r["label"] for r in tab["rows"] if r["label"] != ours], cols=tab["cols"], datasets=tab["datasets"])
             rx = [und.compile_pattern(p) for p in spec["files"]]
 
@@ -152,7 +162,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                 t = GitTree(infos[repo]["abs_path"], repo, ev["rev"])
                 try:
                     found = [(p, mm.groupdict()) for p in t.list_files() for mm in [next((r.match(p) for r, _ in rx if r.match(p)), None)] if mm]
-                    return combine(found, t.read, sp, tuning)
+                    return toward(combine(found, t.read, sp, tuning), target)
                 finally:
                     t.close()
 
@@ -177,12 +187,14 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             if tab["metric_by"] != "map" and not e.get("metric"):
                 x["caveats"].append({"k": "guess", "t": "Metric is a guess"})
             if full:
-                x["table"] = {"cols": tab["cols"], "rows": tab["rows"][:60], "seeds": tab["seeds"]}
+                x["table"] = {"cols": raw["cols"], "rows": raw["rows"][:60], "seeds": raw["seeds"]}
                 x["history"] = hist
         elif hit:
             x["caveats"].append({"k": "untraced", "t": "Files could not be read as tables"})
         if cells:
-            grid, tally, problems = align(cells, tab, x["summary"]["lower"] if x["summary"] else None)
+            grid, tally, problems = align(cells, raw if tab else None, x["summary"]["lower"] if x["summary"] and x["summary"].get("target") is None else None)
+            if x["summary"] and x["summary"].get("target") is not None:     # "best" in a column is the value nearest the target: skip the bold check
+                problems = [p for p in problems if p["kind"] != "bold"]
             x["tally"], x["problems"] = tally, problems
             if any(p["kind"] == "bold" for p in problems):
                 x["caveats"].append({"k": "bold", "t": "Bold is not best"})
@@ -231,7 +243,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
         exps = sorted((built[x["id"]] for x in m["experiments"] if q["id"] in x["tests"]), key=key)
         real = [x for x in exps if x["type"] != "tuning"]
         status = "unsupported" if not real else "partial" if any(x["attention"] for x in real) else "supported"
-        sections.append({"id": q["id"], "claim_id": q.get("claim_id"), "kind": q["kind"], "label": q["label"], "text": q["text"], "status": status,
+        sections.append({"id": q["id"], "claim_id": q.get("claim_id"), "kind": q["kind"], "source": q.get("source", "paper"), "label": q["label"], "text": q["text"], "status": status,
                          "state": "confirmed", "recheck": any(x["stale"] for x in exps), "experiments": exps, "suggested": [], "evidence": q["evidence"][:2]})
     rest = sorted((built[x["id"]] for x in m["experiments"] if not x["tests"]), key=key)
     if rest:

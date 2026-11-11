@@ -1,7 +1,7 @@
 ---
 type: task-card
 owner_agent: lead
-status: built, not yet QA-verified
+status: built, first real run done, not yet QA-verified
 sources:
   - "founder message in chat, 2026-11-11, with a screenshot of the flooded 'No question' section on mcd_extension (quoted in ADR-007)"
   - "founder reply in chat, 2026-11-11 14:55 KST: 'I like the design. build it.'"
@@ -34,3 +34,12 @@ last_reviewed: 2026-11-11
 - One experiment reads files from one repository. Result files must be CSV/TSV/JSON tables. At most 300 files per experiment and 15 days of history are read.
 - When the map is confirmed again, claims added by an earlier confirmation are reused by exact text; a reworded question creates a new claim and leaves the old one.
 - The Average column is a plain mean over datasets; it is not what every paper reports.
+
+## First real run (mcd_extension, 2026-11-11)
+Source: Claude Code transcript the founder pasted in chat, 2026-11-11 15:31 KST. Claude Code read the brief, proposed three times, and the third proposal passed. It found four checker problems, fixed in the follow-up commit:
+- **Method aliases rejected** although they are in the result tables (`MCD_EXT`). The checker looked only at two sample rows per file group. It now reads every text cell, column name and file-name part.
+- **File patterns dropped silently.** An experiment kept only its first 8 patterns with no report. Every cap is now reported, and the caps were raised (24 patterns, 60 experiments).
+- **Questions had to quote the paper**, but the extension's questions live in the repository's notes (`RESEARCH_QUESTIONS.md`). Questions may now quote notes (.md, .txt, .rst, .tex, .org); they carry a "notes" tag in the map and on the Experiments page.
+- **"Close to 0 is best"** (excess false alarms) was treated as lower-is-better. An experiment can now set `target`; ranking uses the distance to it, the paper check still compares raw values, and the bold check is skipped.
+
+Open: the paper repository linked to this project is the original MCD-DD paper (KDD 2024), not the extension, so "MCD" in the paper means MCD-DD. Founder to decide which paper the project should track.
