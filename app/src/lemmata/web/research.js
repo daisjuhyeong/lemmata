@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
+const RX_TABS = { review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 const RX_KIND = { contribution: 'Contribution', question: 'Research question', theorem: 'Theorem', lemma: 'Lemma', proposition: 'Proposition', corollary: 'Corollary', claim: 'Claim', core: 'Core message' };
@@ -20,6 +20,7 @@ async function rxLoad() {
     const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
     let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
     let map = null; try { map = await apiGet('/api/map'); } catch (e) { /* older data has no map */ }
+    try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
@@ -753,6 +754,62 @@ function rxTaskCard(t) {
       : h('div', { class: 'rx-task-l muted' }, 'Lemmata could not tell what this is about. Name a table, figure, section, theorem or file in the feedback, or link one.'),
     !done && t.also_check && t.also_check.length ? h('div', { class: 'rx-task-l' }, h('span', { class: 'muted' }, 'When you change that, also recheck: '), t.also_check.slice(0, 8).map((x, i) => [i ? ', ' : null, rxNodeBtn(x.node_id, x.name)])) : null);
 }
+/* Review: should I continue? Three checks on top, the questions under them, the checklist one click down. */
+const RX_VERDICT = { yes: ['✓', 'Yes', 'fine'], partly: ['◐', 'Partly', 'look'], no: ['✕', 'No', 'fix'], none: ['○', 'Not yet', 'ign'] };
+const RX_CONF_PROMPT = name => 'Use Lemmata to check confounds for the project "' + name + '": call confound_brief, open the scripts and settings it names, then report_confounds for every question.';
+function pageReview() {
+  const nr = rxNotReady('Review'); if (nr) return nr;
+  S.outline = [];
+  const R = RX.review, days = RX.rvDays || 30, name = S.project ? S.project.name : 'this project';
+  const setDays = async d => { RX.rvDays = d; try { RX.review = await apiGet('/api/review?days=' + d); } catch (e) { /* keep */ } renderPage(true); };
+  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Period' }, [[30, '30 days'], [7, '1 week'], [1, '1 day']].map(([d, l]) => h('button', { 'aria-pressed': String(days === d), disabled: READONLY && days !== d, onclick: () => setDays(d) }, l)));
+  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Review'), R ? seg : null));
+  root.classList.add('wide');
+  if (!R) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
+  const post = async body => { const r = await rxPost('/api/review', Object.assign({ days }, body)); if (r) { RX.review = r; renderPage(true); } };
+  const F = RX.rvFilter, fc = F && R.checks.find(c => c.k === F);
+  root.append(h('div', { class: 'rx-rv-checks' }, R.checks.map((c, i) => { const v = RX_VERDICT[c.verdict];
+    return h('button', { class: 'rx-rv-check v-' + c.verdict + (F === c.k ? ' sel' : ''), 'aria-pressed': String(F === c.k), title: 'Show what is behind this', onclick: () => { RX.rvFilter = F === c.k ? null : c.k; renderPage(true); } },
+      h('span', { class: 'rx-rv-q' }, (i + 1) + ' · ' + c.q), h('span', { class: 'rx-rv-v ' + v[2] }, v[0] + ' ' + (c.k === 'paper' && c.verdict === 'partly' ? 'A smaller one' : v[1])), h('span', { class: 'rx-rv-l' }, c.line)); })));
+  // hoped vs supported
+  const hopedIn = h('textarea', { class: 'rx-rv-hoped serif', rows: 2, disabled: READONLY, placeholder: 'The best-case conclusion, in one or two sentences. Write it before the results are in.', 'aria-label': 'Hoped conclusion' }, R.hoped || '');
+  hopedIn.addEventListener('change', () => post({ hoped: hopedIn.value }));
+  root.append(h('div', { class: 'rx-rv-two' },
+    h('div', { class: 'rx-rv-pane' }, h('div', { class: 'rx-label' }, 'Hoped conclusion'), hopedIn),
+    h('div', { class: 'rx-rv-pane' }, h('div', { class: 'rx-label' }, 'Supported today'),
+      R.supported.length ? R.supported.map(c => h('div', { class: 'serif rx-rv-s' }, h('b', null, c.label + ' '), rxMath(trunc(c.text, 140)))) : h('div', { class: 'muted' }, 'No claim is fully backed yet.'),
+      R.not_yet.length ? h('details', { class: 'rx-rv-ny' }, h('summary', null, plural(R.not_yet.length, 'claim') + ' not yet'), R.not_yet.map(c => h('div', { class: 'serif rx-rv-s no', title: 'Missing: ' + c.missing.join(', ') }, h('b', null, c.label + ' '), h('s', null, rxMath(trunc(c.text, 140)))))) : null)));
+  // behind list for the "ahead" check
+  if (fc && fc.k === 'ahead' && fc.behind.length) root.append(h('div', { class: 'rx-rv-behind' }, fc.behind.map(x => h('button', { class: 'chip-btn', title: 'Open this experiment', onclick: () => { RX.exView = 'map'; RX.mapSel = 'x:' + x.id; openTab('experiments'); } },
+    '▼ ' + x.name + ' · ' + x.question + (x.since ? ' · since ' + dmon(x.since) : ''))))) ;
+  // questions
+  const TREND = { moved: ['↗', 'Moved', 'fine'], stalled: ['–', 'Stalled', 'ign'], none: ['○', 'Not started', 'ign'] };
+  const rows = R.questions.filter(q => !fc || fc.rows.includes(q.id));
+  const tbl = h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-rv-r head' }, h('span', null, 'Claim'), h('span', null, 'Question'), h('span', null, 'Complete'), h('span', null, days === 30 ? '30 days' : days === 7 ? '1 week' : '1 day')));
+  for (const q of rows) {
+    const open = RX.rvOpen === q.id, t = TREND[q.trend];
+    const segs = q.started ? h('span', { class: 'rx-rv-segs' }, q.checklist.map(c => h('i', { class: 's-' + c.state, title: c.label + ': ' + c.why })), h('span', { class: 'muted small' }, ' ' + q.done + '/' + q.of)) : h('span', { class: 'muted small' }, 'Not started');
+    tbl.append(h('button', { class: 'rx-rv-r' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: () => { RX.rvOpen = open ? null : q.id; renderPage(true); } },
+      h('b', null, q.label), h('span', { class: 'serif rx-rv-t' }, rxMath(trunc(q.text, 120))), segs,
+      h('span', { class: 'rx-rv-tr ' + t[2] }, t[0] + ' ' + (q.behind && q.trend !== 'none' ? 'Behind in ' + q.behind : t[1]))));
+    if (open) { const conf = q.checklist.find(c => c.k === 'confounds'), rep = conf && conf.report;
+      const G = { done: ['✓', 'fine', 'Done'], todo: ['○', 'look', 'To do'], stale: ['↻', 'look', 'Check again'], na: ['–', 'ign', 'Not applicable'] };
+      tbl.append(h('div', { class: 'rx-rv-d' },
+        q.checklist.map(c => h('div', { class: 'rx-rv-item' }, h('span', { class: 'sg ' + G[c.state][1], title: G[c.state][2] }, G[c.state][0]), h('b', null, c.label), h('span', { class: 'muted' }, c.why))),
+        rep && rep.confounds.length ? h('div', { class: 'rx-rv-conf' }, rep.confounds.map((c, i) => h('div', { class: 'rx-rv-cf' + (c.resolved ? ' ok' : '') },
+          h('input', { type: 'checkbox', checked: c.resolved ? '' : null, disabled: READONLY, 'aria-label': 'Resolved', title: 'Resolved', onchange: () => post({ question: q.id, resolve: i }) }),
+          h('span', null, c.text), rxWhere(c.evidence, c.evidence.repo)))) : null,
+        h('div', { class: 'row rx-rv-act' },
+          READONLY ? null : h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
+          READONLY ? null : h('button', { class: 'btn sm', title: 'Mark confounds as checked by you, without an agent', onclick: () => post({ question: q.id, mine: !(rep && rep.by === 'you') }) }, rep && rep.by === 'you' ? 'Undo my check' : 'I checked it myself'),
+          q.started ? h('button', { class: 'btn sm', onclick: () => { RX.exView = 'map'; RX.mapSel = 'q:' + q.id; openTab('experiments'); } }, 'Open experiments') : null,
+          rep ? h('span', { class: 'muted small' }, 'Confounds: ' + rep.by + ', ' + dmon(rep.at)) : null)));
+    }
+  }
+  if (!rows.length) tbl.append(h('div', { class: 'rx-x-none' }, R.questions.length ? 'Nothing behind this check.' : 'No questions yet. Confirm a project map on the Experiments page.'));
+  root.append(tbl);
+  return root;
+}
 function pageTasks() {
   const nr = rxNotReady('Tasks'); if (nr) return nr;
   S.outline = [];
@@ -922,11 +979,12 @@ function rxNotationDetail(s, post) {
 }
 
 /* ---------- wiring into the shell ---------- */
-const RX_PAGES = { notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, tasks: pageTasks, ask: pageAsk };
+const RX_PAGES = { review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, tasks: pageTasks, ask: pageAsk };
 function rxNavRows() {
   const cc = RX.claims && RX.claims.counts, lc = RX.ledger && RX.ledger.counts, tc = RX.tasks && RX.tasks.counts;
   const act = k => { const t = S.tabs[S.active]; return !!t && t.k === k; };
   return [
+    navRow('Review', '◎', () => openTab('review'), null, act('review')),
     navRow('Claims', '◆', () => openTab('claims'), cc ? (cc.unsupported + cc.partial) || null : null, act('claims')),
     navRow('Notation', '𝑥', () => openTab('notation'), RX.notation && RX.notation.counts ? RX.notation.issues.length || null : null, act('notation')),
     navRow('Timeline', '⚑', () => openTab('timeline'), null, act('timeline')),

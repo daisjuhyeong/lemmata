@@ -442,7 +442,7 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
                                 cols=tab["cols"], datasets=tab["datasets"] or ([c for c in tab["cols"]] if len(tab["cols"]) > 1 and tab["metrics"] and len(tab["metrics"]) == 1 and tab["datasets"] else []))
             hist = history(events, infos, G.nodes, rn["repo"], rn["loc"]["path"], ours, col, lower)
             x["history_n"] = len(hist)
-            x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"])} for h in hist]
+            x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
             if s and s["n"] <= 1 and s.get("std") is None:
                 x["caveats"].append({"k": "seeds", "t": "One run, no spread"})
             if len(tab["cols"]) == 1 and not tab["datasets"]:

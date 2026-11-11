@@ -643,6 +643,27 @@ def _map_text(d):
     return "\n".join(lines)
 
 
+def t_confound_brief(ctx, args):
+    from lemmata.engine import review as rev
+    pid, eng = _project(ctx, args)
+    qs = eng.confound_brief()
+    data = {"how_to_report": rev.GUIDE, "questions": qs}
+    return rev.GUIDE + "\n" + _quote([json.dumps(qs, ensure_ascii=False, indent=1)]), data, "Open the scripts and settings themselves for more."
+
+
+def t_report_confounds(ctx, args):
+    pid, eng = _project(ctx, args)
+    if not isinstance(args.get("findings"), list):
+        raise _Fail("Argument 'findings' must be a list. Call confound_brief for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.report_confounds(args["findings"])
+    else:
+        d = eng.report_confounds(args["findings"])
+    return "\n".join(d["notes"]) + "\nStored. The researcher sees it on the Review page and decides what to do about each confound.", {"notes": d["notes"]}, "Nothing to narrow."
+
+
 def t_project_map(ctx, args):
     pid, eng = _project(ctx, args)
     d = eng.project_map()
@@ -777,6 +798,17 @@ TOOLS = [
                     "what fails, and stores the rest as a proposal for the researcher to confirm. It never edits the paper or code. Only call "
                     "it when the user asked you to map or understand the project.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "map": {"type": "object", "description": "The map: method, questions, experiments, ignore."}}, ["project", "map"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "confound_brief", "fn": t_confound_brief, "title": "Brief for checking confounds", "max_text": 30000,
+     "description": "For the Review page's checklist. Returns each research question with its experiments (files, methods, runs, scripts, "
+                    "settings, commands) and how to report confounds: things other than the method that could explain a result. Read it, "
+                    "open the scripts and settings, then call report_confounds.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "report_confounds", "fn": t_report_confounds, "title": "Report confounds",
+     "description": "Submit, per research question, a verdict (clear or risk) and the confounds found, each with a quote from a real file. "
+                    "Lemmata drops findings whose quote is not in the file and stores the rest for the researcher. It never edits the paper "
+                    "or code. Only call it when the user asked you to check confounds.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "findings": {"type": "array", "items": {"type": "object"}, "description": "One entry per question; see confound_brief."}}, ["project", "findings"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
 ]
 _BY_NAME = {t["name"]: t for t in TOOLS}

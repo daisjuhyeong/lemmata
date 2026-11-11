@@ -18,6 +18,7 @@ from . import refs as refsmod
 from . import store
 from . import track as trackmod
 from . import tree as treemod
+from . import review as reviewmod
 from . import triage as triagemod
 from . import understand as undmod
 from .errors import BadRequest, NotFound
@@ -465,6 +466,28 @@ class Engine:
         expmod.decide(st, known, exp_id, ours, metric, lower)
         self.hub.write_json("experiments.json", st)
         return self._exp(exp_id)
+
+    # ------------------------------------------------------------------ review: should I continue?
+    def review(self, days=30, now=None):
+        return reviewmod.build(self._exp(), reviewmod.load(self.hub), days, now)
+
+    def set_review(self, hoped=None, question=None, resolve=None, mine=None, days=30):
+        E = self._exp()
+        st = reviewmod.load(self.hub)
+        reviewmod.decide(st, {s["id"] for s in E["sections"]}, hoped, question, resolve, mine, now_iso())
+        self.hub.write_json("review.json", st)
+        return reviewmod.build(E, st, days)
+
+    def confound_brief(self):
+        return reviewmod.brief(self._exp(), self._exp)
+
+    def report_confounds(self, findings, by="agent"):
+        s = self._ensure()
+        E = self._exp()
+        st = reviewmod.load(self.hub)
+        notes = reviewmod.report(st, findings, E, s["trees"], by, now_iso())
+        self.hub.write_json("review.json", st)
+        return {"notes": notes, "review": reviewmod.build(E, st)}
 
     # ------------------------------------------------------------------ project map (phase 1: understand)
     def brief(self):

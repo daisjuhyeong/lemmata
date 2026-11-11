@@ -152,7 +152,7 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
-        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "project_map"):   # research views (absent on fixture data)
+        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "project_map", "review"):   # research views (absent on fixture data)
             fn = getattr(e, name, None)
             if fn is not None:
                 try:
@@ -371,6 +371,14 @@ class Handler(BaseHTTPRequestHandler):
                 with self.app.lock:
                     data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
                 return self._json(data)
+            if r == "/review":
+                try:
+                    days = int(q.get("days", "30"))
+                except ValueError:
+                    raise ApiError(400, "bad_request", "days must be a number")
+                with self.app.lock:
+                    data = need("review")(days)
+                return self._json(data)
             if r == "/digest":
                 try:
                     days = int(q.get("days", "7"))
@@ -421,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard")
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -455,6 +463,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("edit_map")(body.get("change")))
                 if r in ("/map/draft", "/map/confirm", "/map/discard"):
                     return self._json(need(r[5:] + "_map")())
+                if r == "/review":
+                    rs, mine, days = body.get("resolve"), body.get("mine"), body.get("days", 30)
+                    if (rs is not None and (not isinstance(rs, int) or isinstance(rs, bool))) or (mine is not None and not isinstance(mine, bool)) or days not in (30, 7, 1):
+                        raise ApiError(400, "bad_request", "resolve must be a number, mine true or false, days 30, 7 or 1")
+                    return self._json(need("set_review")(txt("hoped"), txt("question"), rs, mine, days))
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):

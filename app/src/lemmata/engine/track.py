@@ -189,7 +189,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             hist = history(events, infos, G.nodes, repo, None, ours, col, lower, is_result=lambda p: any(r.match(p) for r, _ in rx),
                            table_at=table_at, versions=per_day) if not tuning else []
             x["history_n"] = len(hist)
-            x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"])} for h in hist]
+            x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
             if not tuning:
                 if s and s["n"] <= 1 and s.get("std") is None:
                     x["caveats"].append({"k": "seeds", "t": "One run, no spread"})

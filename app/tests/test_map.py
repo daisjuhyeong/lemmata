@@ -272,6 +272,35 @@ class MapTest(unittest.TestCase):
         subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
         subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "undo"], check=True, capture_output=True)
 
+    def test_review(self):
+        """Should I continue: three checks, the five-item checklist, and confounds reported by an agent."""
+        from datetime import datetime, timezone
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        now = datetime(2026, 10, 13, tzinfo=timezone.utc)
+        r = self.e.review(30, now)
+        self.assertEqual([(c["k"], c["verdict"]) for c in r["checks"]], [("moving", "yes"), ("ahead", "yes"), ("paper", "no")])
+        self.assertEqual(self.e.review(1, now)["checks"][0]["line"], "1 of 3 questions moved in 1 day")
+        q = {x["label"]: x for x in r["questions"]}
+        self.assertEqual([(c["k"], c["state"]) for c in q["H1"]["checklist"]],
+                         [("seeds", "todo"), ("baseline", "done"), ("ablation", "done"), ("paper", "done"), ("confounds", "todo")])
+        self.assertEqual((q["RQ1"]["done"], q["RQ1"]["of"]), (2, 5))
+        with self.assertRaises(BadRequest):
+            self.e.review(3)
+        notes = self.e.report_confounds([
+            {"question": "q1", "verdict": "risk", "confounds": [{"text": "Learning rate was tuned for MCD only.", "evidence": {"path": "train.py", "quote": 'p.add_argument("--lr")'}},
+                                                               {"text": "made up", "evidence": {"path": "train.py", "quote": "not there at all"}}]},
+            {"question": "q2", "verdict": "clear"}, {"question": "zz", "verdict": "clear"}])["notes"]
+        self.assertEqual(notes, ["dropped (q1): a confound whose quote is not in 'train.py'", "kept (q1): risk, 1 confound", "kept (q2): clear, 0 confounds", "dropped: unknown question 'zz'"])
+        q = {x["label"]: x for x in self.e.review(30, now)["questions"]}
+        self.assertEqual((q["RQ1"]["checklist"][4]["state"], q["H1"]["checklist"][4]["state"]), ("todo", "done"))
+        r = self.e.set_review(hoped="MCD detects drift earlier.", question="q1", resolve=0)
+        self.assertEqual(r["hoped"], "MCD detects drift earlier.")
+        self.assertEqual({x["label"]: x for x in r["questions"]}["RQ1"]["checklist"][4]["state"], "done")
+        self.assertEqual({x["label"]: x for x in self.e.set_review(question="q3", mine=True)["questions"]}["H2"]["checklist"][4]["why"], "Checked by you, none found")
+        self.assertIn("report_confounds", self.e.confound_brief() and __import__("lemmata.engine.review", fromlist=["GUIDE"]).GUIDE)
+        os.remove(self.tmp + "/.lemmata/review.json")
+
     def test_mcp_tools(self):
         ctx = mcp.LocalCtx(self.tmp)
         pid = ctx.list_projects()[0]["id"]
