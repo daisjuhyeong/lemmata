@@ -22,7 +22,7 @@ The hub needs the new `/api/runs` route and the `runs` / `log_run` MCP tools.
 
 ## Step 2. Install the extension (the machine where you run experiments)
 
-1. `code --install-extension vscode/lemmata-0.3.0.vsix` (or Extensions → `...` → **Install from VSIX...**). With Remote-SSH, install it in the remote window: it must run where the files are.
+1. `code --install-extension vscode/lemmata-0.4.0.vsix` (or Extensions → `...` → **Install from VSIX...**). With Remote-SSH, install it in the remote window: it must run where the files are.
 2. If you have not connected before: Command Palette → **Lemmata: Connect to Server**, paste a token (`uv run lemmata hub token --device "VS Code"` on the Mac mini).
 3. Open your code repository as the workspace folder. The status bar should read `Lemmata: N to recheck`, not `no project`.
 

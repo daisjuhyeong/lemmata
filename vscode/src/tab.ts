@@ -18,7 +18,8 @@ export interface TabHost {
   hubChanged(): void;
 }
 
-interface Open { panel: vscode.WebviewPanel; client: HubClient; pid: string; ready: boolean; want: View | null }
+interface Want { k: View; sel?: string | null }
+interface Open { panel: vscode.WebviewPanel; client: HubClient; pid: string; ready: boolean; want: Want | null }
 
 export class LemmataTab {
   private readonly tabs = new Map<string, Open>();      // project id -> its tab
@@ -26,16 +27,18 @@ export class LemmataTab {
 
   constructor(private readonly ctx: vscode.ExtensionContext, private readonly host: TabHost) { }
 
-  async open(client: HubClient, base: string, pid: string, name: string, view?: View) {
+  /** sel: what to select on that page (q:<claim> or x:<experiment> on Experiments), from a website link. */
+  async open(client: HubClient, base: string, pid: string, name: string, view?: View, sel?: string | null) {
+    const want: Want | null = view ? { k: view, sel: sel || null } : null;
     const cur = this.tabs.get(pid);
     if (cur) {
       cur.panel.reveal(undefined, false);
-      if (view) { if (cur.ready) void cur.panel.webview.postMessage({ t: 'view', k: view }); else cur.want = view; }
+      if (want) { if (cur.ready) void cur.panel.webview.postMessage({ t: 'view', k: want.k, sel: want.sel }); else cur.want = want; }
       return;
     }
     const panel = vscode.window.createWebviewPanel('lemmata.tab', name ? 'Lemmata: ' + name : 'Lemmata', vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] });
-    const o: Open = { panel, client, pid, ready: false, want: view || null };
+    const o: Open = { panel, client, pid, ready: false, want };
     this.tabs.set(pid, o);
     panel.onDidDispose(() => { if (this.tabs.get(pid) === o) this.tabs.delete(pid); }, null, this.ctx.subscriptions);
     panel.webview.onDidReceiveMessage(m => { void this.onMessage(o, m); }, null, this.ctx.subscriptions);
@@ -97,7 +100,7 @@ export class LemmataTab {
     if (!m || typeof m !== 'object') return;
     try {
       if (m.t === 'fetch') return await this.onFetch(o, m);
-      if (m.t === 'ready') { o.ready = true; if (o.want) { void o.panel.webview.postMessage({ t: 'view', k: o.want }); o.want = null; } return; }
+      if (m.t === 'ready') { o.ready = true; if (o.want) { void o.panel.webview.postMessage({ t: 'view', k: o.want.k, sel: o.want.sel }); o.want = null; } return; }
       if (m.t === 'external' && typeof m.url === 'string' && /^https?:\/\//i.test(m.url)) { await vscode.env.openExternal(vscode.Uri.parse(m.url, true)); return; }
       if (m.t === 'openFile') {
         const ok = await this.host.openLocation(o.pid, String(m.repo || ''), String(m.path || ''), Number(m.line) || 1);

@@ -13,6 +13,7 @@ import { HubProject, TriageState } from './core/types';
 import { RunCapture } from './runs';
 import { LemmataTab, isView } from './tab';
 import { View } from './core/embed';
+import { parseOpenLink } from './core/link';
 
 const WHY_SCHEME = 'lemmata-why';
 
@@ -369,9 +370,22 @@ function setTriage(state: TriageState) {
   };
 }
 
+/** "Open in VS Code" on the website: open the Lemmata tab on that page, with the claim or experiment selected. */
+async function openFromLink(u: vscode.Uri) {
+  const l = parseOpenLink(u.path, u.query);
+  if (!l) { void vscode.window.showWarningMessage('Lemmata: that link is not one Lemmata understands.'); return; }
+  const client = CTRL.clientOrNull();
+  if (!client) { void vscode.window.showWarningMessage('Lemmata: connect to your server first, then click the link again.', 'Connect').then(a => a && vscode.commands.executeCommand('lemmata.connect')); return; }
+  let projects = CTRL.projects;
+  if (!projects.some(p => p.id === l.pid)) { try { projects = await client.projects(); } catch (e) { void fail('could not reach the server', e); return; } }
+  const p = projects.find(x => x.id === l.pid);
+  if (!p) { void vscode.window.showWarningMessage('Lemmata: that project is not on the server this VS Code is connected to (' + CTRL.serverBase() + ').'); return; }
+  await TAB.open(client, CTRL.serverBase(), p.id, oneLine(p.name, 40), l.view, l.sel);
+}
 export async function activate(ctx: vscode.ExtensionContext) {
   CTRL = new Controller(ctx);
   const c = vscode.commands.registerCommand;
+  ctx.subscriptions.push(vscode.window.registerUriHandler({ handleUri: u => { void openFromLink(u); } }));
   ctx.subscriptions.push(
     vscode.window.createTreeView('lemmata.panel', { treeDataProvider: CTRL, showCollapseAll: true }),
     vscode.workspace.registerTextDocumentContentProvider(WHY_SCHEME, CTRL),

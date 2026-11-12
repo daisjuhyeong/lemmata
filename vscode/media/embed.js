@@ -27,7 +27,7 @@
       const p = pending.get(m.id); pending.delete(m.id);
       if (m.error) p.reject(new TypeError(m.error)); else p.resolve(m);
     } else if (m.t === 'view' && typeof window.openTab === 'function') {
-      try { window.openTab(m.k); } catch (e) { /* the app is still starting */ }
+      try { if (typeof m.sel === 'string' && m.sel && typeof window.rxGoto === 'function') window.rxGoto(m.k, m.sel); else window.openTab(m.k); } catch (e) { /* the app is still starting */ }
     }
   });
 

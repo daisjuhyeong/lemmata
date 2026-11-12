@@ -345,6 +345,10 @@ class MapTest(unittest.TestCase):
         self.assertEqual([(c["k"], c["verdict"]) for c in r["checks"]], [("moving", "yes"), ("ahead", "yes"), ("paper", "no")])
         self.assertEqual([(b["name"], b["ahead"], b["tie"], b["behind"], b["verdict"]) for b in r["baselines"]], [("ADWIN", 1, 1, 0, "ahead"), ("DDM", 1, 1, 0, "ahead")])
         self.assertEqual(r["checks"][1]["line"], "Ahead of 2 of 2 baselines")
+        for b in r["baselines"]:                    # side-by-side numbers: ours, the baseline, and a gap that agrees with them
+            for x in b["experiments"]:
+                self.assertIsNotNone(x["ours"]); self.assertIsNotNone(x["value"]); b["base"] or self.assertEqual(x["label"].lower(), b["name"].lower())
+                self.assertAlmostEqual(x["gap"], (x["value"] - x["ours"]) if x["lower"] else (x["ours"] - x["value"]))
         self.assertEqual(self.e.review(1, now)["checks"][0]["line"], "1 of 3 claims moved in 1 day")
         q = {x["ref"]: x for x in r["questions"]}
         self.assertEqual((q["H1"]["label"], q["H1"]["stage"]), ("C2", "finding"))      # the Review names claims as the Claims page does

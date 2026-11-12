@@ -224,6 +224,30 @@ test('S18 width modes on Experiments, Digest and Review: usable at 300px, column
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 
+test('S19: a website link opens Experiments with that item selected, and an experiment\'s files open in the editor', { skip }, async () => {
+  const before = navigations;
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments', 'q:h1');
+  await settle(2500);
+  assert.equal(await page.evaluate(() => (window as any).eval('RX.mapSel')), 'q:h1', 'the selection from the link reached the page');
+  assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Experiments') ?? null), true);
+  assert.equal(navigations, before, 'the page was not rebuilt');
+  // an experiment's details: "Open in editor" buttons for its scripts, settings and result file
+  await page.evaluate(() => { (window as any).eval("RX.mapSel = null; RX.exView = 'list'"); openTab('experiments'); });
+  await settle(1500);
+  const rows = await page.$$('.rx-x-main');
+  assert.ok(rows.length > 0, 'the sample has experiments');
+  let btn: any = null;
+  for (const r of rows) { await r.click(); await settle(1200); btn = await page.$('.rx-x-ed button'); if (btn) break; await r.click(); await settle(300); }
+  assert.ok(btn, 'an experiment with a script or result file offers Open in editor');
+  const n = host.locs.length;
+  await btn.click();
+  await settle(300);
+  assert.equal(host.locs.length, n + 1);
+  assert.deepEqual([host.locs[n].pid, typeof host.locs[n].rel, host.locs[n].rel.length > 0], [fx.pid, 'string', true]);
+  assert.equal(await page.$('a[href^="vscode://"]'), null, 'no "Open in VS Code" link inside VS Code');
+  assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
+});
+
 test('a hub that is too old, or unreachable, gets a plain message instead of a broken page', { skip }, async () => {
   const t2 = new LemmataTab({ subscriptions: [], extensionPath: path.resolve(__dirname, '..', '..', '..') } as any, host);
   await t2.open(new HubClient('http://127.0.0.1:9', fx.token), 'http://127.0.0.1:9', 'p-offline', 'X');

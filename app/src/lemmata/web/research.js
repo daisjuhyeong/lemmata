@@ -16,6 +16,28 @@ function rxSt(stage) { return ' st-' + (RX_STAGE[stage] || RX_STAGE.hypothesis)[
 function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', s = RX_STAGE[k]; const ch = plainChip(s[0], s[1], s[2] + ' stg-' + k); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || ''); return ch; }
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
 function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
+/* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
+function rxGoto(view, sel) {
+  if (view === 'experiments' && /^[qx]:/.test(sel || '')) { RX.exView = 'map'; RX.mapSel = sel; RX.exOpen = null; }
+  openTab(view);
+}
+/* Website only: a link that opens this page in VS Code's Lemmata tab (vscode/src/core/link.ts reads it). */
+function rxVsLink(sel, label) {
+  if (EMBED || !PID) return null;
+  return h('a', { class: 'btn sm', href: 'vscode://lemmata-local.lemmata/open?pid=' + encodeURIComponent(PID) + '&view=experiments&sel=' + encodeURIComponent(sel),
+    title: 'Open in VS Code, in the Lemmata tab. Needs the Lemmata extension, connected to this hub.' }, label || 'Open in VS Code');
+}
+/* VS Code tab only: buttons that open an experiment's own files (scripts, settings, result) in the editor. */
+function rxEditorRow(x) {
+  if (!EMBED || !IX.node) return null;
+  const d = x.design || {}, seen = new Set(), btns = [];
+  const add = (it, kind) => { const n = it && IX.node.get(it.node_id); if (!n || !n.loc || !n.loc.path || seen.has(n.repo + ':' + n.loc.path)) return; seen.add(n.repo + ':' + n.loc.path);
+    btns.push(h('button', { class: 'btn sm', title: 'Open ' + n.loc.path + ' in the editor', onclick: () => EMBED.openFile(n.repo, n.loc.path, n.loc.line || 1) }, kind + ' ' + n.loc.path.split('/').pop())); };
+  (d.scripts || []).slice(0, 4).forEach(it => add(it, '▸'));
+  (d.settings || []).slice(0, 3).forEach(it => add(it, '⚙'));
+  if (x.result) add(x.result, '▦');
+  return btns.length ? h('div', { class: 'rx-x-ed' }, h('span', { class: 'muted small' }, 'Open in editor:'), btns) : null;
+}
 // Why we experiment: the experiments run because of this claim, and how each came out.
 function rxWhyRows(c) {
   const xs = c.experiments || [];
@@ -534,7 +556,7 @@ function rxExpDetail(id) {
     } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.map ? (x.connected ? 'These files could not be read as tables with the map’s metric.' : 'No file matches this experiment’s patterns any more.') : x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
     // design
     const d = x.design || { scripts: [], settings: [], runs: [], values: [] };
-    out.push(blk('Design', h('dl', { class: 'rx-dl' },
+    out.push(blk('Design', rxEditorRow(x) || (rxVsLink('x:' + id) ? h('div', { class: 'rx-x-ed' }, rxVsLink('x:' + id)) : null), h('dl', { class: 'rx-dl' },
       x.map && x.result ? [h('dt', null, 'Files'), h('dd', null, h('span', { class: 'rx-code mono' }, x.result.path), ' ', h('details', { class: 'rx-x-files' }, h('summary', null, plural(x.files_n, 'file')),
         (d.files || []).map(f => h('div', null, rxNodeBtn(f.node_id, f.path), Object.keys(f.fields).length ? h('span', { class: 'muted small' }, ' ' + Object.entries(f.fields).map(e => e[0] + ' ' + e[1]).join(' · ')) : null)), x.files_n > (d.files || []).length ? h('div', { class: 'muted small' }, '…') : null))] : null,
       x.map && x.paper.length ? [h('dt', null, 'In the paper'), h('dd', null, x.paper.map((p, i) => [i ? ', ' : null, rxNodeBtn(p.node_id, p.name)]))] : null,
@@ -764,6 +786,23 @@ function rxTaskCard(t) {
       : h('div', { class: 'rx-task-l muted' }, 'Lemmata could not tell what this is about. Name a table, figure, section, theorem or file in the feedback, or link one.'),
     !done && t.also_check && t.also_check.length ? h('div', { class: 'rx-task-l' }, h('span', { class: 'muted' }, 'When you change that, also recheck: '), t.also_check.slice(0, 8).map((x, i) => [i ? ', ' : null, rxNodeBtn(x.node_id, x.name)])) : null);
 }
+/* One baseline, opened: every shared experiment with ours and the baseline side by side (no hover needed to see the numbers). */
+function rxBaselineTable(b, ours) {
+  const G = { ahead: ['▲', 'fine', 'Ahead'], behind: ['▼', 'fix', 'Behind'], tie: ['=', 'ign', 'Level'] };
+  const oursName = (b.experiments.find(x => x.ours_label) || {}).ours_label || ours;
+  const dir = x => x.target != null ? '→ ' + x.target : x.lower ? '↓' : '↑';
+  return h('div', { class: 'rx-rv-bd' }, h('table', { class: 'tbl rx-bt' },
+    h('thead', null, h('tr', null, h('th', null, 'Experiment'), h('th', null, 'Metric'), h('th', { class: 'num me' }, oursName), h('th', { class: 'num' }, b.name), h('th', { class: 'num' }, 'Gap'))),
+    h('tbody', null, b.experiments.map(x => { const g = G[x.state] || G.tie;
+      return h('tr', { class: 'x-' + x.state },
+        h('td', null, h('button', { class: 'linkbtn', title: (x.question ? x.question + ' · ' : '') + 'Open this experiment', onclick: () => rxOpenExp(x.id) }, x.name)),
+        h('td', { class: 'muted small' }, (x.metric || '') + (x.col ? ' · ' + x.col : ''), h('span', { title: x.target != null ? 'Closest to ' + x.target + ' is best' : x.lower ? 'Lower is better' : 'Higher is better' }, ' ' + dir(x))),
+        h('td', { class: 'num mono me' }, x.ours == null ? '—' : rxFmt(x.ours)),
+        h('td', { class: 'num mono' }, x.value == null ? '—' : rxFmt(x.value)),
+        h('td', { class: 'num mono' }, h('span', { class: 'rx-bt-g ' + g[1], title: g[2] + ' (positive means ' + oursName + ' is better)' }, g[0] + ' ' + (x.gap > 0 ? '+' : x.gap < 0 ? '−' : '') + rxFmt(Math.abs(x.gap)))));
+    }))),
+    h('div', { class: 'muted small rx-bt-n' }, 'Gap: how much better ' + oursName + ' is on that experiment\'s metric. Positive means ahead, whichever direction the metric goes.'));
+}
 /* Review: should I continue? Three checks on top, the questions under them, the checklist one click down. */
 const RX_VERDICT = { yes: ['✓', 'Yes', 'fine'], partly: ['◐', 'Partly', 'look'], no: ['✕', 'No', 'fix'], none: ['○', 'Not yet', 'ign'] };
 const RX_CONF_PROMPT = name => 'Use Lemmata to check confounds for the project "' + name + '": call confound_brief, open the scripts and settings it names, then report_confounds for every question.';
@@ -797,8 +836,7 @@ function pageReview() {
         h('span', null, h('b', null, b.name), b.base ? h('span', { class: 'tag', title: 'The method this work extends' }, 'base') : null),
         h('span', { class: 'rx-m-meter', title: b.ahead + ' ahead, ' + b.tie + ' level, ' + b.behind + ' behind' }, ['ahead', 'tie', 'behind'].map(k => b[k] ? h('span', { class: 'm-' + k, style: 'flex:' + b[k] }) : null)),
         h('span', { class: 'muted small' }, b.ahead + ' of ' + b.of + ' ahead'), h('span', { class: 'rx-rv-tr ' + v[2] }, v[0] + ' ' + v[1])));
-      if (open) sec.append(h('div', { class: 'rx-rv-bd' }, b.experiments.map(x => h('button', { class: 'chip-btn x-' + x.state, title: (x.question ? x.question + ' · ' : '') + (x.metric || '') + ' · open this experiment', onclick: () => { RX.exView = 'map'; RX.mapSel = 'x:' + x.id; openTab('experiments'); } },
-        (x.state === 'ahead' ? '▲ ' : x.state === 'behind' ? '▼ ' : '= ') + x.name + ' ' + (x.gap > 0 ? '+' : x.gap < 0 ? '−' : '') + rxFmt(Math.abs(x.gap))))));
+      if (open) sec.append(rxBaselineTable(b, R.ours));
     }
     if (R.baselines.length > 6) sec.append(h('div', { class: 'rx-x-none' }, h('button', { class: 'linkbtn small', onclick: () => { RX.rvAllB = !RX.rvAllB; renderPage(true); } }, RX.rvAllB ? 'Show fewer' : 'Show all ' + R.baselines.length + ' baselines')));
     root.append(sec); }
@@ -824,6 +862,7 @@ function pageReview() {
           READONLY ? null : h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
           READONLY ? null : h('button', { class: 'btn sm', title: 'Mark confounds as checked by you, without an agent', onclick: () => post({ question: q.id, mine: !(rep && rep.by === 'you') }) }, rep && rep.by === 'you' ? 'Undo my check' : 'I checked it myself'),
           q.started ? h('button', { class: 'btn sm', onclick: () => { RX.exView = 'map'; RX.mapSel = 'q:' + q.id; openTab('experiments'); } }, 'Open experiments') : null,
+          q.started ? rxVsLink('q:' + q.id) : null,
           rep ? h('span', { class: 'muted small' }, 'Confounds: ' + rep.by + ', ' + dmon(rep.at)) : null)));
     }
   }

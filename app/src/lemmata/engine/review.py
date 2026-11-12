@@ -159,7 +159,11 @@ def build(E, store, days=30, now=None):
                 st = "ahead" if v["gap"] > 0 else "behind" if v["gap"] < 0 else "tie"
                 b[st] += 1
                 b["experiments"].append({"id": x["id"], "name": x["name"], "state": st, "gap": v["gap"], "metric": sm.get("measure") or sm.get("metric"),
-                                         "question": name(s) if s["kind"] != "other" else None})
+                                         "question": name(s) if s["kind"] != "other" else None,
+                                         # side by side on the Review: ours and this baseline on the experiment's own metric and column
+                                         "ours": sm.get("ours"), "ours_label": sm.get("ours_label"), "value": v["value"], "label": v["label"],
+                                         "col": sm.get("metric") if sm.get("measure") and sm.get("metric") != sm.get("measure") else None,
+                                         "lower": bool(sm.get("lower")), "target": sm.get("target")})
     baselines = sorted(bl.values(), key=lambda b: (not b["base"], -(b["ahead"] + b["behind"] + b["tie"]), b["name"].lower()))[:20]
     for b in baselines:
         b["of"] = b["ahead"] + b["behind"] + b["tie"]

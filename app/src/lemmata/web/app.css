@@ -807,3 +807,11 @@ button.rx-rv-r:hover, button.rx-rv-b:hover { background:var(--surface-hover); } 
 .rx-digest-p { margin:0 0 8px; }
 .rx-dg-h { margin:0 0 4px; font-style:italic; color:var(--text-secondary); }
 .rx-dg-l { padding:2px 0; } .rx-dg-l.sub { padding-left:20px; }
+/* S19: an opened baseline, side by side with ours */
+.rx-rv-bd:has(> .rx-bt) { display:block; overflow-x:auto; }
+table.tbl.rx-bt { margin:0; } table.tbl.rx-bt th.num, table.tbl.rx-bt td.num { text-align:right; white-space:nowrap; }
+table.tbl.rx-bt .me { font-weight:var(--fw-bold, 600); color:var(--text); }
+table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
+.rx-bt-g.fine { color:var(--success); } .rx-bt-g.fix { color:var(--error); } .rx-bt-g.ign { color:var(--muted); }
+.rx-bt-n { padding-top:var(--s-2, 6px); }
+.rx-x-ed { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }

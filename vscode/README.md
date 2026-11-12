@@ -8,9 +8,9 @@ The extension only talks to your own Lemmata hub (the Mac mini). No telemetry, n
 
 ## Install
 
-The packaged file is `vscode/lemmata-0.3.0.vsix`.
+The packaged file is `vscode/lemmata-0.4.0.vsix`.
 
-- Command line: `code --install-extension vscode/lemmata-0.3.0.vsix`
+- Command line: `code --install-extension vscode/lemmata-0.4.0.vsix`
 - Or in VS Code: Extensions view -> `...` menu (top right) -> **Install from VSIX...** -> pick the file.
 
 Requires VS Code 1.93 or newer and `git` on your PATH. Run capture from the terminal needs VS Code's shell integration (on by default for bash, zsh, fish and PowerShell).
@@ -99,5 +99,5 @@ npm run compile
 npm test                    # unit tests (node's test runner)
 npm run test:integration    # real hub + fake GitHub, needs python3 and git
 npm run test:host           # optional: extension-host smoke test (downloads VS Code)
-npx @vscode/vsce package    # -> lemmata-0.3.0.vsix
+npx @vscode/vsce package    # -> lemmata-0.4.0.vsix
 ```
