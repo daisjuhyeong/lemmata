@@ -28,7 +28,7 @@ last_reviewed: 2026-11-02
   - S15 Run capture in VS Code and the coding agent: [brief](sprints/S15/S15-brief.md) · guide: `docs/RUN-CAPTURE.md`
   - S16 Lemmata pages in a VS Code tab: [brief](sprints/S16/S16-brief.md)
   - S17 claim stages and the reason for each experiment: [brief](sprints/S17/S17-brief.md)
-  - S18 DAIS-aligned UI, compact VS Code design: [task card S18-01](sprints/S18/S18-01-lead.md) · spec: [S18 UI style spec](design/screens/S18-dais-ui.md) — open, assigned to CTO
+  - S18 DAIS-aligned UI, compact VS Code design: [task card S18-01](sprints/S18/S18-01-lead.md) (handoff note, contrast table, page mapping) · spec: [S18 UI style spec](design/screens/S18-dais-ui.md) · [screenshots](sprints/S18/screenshots/) — built on `s18-dais-ui`, awaiting QA
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)
