@@ -185,7 +185,7 @@ uv run lemmata hub token --device "Claude Code" --host 100.111.135.94
 Each token is shown once.
 
 **Extension:**
-1. Install it: `code --install-extension ~/lemmata/vscode/lemmata-0.2.0.vsix`, or Extensions → `...` → Install from VSIX….
+1. Install it: `code --install-extension ~/lemmata/vscode/lemmata-0.3.0.vsix`, or Extensions → `...` → Install from VSIX….
 2. ⌘⇧P → **Lemmata: Connect to Server**.
 3. Server: `http://100.111.135.94:8765` (the default).
 4. Token: paste the first token.

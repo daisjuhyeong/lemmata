@@ -26,6 +26,7 @@ last_reviewed: 2026-11-02
   - S13 experiments map, clean UI, resizable tree: [brief](sprints/S13/S13-brief.md) · spec: [S13 clean UI](design/screens/S13-clean-ui.md) — proposed
   - S14 Review page (should I continue?): [brief](sprints/S14/S14-brief.md)
   - S15 Run capture in VS Code and the coding agent: [brief](sprints/S15/S15-brief.md) · guide: `docs/RUN-CAPTURE.md`
+  - S16 Lemmata pages in a VS Code tab: [brief](sprints/S16/S16-brief.md)
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

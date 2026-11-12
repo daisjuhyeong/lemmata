@@ -11,6 +11,8 @@ import { oneLine } from './core/text';
 import { DEFAULT_URL, TOKEN_PREFIX, serverFromInspect, tokenFor, tokenKey } from './core/settings';
 import { HubProject, TriageState } from './core/types';
 import { RunCapture } from './runs';
+import { LemmataTab, isView } from './tab';
+import { View } from './core/embed';
 
 const WHY_SCHEME = 'lemmata-why';
 
@@ -203,6 +205,19 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
     return m && f ? vscode.Uri.joinPath(f.uri, ...m.rel.split('/')) : null;
   }
 
+  /** Open a hub location (repo "code" or "paper", repo-relative path) of project `pid` in the editor, beside the current tab. */
+  async openLocation(pid: string, repo: string, rel: string, line: number): Promise<boolean> {
+    const b = this.bound.find(x => x.binding.project.id === pid);
+    const uri = b ? this.mapped(b, { repo, path: rel } as LocRef) : null;
+    if (!uri) return false;
+    const l0 = Math.max(0, Math.floor(line) - 1);
+    try { await vscode.window.showTextDocument(uri, { selection: new vscode.Range(l0, 0, l0, 0), preview: true, viewColumn: vscode.ViewColumn.Beside }); return true; }
+    catch { return false; }
+  }
+  private refreshSoon: ReturnType<typeof setTimeout> | undefined;
+  /** The Lemmata tab changed something on the hub: refresh the panel and warnings shortly after. */
+  hubChanged() { if (this.refreshSoon) clearTimeout(this.refreshSoon); this.refreshSoon = setTimeout(() => { void this.refresh(); }, 1500); }
+
   /* ---------- virtual document for "Why?" ---------- */
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
     const q = new URLSearchParams(uri.query);
@@ -227,6 +242,7 @@ type Data =
   | { kind: 'finding'; b: Bound; f: FindingItem; uri: vscode.Uri | null };
 
 let CTRL: Controller;
+let TAB: LemmataTab;
 
 const STATE_LABEL: Record<TriageState, string> = { unreviewed: '', reviewed: 'reviewed', needs_fixing: 'needs fixing', ignored: 'ignored' };
 
@@ -329,7 +345,7 @@ async function connect() {
     const projects = await new HubClient(norm.url, token.trim()).projects();   // proves the token works
     await CTRL.ctx_secrets().store(tokenKey(norm.url), token.trim());
     await CTRL.cfg().update('serverUrl', norm.url, vscode.ConfigurationTarget.Global);
-    CTRL.resetClient();
+    CTRL.resetClient(); TAB.reset(); TAB.closeAll();
     void vscode.window.showInformationMessage('Lemmata: connected. ' + projects.length + ' project' + (projects.length === 1 ? '' : 's') + ' on the server.');
     await CTRL.refresh();
   } catch (e) {
@@ -382,6 +398,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const t = await pickProject(it); if (!t) return;
       await vscode.env.openExternal(vscode.Uri.parse(CTRL.serverBase() + '/p/' + encodeURIComponent(t.pid) + '/'));
     }),
+    ...(['', 'review', 'claims', 'experiments'] as const).map(v => c('lemmata.openTab' + (v ? '.' + v : ''), async (arg?: Item | string) => {
+      const t = await pickProject(typeof arg === 'string' ? undefined : arg); if (!t) return;
+      const view: View | undefined = v || (isView(arg) ? arg : undefined);
+      const b = CTRL.bound.find(x => x.binding.project.id === t.pid);
+      await TAB.open(t.client, CTRL.serverBase(), t.pid, t.name || (b ? oneLine(b.binding.project.name, 40) : ''), view);
+    })),
     c('lemmata.sync', async (it?: Item) => {
       const t = await pickProject(it); if (!t) return;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: syncing your code and paper from GitHub…' }, async () => {
@@ -414,6 +436,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ctx.secrets.onDidChange(e => { if (e.key.startsWith(TOKEN_PREFIX)) { CTRL.resetClient(); void CTRL.refresh(); } }),
     { dispose: () => CTRL.dispose() },
   );
+  TAB = new LemmataTab(ctx, CTRL);
   const runs = new RunCapture(ctx, CTRL);
   runs.register();
   await CTRL.start();

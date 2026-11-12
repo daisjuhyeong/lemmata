@@ -8,9 +8,9 @@ The extension only talks to your own Lemmata hub (the Mac mini). No telemetry, n
 
 ## Install
 
-The packaged file is `vscode/lemmata-0.2.0.vsix`.
+The packaged file is `vscode/lemmata-0.3.0.vsix`.
 
-- Command line: `code --install-extension vscode/lemmata-0.2.0.vsix`
+- Command line: `code --install-extension vscode/lemmata-0.3.0.vsix`
 - Or in VS Code: Extensions view -> `...` menu (top right) -> **Install from VSIX...** -> pick the file.
 
 Requires VS Code 1.93 or newer and `git` on your PATH. Run capture from the terminal needs VS Code's shell integration (on by default for bash, zsh, fish and PowerShell).
@@ -45,6 +45,16 @@ A hub path such as `code/configs/default.yaml` or `paper/main.tex` is mapped ont
   - items you marked **Reviewed** or **Ignore** disappear; **Needs fixing** shows as an Error.
 - **Lemmata panel** (activity bar): Alarms (groups, then items) and Findings (by check). Click an item to open the file at the line. Right-click for **Mark Reviewed / Needs fixing / Ignore** (optional note), **Why?** (read-only document with the chain and the diff) and **Open in Lemmata** (the web page). Toolbar: **Refresh**, **Sync now** (pull your code and paper from GitHub on the server), **Set checkpoint**.
 - Refresh runs every 30 s (`lemmata.refreshSeconds`), when the window gets focus and when you save a file.
+
+## The Lemmata tab (since 0.3.0)
+
+**Lemmata: Open Lemmata (in a tab)**, or the button at the top of the panel, opens the hub's own pages inside VS Code: Review, the Claims tree, Experiments, Timeline, Tasks, Notation, Changes and the graph. **Open Review**, **Open Claims tree** and **Open Experiments** go straight to one page. It is the same app as the website, so what you edit here (a hoped conclusion, a confirmed claim, a checklist item) is saved on the hub.
+
+- **It works over Remote-SSH.** The page has no network access of its own. Every request it makes is passed to the extension, which calls the hub with your token. Only the extension needs to reach the hub.
+- **The token never enters the page**, and the page can only reach its own project: requests for other projects, tokens, devices or users are refused by the extension.
+- File pages have an **Open in editor** link that opens the file beside the tab when its repository is open in the window. `.md` downloads open as a document; pictures open in an editor tab; web links open in your browser.
+- The tab is at least 1024 px wide inside; in a narrower editor column it scrolls sideways.
+- It needs a hub that has this change (the tab says so when the hub is older). After a hub update, close the tab and open it again to get the new pages.
 
 ## Runs
 
@@ -89,5 +99,5 @@ npm run compile
 npm test                    # unit tests (node's test runner)
 npm run test:integration    # real hub + fake GitHub, needs python3 and git
 npm run test:host           # optional: extension-host smoke test (downloads VS Code)
-npx @vscode/vsce package    # -> lemmata-0.2.0.vsix
+npx @vscode/vsce package    # -> lemmata-0.3.0.vsix
 ```

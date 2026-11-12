@@ -11,7 +11,17 @@ const SNAP = (function () {
 })();
 const READONLY = !!SNAP;
 /* API base: /p/<pid>/ -> /p/<pid>/api/ (served by a hub); anything else -> /api/ (single-project mode). */
-const PID = (function () { const m = location.pathname.match(/^\/p\/([^/]+)\//); return m ? decodeURIComponent(m[1]) : null; })();
+/* EMBED: set by a host that shows this app inside its own frame (the VS Code extension's tab). The host supplies the
+   project id, answers fetch() itself, and opens links and files: { pid, open(url), openFile(repo, path, line) }. */
+const EMBED = (!SNAP && typeof window !== 'undefined' && window.LEMMATA_EMBED) || null;
+const PID = EMBED ? String(EMBED.pid) : (function () { const m = location.pathname.match(/^\/p\/([^/]+)\//); return m ? decodeURIComponent(m[1]) : null; })();
+const goTo = url => { if (EMBED) EMBED.open(url); else location.href = url; };
+/* a file's place, with a link that opens it in the host's editor when there is one */
+function capLoc(n, text, line) {
+  const cap = h('div', { class: 'cap' }, text);
+  if (EMBED && n && n.loc && n.loc.path) cap.append(' ', h('a', { class: 'ghl', href: '#', title: 'Open this file in the editor', onclick: ev => { ev.preventDefault(); EMBED.openFile(n.repo, n.loc.path, line || n.loc.line || 1); } }, 'Open in editor'));
+  return cap;
+}
 const API_BASE = PID ? '/p/' + encodeURIComponent(PID) + '/api/' : '/api/';
 const apiUrl = path => path.startsWith('/api/') ? API_BASE + path.slice(5) : path;
 let HUB_ON = false;   // true when /api/hub/status answers and the page is under /p/<pid>/
@@ -261,7 +271,7 @@ function paperStatusText() {
 function hubControls() {
   if (!HUB_ON || READONLY) return { menu: [], status: '', sync: null };
   const kind = HUBINFO && HUBINFO.kind;
-  const menu = [{ label: '← Projects', hint: 'Back to your list of projects', fn: () => { location.href = '/'; } }];
+  const menu = EMBED ? [] : [{ label: '← Projects', hint: 'Back to your list of projects', fn: () => { location.href = '/'; } }];
   menu.push({ label: paperStatusText() || 'Paper', hint: kind === 'zip' ? 'Click to upload' : '', fn: kind === 'zip' ? () => { const i = $('#zip-in'); if (i) i.click(); } : null });
   if (kind === 'zip') menu.push({ label: 'Upload paper as zip', hint: 'Replaces the paper with a new zip', fn: () => { const i = $('#zip-in'); if (i) i.click(); } });
   menu.push({ label: 'Connect paper repo…', hint: 'Read the paper from GitHub', fn: connectPaperRepo });
@@ -1503,9 +1513,9 @@ function pageItem(it) {
   if (!it.shared && n.loc && n.loc.path && !it.readme) {
     const box = h('div', null, h('div', { class: 'muted' }, 'Loading…'));
     const line = n.loc.line, end = Math.min(n.loc.end_line || line, line + 11);
-    if (line) getLines(n.repo, n.loc.path, line, end).then(r => { clear(box); box.append(h('div', { class: 'cap' }, n.loc.path + ' line ' + line), codeBlock(r.lines, r.start, [line], { label: 'Your paper source' })); })
-      .catch(() => { clear(box); box.append(h('div', { class: 'cap' }, n.loc.path + (line ? ' line ' + line : '')), (n.attrs || {}).caption ? h('div', { class: 'quote' }, 'Caption: “' + n.attrs.caption + '”') : h('div', { class: 'muted' }, 'The text is not available here.')); });
-    else clear(box).append(h('div', { class: 'cap' }, mono(n.loc.path)));
+    if (line) getLines(n.repo, n.loc.path, line, end).then(r => { clear(box); box.append(capLoc(n, n.loc.path + ' line ' + line, line), codeBlock(r.lines, r.start, [line], { label: 'Your paper source' })); })
+      .catch(() => { clear(box); box.append(capLoc(n, n.loc.path + (line ? ' line ' + line : ''), line), (n.attrs || {}).caption ? h('div', { class: 'quote' }, 'Caption: “' + n.attrs.caption + '”') : h('div', { class: 'muted' }, 'The text is not available here.')); });
+    else clear(box).append(capLoc(n, mono(n.loc.path)));
     root.append(sec('In your paper', 'paper', box));
   }
   // checks
@@ -1532,6 +1542,7 @@ function pageEvidence(nid) {
   if (!n) return root.append(h('div', { class: 'muted' }, 'This file is not part of the project any more.')), root;
   const rn = n.kind === 'run' ? n.name.replace(/^run\s+/, '') : pathOf(n);
   root.append(h('h1', { class: 'ptitle mono-title' }, rn));
+  if (EMBED && n.loc && n.loc.path) root.append(capLoc(n, mono(n.loc.path)));
   const users = (M.itemsOf.get(nid) || []).map(i => M.byId.get(i));
   root.append(h('p', { class: 'what' }, (FILE_WORD[n.kind] || 'A file') + (n.kind === 'item' ? ' listed in your README' : ' in your ' + (repoWord(n.repo) === 'paper' ? 'paper' : 'code')) + '. ' + (users.length ? 'It is used by ' + users.map(u => lead(u)).join(', ') + '.' : n.kind === 'item' ? 'It was listed in your README, but no figure or table in the paper has that number.' : 'It is not used by anything in the paper yet.')));
   if (users.length) root.append(sec('Used by', 'used', users.map(u => h('div', { class: 'evrow' }, itemLink(u)))));
@@ -1854,7 +1865,7 @@ function evPreview(id) {
   const head = () => {
     if (n.kind === 'run' && (n.attrs || {}).command) return clear(body).append(h('div', { class: 'cap' }, 'Command'), h('div', { class: 'code' }, h('div', { class: 'ln' }, h('span', { class: 'n' }, '$'), n.attrs.command)));
     if (!(n.loc && n.loc.path)) return clear(body).append(h('div', { class: 'muted' }, 'No preview for this.'));
-    getLines(n.repo, n.loc.path, 1, 14).then(r => { clear(body).append(h('div', { class: 'cap' }, 'Start of the file'), codeBlock(r.lines, r.start, [], { label: 'Start of the file' })); })
+    getLines(n.repo, n.loc.path, 1, 14).then(r => { clear(body).append(capLoc(n, 'Start of the file', 1), codeBlock(r.lines, r.start, [], { label: 'Start of the file' })); })
       .catch(() => { clear(body).append(h('div', { class: 'muted' }, 'No preview for this kind of file.')); });
   };
   if (ch) ensureAnalysis(ch.group.id, id).then(an => {
@@ -2336,7 +2347,7 @@ function palette() {
     { label: 'Sync now', run: () => syncNow(), disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'Show files behind items', run: () => { S.gf.files = true; persistUI(); GR.sig = ''; openTab('graph'); } },
     { label: 'Toggle left sidebar', run: () => toggleSide('left') }, { label: 'Toggle right sidebar', run: () => toggleSide('right') },
-    { label: 'Export report (HTML)', run: () => { location.href = apiUrl('/api/export'); }, disabled: READONLY, reason: 'Read-only snapshot' },
+    { label: 'Export report (HTML)', run: () => { goTo(apiUrl('/api/export')); }, disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'How Lemmata works', run: () => intro(true) },
   ];
   listModal('Type a command or an item', q => cmds.map(c => ({ ...c, s: fuzzy(q, c.label) })).filter(c => c.s >= 0).sort((a, b) => b.s - a.s), '↑↓ to move · Enter to run · Esc to close');

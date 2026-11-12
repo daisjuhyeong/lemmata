@@ -34,6 +34,28 @@ export class HubClient {
     return j as T;
   }
 
+  /**
+   * One request whose body is returned as bytes, whatever the status (for the Lemmata tab, which shows the hub's own pages).
+   * `path` must already be checked by the caller (core/embed.ts). Bodies larger than `maxBytes` are refused.
+   */
+  async raw(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: { contentType: string; data: string | Uint8Array }, maxBytes = 25 * 1024 * 1024,
+    timeoutMs = 120000): Promise<{ status: number; contentType: string; data: Buffer }> {
+    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('bad path');
+    const headers: Record<string, string> = { Authorization: 'Bearer ' + this.token };
+    if (body) headers['Content-Type'] = body.contentType;
+    let r: Response;
+    try {
+      r = await fetch(this.base + path, { method, headers, body: body ? body.data : undefined, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      throw new HubError(0, 'offline', 'Cannot reach the Lemmata server at ' + this.base + '.');
+    }
+    const len = Number(r.headers.get('content-length') || 0);
+    if (len > maxBytes) throw new HubError(r.status, 'too_large', 'The answer is too large to show here.');
+    const data = Buffer.from(await r.arrayBuffer());
+    if (data.length > maxBytes) throw new HubError(r.status, 'too_large', 'The answer is too large to show here.');
+    return { status: r.status, contentType: r.headers.get('content-type') || '', data };
+  }
+
   projects = async (): Promise<HubProject[]> => (await this.req<{ projects: HubProject[] }>('GET', '/api/hub/projects')).projects || [];
   private p(pid: string, rest: string) { return '/p/' + encodeURIComponent(pid) + '/api/' + rest; }
   alarms = (pid: string) => this.req<Alarms>('GET', this.p(pid, 'alarms'));

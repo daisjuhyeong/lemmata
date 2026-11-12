@@ -1,8 +1,8 @@
 {
   "name": "lemmata",
   "displayName": "Lemmata",
-  "description": "Lemmata in your editor: alarms and findings for your ML paper and code, and a log of the experiments you run (terminal, results folders, coding agent).",
-  "version": "0.2.0",
+  "description": "Lemmata in your editor: the Review, Claims tree and Experiments pages in a tab, alarms and findings on the lines they concern, and a log of the experiments you run.",
+  "version": "0.3.0",
   "publisher": "lemmata-local",
   "license": "UNLICENSED",
   "private": true,
@@ -137,7 +137,7 @@
       },
       {
         "command": "lemmata.openInLemmata",
-        "title": "Open in Lemmata",
+        "title": "Open in the browser",
         "category": "Lemmata"
       },
       {
@@ -167,6 +167,27 @@
         "title": "Set up coding agent (Claude Code)",
         "category": "Lemmata",
         "icon": "$(hubot)"
+      },
+      {
+        "command": "lemmata.openTab",
+        "title": "Open Lemmata (in a tab)",
+        "category": "Lemmata",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "lemmata.openTab.review",
+        "title": "Open Review",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.openTab.claims",
+        "title": "Open Claims tree",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.openTab.experiments",
+        "title": "Open Experiments",
+        "category": "Lemmata"
       }
     ],
     "viewsContainers": {
@@ -204,6 +225,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "lemmata.openTab",
+          "when": "view == lemmata.panel",
+          "group": "navigation@0"
+        },
         {
           "command": "lemmata.refresh",
           "when": "view == lemmata.panel",
@@ -300,7 +326,8 @@
     "test": "npm run compile && node --test \"out/test/unit/*.test.js\"",
     "test:integration": "npm run compile && node --test --test-timeout=240000 \"out/test/integration/*.test.js\"",
     "test:host": "npm run compile && node out/test/host/run.js",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package",
+    "test:e2e": "npm run compile && node --test --test-timeout=240000 \"out/test/e2e/*.test.js\""
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
