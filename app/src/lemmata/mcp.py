@@ -725,8 +725,8 @@ def t_experiment_brief(ctx, args):
     if not isinstance(t, str) or not re.match(r"^[qx]:.{1,300}$", t):
         raise _Fail("Argument 'target' must be 'q:<claim id>' or 'x:<experiment id>' (Lemmata's Plan button gives you the target; claim ids are in project_map).")
     d = eng.plan_brief(t)
-    guide = d.pop("how_to_propose")
-    return guide + "\n" + _quote([json.dumps(d, ensure_ascii=False, indent=1)]), dict(d, how_to_propose=guide), "Open the scripts and settings themselves for more."
+    guide = d.pop("how_to_propose")     # data first, instructions last (long-context order)
+    return _quote(["<brief>", json.dumps(d, ensure_ascii=False, indent=1), "</brief>"]) + "\n" + guide, dict(d, how_to_propose=guide), "Open the scripts and settings themselves for more."
 
 
 def t_propose_experiments(ctx, args):
@@ -740,7 +740,7 @@ def t_propose_experiments(ctx, args):
             d = eng.propose_plans(t, args["proposals"])
     else:
         d = eng.propose_plans(t, args["proposals"])
-    return "\n".join(d["notes"]) + "\nStored as drafts. The researcher reads them under Next experiments in Lemmata, edits a prompt if needed and copies it into Claude Code. Do not run them now.", {"notes": d["notes"]}, "Nothing to narrow."
+    return "\n".join(d["notes"]) + "\nStored as drafts. Lemmata renders each run prompt from its spec; the researcher reviews and edits the fields under Next experiments and copies the prompt into Claude Code. Do not run them now. Fix and resubmit anything dropped.", {"notes": d["notes"]}, "Nothing to narrow."
 
 
 def t_project_map(ctx, args):
@@ -908,9 +908,10 @@ TOOLS = [
      "inputSchema": _schema({"project": _PROJECT_PROP, "target": {"type": "string", "description": "'q:<claim id>' or 'x:<experiment id>'."}}, ["project", "target"]),
      "annotations": dict(_RO)},
     {"name": "propose_experiments", "fn": t_propose_experiments, "title": "Propose next experiments",
-     "description": "Submit up to three experiments for a target, each with a complete prompt a fresh Claude Code session can run. Lemmata drops "
-                    "proposals whose file quotes are not in the files or whose prompt names none of them, and stores the rest as drafts for the "
-                    "researcher. It runs nothing and never edits code or the paper. Only call it when the user asked you to plan experiments.",
+     "description": "Submit up to three experiments for a target, each as a structured spec (goal, decision rule, files to read, protected "
+                    "paths, steps, commands, where results go; format in experiment_brief). Lemmata drops proposals with missing fields or file "
+                    "quotes that are not in the files, renders a run prompt from the rest with a fixed template, and stores them as drafts for "
+                    "the researcher. It runs nothing and never edits code or the paper. Only call it when the user asked you to plan experiments.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "target": {"type": "string", "description": "The target given to experiment_brief."},
                              "proposals": {"type": "array", "items": {"type": "object"}, "description": "Up to three; see experiment_brief for the format."}}, ["project", "target", "proposals"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},

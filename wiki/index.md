@@ -31,6 +31,7 @@ last_reviewed: 2026-11-02
   - S18 DAIS-aligned UI, compact VS Code design: [task card S18-01](sprints/S18/S18-01-lead.md) (handoff note, contrast table, page mapping) · spec: [S18 UI style spec](design/screens/S18-dais-ui.md) · [screenshots](sprints/S18/screenshots/) — built on `s18-dais-ui` · [QA report](sprints/S18/qa-S18-01.md): round 2 PASS WITH ISSUES (all suites green incl. end-to-end 8/8; contrast fix awaits Juhyeong)
   - S19 open experiments in VS Code, baselines side by side: [handoff note S19-01](sprints/S19/S19-01-handoff.md) · [screenshots](sprints/S19/screenshots/) — on `s18-dais-ui`, awaiting QA
   - S20 next experiments planned by Claude Code: [handoff note S20-01](sprints/S20/S20-01-handoff.md) · [screenshots](sprints/S20/screenshots/) — on `s20-experiment-prompts` (stacked on S19), awaiting QA
+  - S21 structured experiment prompts (form, fixed template, protection rules): [handoff note S21-01](sprints/S21/S21-01-handoff.md) · [screenshots](sprints/S21/screenshots/) — on `s21-structured-prompts` (stacked on S20), awaiting QA
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

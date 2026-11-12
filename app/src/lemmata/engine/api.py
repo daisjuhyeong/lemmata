@@ -566,7 +566,8 @@ class Engine:
 
     # ------------------------------------------------------------------ next experiments (S20: planned by the user's own agent)
     def plans(self):
-        return plansmod.view(plansmod.load(self.hub))
+        s = self._ensure()
+        return plansmod.view(plansmod.load(self.hub), plansmod.files_of(s["trees"]))
 
     def plan_brief(self, target):
         E = self._exp()
@@ -581,13 +582,14 @@ class Engine:
         st = plansmod.load(self.hub)
         notes = plansmod.propose(st, self._exp(), s["trees"], target, proposals, by, now_iso())
         self.hub.write_json("plans.json", st)
-        return {"notes": notes, "plans": plansmod.view(st)["plans"]}
+        return {"notes": notes, "plans": plansmod.view(st, plansmod.files_of(s["trees"]))["plans"]}
 
-    def set_plan(self, plan_id, state=None, prompt=None):
+    def set_plan(self, plan_id, state=None, spec=None, title=None):
+        s = self._ensure()
         st = plansmod.load(self.hub)
-        plansmod.decide(st, plan_id, state, prompt, now_iso())
+        plansmod.decide(st, plan_id, state, spec, title, now_iso())
         self.hub.write_json("plans.json", st)
-        return plansmod.view(st)
+        return plansmod.view(st, plansmod.files_of(s["trees"]))
 
     # ------------------------------------------------------------------ project map (phase 1: understand)
     def brief(self):

@@ -479,7 +479,10 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError(400, "bad_request", "resolve must be a number, mine true or false, days 30, 7 or 1")
                     return self._json(need("set_review")(txt("hoped"), txt("question"), rs, mine, days))
                 if r == "/plans":     # the researcher keeps, edits or drops a planned experiment
-                    return self._json(need("set_plan")(txt("id", True), txt("state"), txt("prompt")))
+                    sp = body.get("spec")
+                    if sp is not None and not isinstance(sp, dict):
+                        raise ApiError(400, "bad_request", "spec must be an object")
+                    return self._json(need("set_plan")(txt("id", True), txt("state"), sp, txt("title")))
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):

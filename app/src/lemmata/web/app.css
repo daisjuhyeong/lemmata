@@ -822,4 +822,11 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .rx-pl-h { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; } .rx-pl-h .muted { margin-left:auto; }
 .rx-pl-l { font-size:var(--fs-13, 13px); } .rx-pl-l > .muted:first-child { display:inline-block; min-width:72px; }
 .rx-pl-d summary { cursor:pointer; color:var(--text-secondary); font-size:var(--fs-13, 13px); }
-textarea.rx-pl-p { width:100%; box-sizing:border-box; font-size:12px; line-height:1.45; margin-top:6px; resize:vertical; }
+/* S21: the plan as a form; the prompt is rendered from it */
+.rx-pl-form { display:grid; grid-template-columns:minmax(120px, 160px) minmax(0, 1fr); gap:6px 12px; margin-top:8px; }
+.rx-pl-f { display:contents; } .rx-pl-f > span { color:var(--text-secondary); font-size:var(--fs-13, 13px); padding-top:6px; }
+.rx-pl-f input, .rx-pl-f textarea { width:100%; box-sizing:border-box; font:inherit; font-size:var(--fs-13, 13px); padding:5px 8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text); resize:vertical; }
+.rx-pl-f .mono { font-family:var(--font-mono, ui-monospace, monospace); font-size:12px; }
+.rx-pl-pre { white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.45; max-height:420px; overflow:auto; margin:6px 0 0; padding:8px 10px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); }
+.rx-pl-lint .rx-warn { margin:2px 0; padding:4px 8px; }
+@container app (max-width: 700px) { .rx-pl-form { grid-template-columns:minmax(0, 1fr); } .rx-pl-f > span { padding-top:4px; } }

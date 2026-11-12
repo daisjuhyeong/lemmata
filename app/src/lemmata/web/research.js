@@ -809,33 +809,70 @@ function rxBaselineTable(b, ours) {
 const RX_VERDICT = { yes: ['✓', 'Yes', 'fine'], partly: ['◐', 'Partly', 'look'], no: ['✕', 'No', 'fix'], none: ['○', 'Not yet', 'ign'] };
 const RX_CONF_PROMPT = name => 'Use Lemmata to check confounds for the project "' + name + '": call confound_brief, open the scripts and settings it names, then report_confounds for every question.';
 /* S20 next experiments: Claude Code (the researcher's own) plans them from experiment_brief; the researcher reviews and copies the prompt. */
-const RX_PLAN_PROMPT = (name, target, what) => 'Use Lemmata to plan the next experiment for the ' + what + ' "' + target + '" in the project "' + name + '": call experiment_brief with that target, open the scripts and settings it names, then call propose_experiments with up to three options, each with a complete prompt a fresh Claude Code session could run. Plan only: do not change code or run anything.';
+const RX_PLAN_PROMPT = (name, target, what) => 'Use Lemmata to plan the next experiment for the ' + what + ' "' + target + '" in the project "' + name + '": call experiment_brief with that target, open the scripts and settings it names, then call propose_experiments with up to three options, each as a structured spec in the format experiment_brief gives. Plan only: do not change code or run anything.';
 const RX_PLAN_KIND = { rerun: 'Rerun', seeds: 'More seeds', baseline: 'Baseline', ablation: 'Ablation', sensitivity: 'Sensitivity', new: 'New', fix: 'Fix' };
+/* One plan as a form: every section of the run prompt is a field; Lemmata renders the prompt from the fields (engine/plans.py). */
+const RX_PLAN_FIELDS = [
+  ['goal', 'Goal', 'area', 'One sentence: what the run finds out'],
+  ['supports', 'Supports the claim if', 'area', 'Metric, datasets, seeds and margin'],
+  ['against', 'Counts against it if', 'area', ''],
+  ['inconclusive', 'Inconclusive if', 'line', 'Default: neither of the above'],
+  ['context', 'Files to read first', 'lines', 'One per line: path — what it is'],
+  ['protected', 'Leave unchanged', 'lines', 'One path per line: evaluation code, data splits, baselines, existing results'],
+  ['steps', 'Changes to make', 'lines', 'One step per line, each as small as possible'],
+  ['baseline_check', 'Reproduce first', 'line', 'A known value and tolerance, e.g. ADWIN fp 43.5 within 2'],
+  ['smoke', 'Smoke test', 'mono', 'A tiny run that checks the pipeline end to end'],
+  ['run', 'Full run', 'monolines', 'One command per line, seeds included'],
+  ['results_to', 'Results go to', 'line', 'Path and layout of the new result files'],
+  ['budget', 'Budget', 'line', 'e.g. at most 18 runs and 3 hours'],
+  ['stop', 'Also stop if', 'lines', 'One condition per line (optional)']];
+function rxPlanCard(p0) {
+  let p = p0;
+  RX.plOpen = RX.plOpen || {};
+  const pre = h('pre', { class: 'rx-pl-pre mono' }, p.prompt);
+  const lintBox = h('div', { class: 'rx-pl-lint' });
+  const titleEl = h('b', null, p.title);
+  const paintLint = () => { clear(lintBox); (p.lint || []).forEach(w => lintBox.append(h('div', { class: 'rx-warn small' }, '! ' + w))); };
+  const save = async body => {
+    try { const r = await apiPost('/api/plans', Object.assign({ id: p.id }, body)); RX.plans = r; const n = r.plans.find(x => x.id === p.id); if (n) { p = n; pre.textContent = p.prompt; titleEl.textContent = p.title; paintLint(); } }
+    catch (e) { toast(e.message || 'Could not save that change.'); }
+  };
+  const asText = (k, kind) => { const v = p.spec[k]; return k === 'context' ? v.map(c => c.path + (c.role ? ' — ' + c.role : '')).join('\n') : Array.isArray(v) ? v.join('\n') : (v || ''); };
+  const form = h('div', { class: 'rx-pl-form' }, h('label', { class: 'rx-pl-f' }, h('span', null, 'Title'), (() => { const i = h('input', { type: 'text', value: p.title, maxlength: '90', 'aria-label': 'Title' }); i.addEventListener('change', () => { if (i.value.trim()) save({ title: i.value }); }); return i; })()),
+    RX_PLAN_FIELDS.map(([k, label, kind, ph]) => {
+      const multi = kind === 'area' || kind === 'lines' || kind === 'monolines';
+      const el = multi ? h('textarea', { rows: String(Math.max(2, Math.min(8, asText(k).split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / (kind.startsWith('mono') ? 56 : 78))), 0)))), placeholder: ph, spellcheck: kind.startsWith('mono') ? 'false' : null, class: kind.startsWith('mono') ? 'mono' : null, 'aria-label': label }, asText(k))
+        : h('input', { type: 'text', value: asText(k), placeholder: ph, spellcheck: kind === 'mono' ? 'false' : null, class: kind === 'mono' ? 'mono' : null, 'aria-label': label });
+      el.addEventListener('change', () => { const v = el.value; save({ spec: { [k]: (kind === 'lines' || kind === 'monolines') ? v.split('\n').map(x => x.trim()).filter(Boolean) : v } }); });
+      return h('label', { class: 'rx-pl-f' }, h('span', null, label), el);
+    }));
+  const det = (key, summary, body) => { const d = h('details', { class: 'rx-pl-d', open: RX.plOpen[p.id + key] ? '' : null }, h('summary', null, summary), body); d.addEventListener('toggle', () => { RX.plOpen[p.id + key] = d.open; }); return d; };
+  paintLint();
+  const rules = () => JSON.stringify({ permissions: { deny: p.deny } }, null, 2);
+  return h('div', { class: 'rx-pl' + (p.state === 'copied' ? ' used' : '') },
+    h('div', { class: 'rx-pl-h' }, h('span', { class: 'tag' }, RX_PLAN_KIND[p.kind] || p.kind), titleEl, p.edited ? h('span', { class: 'muted small' }, 'edited') : null,
+      p.state === 'copied' ? h('span', { class: 'muted small' }, 'copied ' + dmon(p.copied_at)) : null),
+    h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Why '), p.why),
+    h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Decides '), h('span', null, 'supports if ' + (p.spec.supports || '?') + '; against if ' + (p.spec.against || '?'))),
+    p.files.length ? h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Builds on '), p.files.map((f, i) => [i ? ', ' : null, rxWhere(f, f.repo)])) : null,
+    lintBox,
+    det('f', 'Edit the experiment', form),
+    det('p', 'Prompt for Claude Code', pre),
+    h('div', { class: 'row rx-rv-act' },
+      h('button', { class: 'btn sm' + (p.state === 'copied' ? '' : ' primary'), title: 'Copy the prompt, then paste it into a new Claude Code session in this project', onclick: () => { copyText(p.prompt); if (p.state !== 'copied') save({ state: 'copied' }); } }, 'Copy prompt for Claude Code'),
+      p.deny && p.deny.length ? h('button', { class: 'btn sm', title: 'Claude Code permission rules that block its edit tools on the paths to leave unchanged. Add them to .claude/settings.local.json in the repository. They do not cover shell commands unless the sandbox is on.', onclick: () => copyText(rules()) }, 'Copy protection rules') : null,
+      h('button', { class: 'linkbtn small', onclick: async () => { await save({ state: 'dropped' }); renderPage(true); } }, 'Drop')));
+}
 function rxPlanBox(target, what, label) {
   if (READONLY) return null;
   const name = S.project ? S.project.name : 'this project';
   const mine = ((RX.plans && RX.plans.plans) || []).filter(p => p.target === target);
   const ask = RX_PLAN_PROMPT(name, target, what);
   const refresh = async () => { try { RX.plans = await apiGet('/api/plans'); } catch (e) { toast(e.message || 'Could not load the plans.'); } renderPage(true); };
-  const set = async (id, body) => { const r = await rxPost('/api/plans', Object.assign({ id }, body)); if (r) { RX.plans = r; renderPage(true); } };
-  const cards = mine.map(p => {
-    const ta = h('textarea', { class: 'rx-ta mono rx-pl-p', rows: '9', spellcheck: 'false', 'aria-label': 'Prompt for Claude Code: ' + p.title }, p.prompt);
-    ta.addEventListener('change', () => { const v = ta.value.trim(); if (v && v !== p.prompt) set(p.id, { prompt: v }); });
-    return h('div', { class: 'rx-pl' + (p.state === 'copied' ? ' used' : '') },
-      h('div', { class: 'rx-pl-h' }, h('span', { class: 'tag' }, RX_PLAN_KIND[p.kind] || p.kind), h('b', null, p.title),
-        p.state === 'copied' ? h('span', { class: 'muted small' }, 'copied ' + dmon(p.copied_at)) : null),
-      h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Why '), p.why),
-      h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Expect '), p.expected),
-      p.files.length ? h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Builds on '), p.files.map((f, i) => [i ? ', ' : null, rxWhere(f, f.repo)])) : null,
-      h('details', { class: 'rx-pl-d' }, h('summary', null, 'Prompt for Claude Code' + (p.edited ? ' (edited by you)' : '')), ta),
-      h('div', { class: 'row rx-rv-act' },
-        h('button', { class: 'btn sm' + (p.state === 'copied' ? '' : ' primary'), title: 'Copy the prompt, then paste it into Claude Code in this project', onclick: () => { const v = ta.value.trim(); copyText(v); set(p.id, v !== p.prompt ? { state: 'copied', prompt: v } : { state: 'copied' }); } }, 'Copy prompt for Claude Code'),
-        h('button', { class: 'linkbtn small', onclick: () => set(p.id, { state: 'dropped' }) }, 'Drop')));
-  });
   return h('div', { class: 'rx-pl-box' }, label ? h('div', { class: 'rx-label' }, 'Next experiments') : null,
-    cards.length ? cards : h('div', { class: 'muted small' }, 'Claude Code reads this ' + what + ', its gaps and its scripts, and proposes up to three experiments, each with a prompt you can run. They appear here for you to check first.'),
+    mine.length ? mine.map(rxPlanCard) : h('div', { class: 'muted small' }, 'Claude Code reads this ' + what + ', its gaps and its scripts, and proposes up to three experiments. Each comes as a form you can change: goal, decision rule, files to read and to leave alone, steps, commands. Lemmata turns it into the prompt.'),
     h('div', { class: 'row rx-rv-act' },
-      h('button', { class: 'btn sm' + (cards.length ? '' : ' primary'), title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, cards.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
+      h('button', { class: 'btn sm' + (mine.length ? '' : ' primary'), title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, mine.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
       h('button', { class: 'linkbtn small', onclick: refresh }, 'Check for new plans')));
 }
 function pageReview() {
