@@ -301,7 +301,7 @@ def _config_diff(root, rid, rev, paths):
     return out[:8]
 
 
-def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, table_at=None, versions=None):
+def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, table_at=None, versions=None, ref=None):
     """Every committed version of a result file, with the changes made between versions.
     -> [{time, short, rev, ours, best, best_label, rank, ruler, delta, changes: [...], attribution, cats}]
     A group of result files (a project-map experiment) passes is_result(path) and table_at(event) instead of one path,
@@ -330,6 +330,7 @@ def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, t
         step = {"time": ev["time"], "short": ev["short"], "rev": ev["rev"], "subject": ev.get("subject") or "",
                 "ours": s["ours"] if s else None, "best": s["best"]["value"] if s and s["best"] else None,
                 "best_label": s["best"]["label"] if s and s["best"] else None, "rank": s["rank"] if s else None, "of": s["of"] if s else None,
+                "ref": next((v["value"] for v in s["vs"] if v["label"] == ref), None) if s and ref else None,      # the base method's value in this version
                 "ruler": bool(tab and prev_cols is not None and set(tab["cols"]) != set(prev_cols)), "changes": [], "cats": []}
         # what changed in the code repositories since the previous version of this file (this commit included)
         cats = set()

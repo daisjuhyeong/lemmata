@@ -233,6 +233,73 @@ class Engine:
 
     # ------------------------------------------------------------------ claims
     def claims(self):
+        """The claims, each with its stage (hypothesis -> being tested -> finding / not supported), the experiments run
+        because of it, and how its stage changed over time."""
+        doc = self._claims_base()
+        tests, meta, ext = {}, {}, False
+        if undmod.load(self.hub)["confirmed"]:
+            E = self._exp_doc()
+            ext = bool(E.get("extends"))
+            vs = E["extends"]["base"]["name"] if ext else "the best other method"
+            for sec in E["sections"]:
+                if sec.get("claim_id"):
+                    meta[sec["claim_id"]] = {"scope": {"extension": "new", "base": "original"}.get(sec.get("scope")), "ref": sec["label"]}
+                    own = ext and sec.get("scope") != "base"      # re-checking the original paper's claim: its method against the others, as the paper did
+                    tests[sec["claim_id"]] = [self._outcome(x, own, vs if own else "the best other method") for x in sec["experiments"]]
+        claimsmod.restage(doc, claimsmod.load(self.hub), tests, meta)
+        # stages over time: what the stored results show for the past, then what Lemmata has recorded since it started watching
+        log = self.hub.read_json("stages.json", None)
+        if not isinstance(log, dict) or not isinstance(log.get("log"), dict):
+            log = {"schema": "lemmata.stages/1", "log": {}}
+        now, changed = now_iso(), False
+        for c in ([doc["core"]] if doc["core"] else []) + [c for c in doc["claims"] if c["state"] != "rejected"]:
+            rec = log["log"].setdefault(c["id"], [])
+            if not rec or rec[-1]["stage"] != c["stage"]:
+                rec.append({"t": now, "stage": c["stage"], "by": c["stage_by"]})
+                del rec[:-200]
+                changed = True
+            t0 = processmod._t(rec[0]["t"])
+            try:
+                past = [p for p in claimsmod.replay(c.get("experiments") or []) if processmod._t(p["t"]) < t0]
+            except TypeError:      # a time that cannot be read or compared: show only what was recorded
+                past = []
+            c["stages"] = [p for i, p in enumerate(past + rec) if i == 0 or (past + rec)[i - 1]["stage"] != p["stage"]][-40:]
+        for c in doc["claims"]:
+            for x in c.get("experiments") or []:
+                x.pop("spark", None)
+        if changed:
+            self.hub.write_json("stages.json", log)
+        return doc
+
+    @staticmethod
+    def _outcome(x, ext, vs):
+        """One experiment as a claim sees it: did ours come out ahead, and is there anything to check before trusting it?"""
+        state, gap = reviewmod._state(x, ext)
+        tl, sp = x.get("tally") or {}, x.get("spark") or []
+        return {"id": x["id"], "name": x["name"], "type": x["type"], "state": state, "gap": gap, "vs": vs, "connected": bool(x["connected"]),
+                "check": bool(tl.get("differs") or tl.get("untraced") or any(p["kind"] == "bold" for p in x["problems"])),
+                "stale": bool(x["stale"]), "last": x.get("last"), "first": next((p["t"] for p in sp if p.get("t")), None),
+                "lower": (x.get("summary") or {}).get("lower"), "vs_base": bool(ext), "spark": sp}
+
+    def _exp_doc(self):
+        """The Experiments document. With a confirmed map it is kept until the scan or a file behind it changes (the claims read it too)."""
+        s = self._ensure()
+        if not undmod.load(self.hub)["confirmed"]:
+            return self._exp()
+
+        def stamp(name):
+            try:
+                st = self.hub.path(name).stat()
+                return (st.st_mtime_ns, st.st_size)
+            except OSError:
+                return None
+        key = (id(s["G"]), s["scanned_at"]) + tuple(stamp(n) for n in ("map.json", "experiments.json", "claims.json", "runs.json"))
+        c = getattr(self, "_exp_cache", None)
+        if c is None or c[0] != key:
+            c = self._exp_cache = (key, self._exp())
+        return c[1]
+
+    def _claims_base(self):
         s = self._ensure()
         doc = claimsmod.build(s["G"], s["alarms"], s["findings"], claimsmod.load(self.hub))
         doc["macros"] = notationmod.macros(s["G"].paper.lines) if s["G"].paper is not None else {}
@@ -437,14 +504,20 @@ class Engine:
         if m and (detail is None or str(detail).startswith("map:")):
             return trackmod.build(m, s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.ledger(),
                                   expmod.load(self.hub), self._github(), detail, "proposed" if d["proposed"] else "confirmed")
-        doc = expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.claims(), self.ledger(),
+        doc = expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self._claims_base(), self.ledger(),
                            expmod.load(self.hub), self._github(), detail)
         if detail is None:
             doc["map"] = {"state": "proposed" if d["proposed"] else "none"}
         return doc
 
     def experiments(self):
-        return self._exp()
+        E = self._exp_doc()
+        by = {c["id"]: c for c in self.claims()["claims"]}
+        for sec in E["sections"]:      # each section is a claim: show where that claim stands
+            c = by.get(sec.get("claim_id") or sec["id"])
+            if c:
+                sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"])
+        return E
 
     def experiment(self, exp_id):
         return self._exp(exp_id)
@@ -579,12 +652,12 @@ class Engine:
         return self.notation()
 
     def _claim_ids(self):
-        d = self.claims()
+        d = self._claims_base()
         return {c["id"] for c in d["claims"]} | ({"core"} if d["core"] else set())
 
-    def set_claim(self, claim_id, state=None, text=None, note=None):
+    def set_claim(self, claim_id, state=None, text=None, note=None, stage=None):
         st = claimsmod.load(self.hub)
-        claimsmod.decide(st, self._claim_ids(), claim_id, state, text, note)
+        claimsmod.decide(st, self._claim_ids(), claim_id, state, text, note, stage)
         self.hub.write_json("claims.json", st)
         return self.claims()
 
@@ -621,7 +694,7 @@ class Engine:
 
     def ledger(self):
         s = self._ensure()
-        return processmod.ledger(s["G"].nodes, s["G"].edge_list(), s["events"], self.claims())
+        return processmod.ledger(s["G"].nodes, s["G"].edge_list(), s["events"], self._claims_base())
 
     def tasks(self):
         s = self._ensure()

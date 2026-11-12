@@ -111,7 +111,7 @@ class MapTest(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
-        for f in ("map.json", "claims.json", "experiments.json"):
+        for f in ("map.json", "claims.json", "experiments.json", "stages.json"):
             p = Path(self.tmp, ".lemmata", f)
             if p.exists():
                 p.unlink()
@@ -179,6 +179,69 @@ class MapTest(unittest.TestCase):
         self.assertEqual([s["name"] for s in claims[cid]["support"]], ["Table 1"])
         self.e.propose_map(agent)
         self.assertEqual([q["claim_id"] for q in self.e.confirm_map()["confirmed"]["questions"]][0], cid)   # confirming again does not duplicate them
+
+    def test_claims_have_stages_and_experiments_have_a_reason(self):
+        """S17: one kind of claim moving through stages; every experiment is tied to the claim it was run for."""
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        d = self.e.claims()
+        by = {c["ref"]: c for c in d["claims"]}
+        self.assertEqual([c["short"] for c in d["claims"]], ["C1", "C2", "C3"])                       # one numbering, whatever the source called them
+        self.assertEqual(by["RQ1"]["stage"], "testing")                                               # ahead, but the paper's table differs from the files
+        self.assertIn("needs checking", by["RQ1"]["stage_why"])
+        self.assertEqual((by["H1"]["stage"], by["H1"]["stage_by"]), ("finding", "evidence"))
+        self.assertEqual([x["name"] for x in by["H1"]["experiments"]], ["Adaptive threshold ablation"])
+        self.assertEqual(d["counts"]["stages"], {"hypothesis": 0, "testing": 1, "finding": 2, "refuted": 0, "exploration": 0})
+        self.assertEqual(d["core"]["stage"], "testing")
+        # the past, read from the stored results: behind before the adaptive threshold, ahead after it
+        self.assertEqual([(s["t"][:10], s["stage"], s["by"]) for s in by["RQ1"]["stages"][:2]], [("2026-10-02", "refuted", "history"), ("2026-10-09", "finding", "history")])
+        self.assertEqual(by["RQ1"]["stages"][-1]["stage"], "testing")
+        log = json.loads(Path(self.tmp, ".lemmata", "stages.json").read_text())["log"]
+        self.assertEqual(log[by["H1"]["id"]][-1]["stage"], "finding")
+        n = len(log[by["H1"]["id"]])
+        self.e.claims()
+        self.assertEqual(len(json.loads(Path(self.tmp, ".lemmata", "stages.json").read_text())["log"][by["H1"]["id"]]), n)      # recorded only when it changes
+        # the researcher's own call wins and is recorded; "auto" hands it back to the evidence
+        c = {c["id"]: c for c in self.e.set_claim(by["H2"]["id"], stage="exploration")["claims"]}[by["H2"]["id"]]
+        self.assertEqual((c["stage"], c["stage_by"], c["stage_auto"]), ("exploration", "you", "finding"))
+        self.assertEqual(self.e.claims()["counts"]["stages"]["exploration"], 1)
+        c = {c["id"]: c for c in self.e.set_claim(by["H2"]["id"], stage="auto")["claims"]}[by["H2"]["id"]]
+        self.assertEqual([s["stage"] for s in c["stages"]][-3:], ["finding", "exploration", "finding"])
+        with self.assertRaises(BadRequest):
+            self.e.set_claim(by["H2"]["id"], stage="proved")
+        # the tree: the experiments are the first roots of the claim they were run for
+        t = self.e.tree()
+        xs = {n["id"]: n for n in t["nodes"] if n["kind"] == "experiment"}
+        self.assertEqual(xs["map:abl"]["state"], "ahead")
+        self.assertIn({"from": by["H1"]["id"], "to": "map:abl", "kind": "support", "how": "detected", "stale": False}, t["edges"])
+        self.assertFalse(any(n["kind"] == "missing" for n in t["nodes"]))
+        self.assertEqual({n["id"]: n["stage"] for n in t["nodes"] if n["layer"] == "claim"}[by["H1"]["id"]], "finding")
+        # Experiments: each section is a claim with its stage; each experiment says why it was run
+        E = self.e.experiments()
+        self.assertEqual([(s["short"], s["stage"]) for s in E["sections"]], [("C1", "testing"), ("C2", "finding"), ("C3", "finding")])
+        self.assertEqual(E["sections"][1]["experiments"][0]["why"][0]["id"], by["H1"]["id"])
+        self.assertEqual(E["counts"]["no_claim"], 0)
+        self.e.edit_map({"experiment": {"id": "cost", "tests": []}})
+        self.e.confirm_map()
+        E = self.e.experiments()
+        self.assertEqual((E["sections"][-1]["label"], E["counts"]["no_claim"]), ("No claim yet", 1))
+        self.assertIn({"k": "why", "t": "Tests no claim"}, E["sections"][-1]["experiments"][0]["caveats"])
+        self.assertEqual({c["ref"]: c["stage"] for c in self.e.claims()["claims"]}["H2"], "hypothesis")     # no experiment left behind it
+        self.assertIn("- Stage: **Finding**", self.e.claims_markdown())
+
+    def test_stage_rules(self):
+        from lemmata.engine.claims import stage_of
+        t = lambda *st: [{"state": s, "connected": s != "planned", "check": False} for s in st]
+        emp = {"formal": False, "status": "unsupported"}
+        self.assertEqual(stage_of(emp)[0], "hypothesis")
+        self.assertEqual(stage_of(emp, t("planned"))[0], "hypothesis")
+        self.assertEqual(stage_of(emp, t("none"))[0], "testing")
+        self.assertEqual(stage_of(emp, t("ahead", "behind"))[0], "testing")
+        self.assertEqual(stage_of(emp, t("ahead", "tie", "none"))[0], "finding")
+        self.assertEqual(stage_of(emp, t("behind", "behind"))[0], "refuted")
+        self.assertEqual(stage_of(emp, [{"state": "ahead", "connected": True, "check": True}])[0], "testing")
+        self.assertEqual(stage_of(dict(emp, status="supported"))[0], "finding")                        # no experiments: the traced evidence decides
+        self.assertEqual([stage_of({"formal": True, "status": s})[0] for s in ("unsupported", "partial", "supported")], ["hypothesis", "testing", "finding"])
 
     def test_edit_discard_and_unmapped(self):
         self.e.propose_map(dict(agent, ignore=[]))

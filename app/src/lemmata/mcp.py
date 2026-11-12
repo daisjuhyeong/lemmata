@@ -500,8 +500,12 @@ def t_claims(ctx, args):
     for c in d["claims"]:
         if c["state"] == "rejected":
             continue
-        lines.append("%s · %s [%s, %s%s]%s: %s" % (c["id"], c["label"], c["status"], c["state"], ", RECHECK: " + _short(c["recheck"], 80) if c["recheck"] else "",
-                                                 _where(c.get("loc")), _short(c["text"], 240)))
+        lines.append("%s · %s%s [stage: %s%s; evidence: %s, %s%s]%s: %s" % (
+            c["id"], c.get("short") or c["label"], " (%s)" % c["label"] if c.get("short") and c["label"] != c["short"] else "", c.get("stage", "hypothesis"),
+            ", set by the researcher" if c.get("stage_by") == "you" else "", c["status"], c["state"],
+            ", RECHECK: " + _short(c["recheck"], 80) if c["recheck"] else "", _where(c.get("loc")), _short(c["text"], 240)))
+        for x in c.get("experiments") or []:
+            lines.append("    experiment run for it: %s (%s): %s" % (x["name"], x["id"], x["state"] if x["connected"] else "no results yet"))
         for s_ in c["support"]:
             ch = s_.get("chain") or {}
             files = ", ".join(x.split("/", 1)[-1] for x in (ch.get("results", []) + ch.get("code", []) + ch.get("runs", []))[:5])
@@ -510,7 +514,10 @@ def t_claims(ctx, args):
         for i in c["issues"]:
             lines.append("    issue: " + _short(i, 200))
     cc = d["counts"]
-    head = ("%d claims: %d supported, %d partly, %d not supported; %d to recheck; %d still drafts the researcher has not confirmed. "
+    st = cc.get("stages") or {}
+    head = ("Every claim starts as a hypothesis and becomes a finding once experiments or a proof back it: %d findings, %d being tested, "
+            "%d hypotheses, %d not supported, %d explorations. Evidence traced: " % tuple(st.get(k, 0) for k in ("finding", "testing", "hypothesis", "refuted", "exploration")))
+    head += ("%d claims: %d supported, %d partly, %d not supported; %d to recheck; %d still drafts the researcher has not confirmed. "
             "'suggested' support is a guess from wording and does not count until the researcher accepts it." %
             (cc["total"], cc["supported"], cc["partial"], cc["unsupported"], cc["recheck"], cc["proposed"]))
     return head + "\n" + "\n".join(lines), d, "Use node(project, node) for one item."

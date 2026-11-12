@@ -7,7 +7,11 @@ assumptions and lemmas a statement refers to). Decisions live in .lemmata/claims
 
 Vocabulary
   claim.state   proposed | confirmed | rejected          (the researcher's decision about the draft)
-  claim.status  supported | partial | unsupported        (what the evidence says), plus claim.recheck
+  claim.status  supported | partial | unsupported        (is the evidence there and traced?), plus claim.recheck
+  claim.stage   hypothesis | testing | finding | refuted | exploration
+                (where the claim stands: every claim starts as a hypothesis and becomes a finding once experiments or a
+                proof back it; claim.stage_by says whether the evidence or the researcher set it)
+  claim.scope   new | original | None                    (with a base paper: the extension's own claim, or the original's re-checked)
   support.how   detected | suggested | manual            (suggested links count only after they are accepted)
 """
 import re
@@ -497,6 +501,95 @@ def _status(c):
     c["recheck"] = next((s["stale"] for s in sup if s.get("stale")), None)
 
 
+STAGES = ("hypothesis", "testing", "finding", "refuted", "exploration")
+STAGE_WORD = {"hypothesis": "Hypothesis", "testing": "Being tested", "finding": "Finding", "refuted": "Not supported", "exploration": "Exploration"}
+
+
+def stage_of(c, tests=None):
+    """-> (stage, why) from the evidence alone. tests: the experiments run because of this claim, each
+    {state: ahead | behind | tie | none, connected, check}. A proof decides a formal statement; experiments decide the rest."""
+    if c.get("formal"):
+        return {"supported": ("finding", "Proved: the proof is complete."), "partial": ("testing", "There is a proof, but part of it is open."),
+                "unsupported": ("hypothesis", "No proof yet.")}[c["status"]]
+    run = [t for t in (tests or []) if t.get("connected")]
+    cmp_ = [t for t in run if t.get("state") in ("ahead", "behind", "tie")]
+    if cmp_:
+        n, behind = len(cmp_), sum(t["state"] == "behind" for t in cmp_)
+        if behind == n:
+            return "refuted", "Behind in %s that tests it." % ("the one experiment" if n == 1 else "all %d experiments" % n)
+        if behind:
+            return "testing", "Mixed results: behind in %d of %d experiments." % (behind, n)
+        if any(t.get("check") for t in run):
+            return "testing", "The results agree, but something in them needs checking first."
+        return "finding", "Ahead or level in %s, with nothing to check." % ("the one experiment that tests it" if n == 1 else "all %d experiments that test it" % n)
+    if run:
+        return "testing", "%d experiment%s linked, none with a comparison yet." % (len(run), "" if len(run) == 1 else "s")
+    if tests:
+        return "hypothesis", "Experiments are planned for it, but none has results yet."
+    return {"supported": ("finding", "Backed by evidence traced to result files."), "partial": ("testing", "Evidence is linked, but not all of it is traced."),
+            "unsupported": ("hypothesis", "Nothing backs this yet.")}[c["status"]]
+
+
+def _roll(stages):
+    st = [s for s in stages if s != "exploration"]
+    return "hypothesis" if not st else st[0] if len(set(st)) == 1 else "testing"
+
+
+def restage(doc, store=None, tests=None, meta=None):
+    """Set stage, scope and the experiments behind each claim; number the claims; roll the stages up to the core message.
+    tests: {claim id: [experiment outcomes]}; meta: {claim id: {scope, ref}} (both from the project map, when there is one)."""
+    ents, tests, meta = (store or {}).get("entries", {}), tests or {}, meta or {}
+    for c in doc["claims"]:
+        m = meta.get(c["id"]) or {}
+        c["scope"], c["ref"] = m.get("scope"), m.get("ref") or c["label"]
+        c["experiments"] = tests.get(c["id"], [])
+        if any(x.get("stale") for x in c["experiments"]) and not c["recheck"]:
+            c["recheck"] = "a result is older than the code or settings behind it"
+        auto, why = stage_of(c, c["experiments"] if c["id"] in tests else None)
+        mine = ents.get(c["id"], {}).get("stage")
+        c["stage"], c["stage_by"], c["stage_auto"] = (mine, "you", auto) if mine in STAGES else (auto, "evidence", auto)
+        c["stage_why"] = why
+    doc["claims"].sort(key=lambda c: {"new": 0, None: 1, "original": 2}[c["scope"]])     # the work's own claims first (the sort is stable)
+    live = [c for c in doc["claims"] if c["state"] != "rejected"]
+    k = 0
+    for c in live:
+        if c.get("formal"):
+            c["short"] = _short(c)
+        else:
+            k += 1
+            c["short"] = "C%d" % k
+    for c in doc["claims"]:
+        c.setdefault("short", _short(c))
+    core = doc.get("core")
+    if core:
+        core["stage"], core["stage_by"], core["stage_why"] = _roll([c["stage"] for c in live]), "evidence", ""
+        core["recheck"] = core.get("recheck") or next((c["recheck"] for c in live if c["recheck"]), None)
+    doc["counts"]["stages"] = {s: sum(c["stage"] == s for c in live) for s in STAGES}
+    doc["counts"]["recheck"] = sum(bool(c["recheck"]) for c in live)
+    return doc
+
+
+def replay(tests):
+    """Past stages of an experiment-backed claim, read from the stored versions of its results: [{t, stage}], oldest first.
+    Each experiment's version carries ours, the best other method and (when the work extends one) the base method."""
+    pts = sorted({p["t"] for x in tests for p in x.get("spark") or [] if p.get("t")})
+    out = []
+    for t in pts:
+        now = []
+        for x in tests:
+            p = next((p for p in reversed(x.get("spark") or []) if p.get("t") and p["t"] <= t), None)
+            if p is None:
+                continue
+            other = p.get("s") if x.get("vs_base") else p.get("b")
+            st = "none" if p.get("o") is None or other is None else "tie" if p["o"] == other else \
+                "ahead" if ((p["o"] < other) if x.get("lower") else (p["o"] > other)) else "behind"
+            now.append({"state": st, "connected": True, "check": False})
+        st = stage_of({"formal": False, "status": "unsupported"}, now)[0]
+        if not out or out[-1]["stage"] != st:
+            out.append({"t": t, "stage": st, "by": "history"})
+    return out
+
+
 def build(G, alarms, findings, store):
     """Drafts merged with the researcher's decisions -> the claims document."""
     drafted, ctx = draft(G, alarms, findings)
@@ -543,7 +636,7 @@ def build(G, alarms, findings, store):
     counts = {"total": len(live), "supported": sum(c["status"] == "supported" for c in live), "partial": sum(c["status"] == "partial" for c in live),
               "unsupported": sum(c["status"] == "unsupported" for c in live), "recheck": sum(bool(c["recheck"]) for c in live),
               "proposed": sum(c["state"] == "proposed" for c in live), "confirmed": sum(c["state"] == "confirmed" for c in live)}
-    return {"schema": SCHEMA, "has_paper": G.paper is not None, "core": core, "claims": rest, "counts": counts}
+    return restage({"schema": SCHEMA, "has_paper": G.paper is not None, "core": core, "claims": rest, "counts": counts}, store)
 
 
 def table_rows(P, node_id, max_rows=14, max_cols=9):
@@ -605,8 +698,8 @@ def tree(doc, G, born=None):
             edges.append({"from": a, "to": b, "kind": kind, "how": how, "stale": bool(stale)})
 
     if core:
-        add("core", layer="core", kind="core", short="", title=core["text"], status=core["status"], recheck=bool(core["recheck"]),
-            state=core.get("state", "proposed"), born=born(None, core.get("loc")))
+        add("core", layer="core", kind="core", short="", title=core["text"], status=core["status"], stage=core.get("stage"), stages=core.get("stages") or [],
+            recheck=bool(core["recheck"]), state=core.get("state", "proposed"), born=born(None, core.get("loc")))
     # which claims hang under another claim ("stated as Theorem 1", "uses Lemma 2")
     parent = {}
     for c in live:
@@ -615,7 +708,8 @@ def tree(doc, G, born=None):
             if cid in by_id and cid != c["id"] and s_["how"] != "suggested":
                 parent.setdefault(cid, c["id"])
     for c in live:
-        add(c["id"], layer="claim", kind=c["kind"], short=_short(c), title=c["text"][:400], label=c["label"], status=c["status"],
+        add(c["id"], layer="claim", kind=c["kind"], short=c.get("short") or _short(c), title=c["text"][:400], label=c["label"], status=c["status"],
+            stage=c.get("stage"), stage_by=c.get("stage_by"), scope=c.get("scope"), stages=c.get("stages") or [],
             recheck=bool(c["recheck"]), state=c["state"], formal=bool(c.get("formal")), depth=0, born=born(None, c.get("loc")))
     for c in live:   # depth in the crown: 1 = directly under the core message
         d, cur, guard = 1, c["id"], 0
@@ -628,6 +722,11 @@ def tree(doc, G, born=None):
     in_tree = lambda n: n in G.nodes and G.nodes[n]["kind"] in BAND
     for c in live:
         real = 0
+        for x in c.get("experiments") or []:      # the experiments run because of this claim are its first roots
+            add(x["id"], layer="root", band=1, kind="experiment", short=x["name"] if len(x["name"]) <= 12 else x["name"][:11].rstrip() + "…", title=x["name"], exp=x["id"], state=x["state"],
+                xtype=x.get("type"), traced=bool(x.get("connected")), born=x.get("first"))
+            edge(c["id"], x["id"], "support", "detected", x.get("stale"))
+            real += 1
         for s_ in c["support"]:
             sug = s_["how"] == "suggested"
             if s_.get("claim_id") in by_id:
@@ -692,10 +791,14 @@ def load(hub):
     return d
 
 
-def decide(store, known_ids, cid, state=None, text=None, note=None):
+def decide(store, known_ids, cid, state=None, text=None, note=None, stage=None):
     if cid not in known_ids:
         raise NotFound("unknown claim %r" % cid)
     e = store["entries"].setdefault(cid, {})
+    if stage is not None:      # the researcher's own call; "auto" hands it back to the evidence
+        if stage not in STAGES + ("auto",) or cid == "core":
+            raise BadRequest("stage must be one of %s, or auto" % ", ".join(STAGES))
+        e.pop("stage", None) if stage == "auto" else e.__setitem__("stage", stage)
     if state is not None:
         if state not in ("proposed", "confirmed", "rejected"):
             raise BadRequest("state must be proposed, confirmed or rejected")
@@ -754,6 +857,7 @@ def remove_manual(store, cid):
 
 # ------------------------------------------------------------------ export
 MARK = {"supported": "supported", "partial": "partly supported", "unsupported": "NOT supported"}
+EVID = {"supported": "traced", "partial": "partly traced", "unsupported": "none"}
 
 
 def to_markdown(doc, project_name, when):
@@ -761,13 +865,18 @@ def to_markdown(doc, project_name, when):
            " confirmations are yours." % when, ""]
     core = doc.get("core")
     if core:
-        out += ["## Core message", "", "> " + core["text"], "", "Status: **%s**" % MARK[core["status"]], ""]
+        out += ["## Core message", "", "> " + core["text"], "", "Stage: **%s** · evidence: %s" % (STAGE_WORD[core.get("stage", "hypothesis")], EVID[core["status"]]), ""]
     out += ["## Claims", ""]
     for c in doc["claims"]:
         if c["state"] == "rejected":
             continue
-        out.append("### %s%s" % (c["label"], "" if c["state"] == "confirmed" else " (draft, not confirmed)"))
-        out += ["", c["text"], "", "- Status: **%s**%s" % (MARK[c["status"]], " — recheck: %s" % c["recheck"] if c["recheck"] else "")]
+        name = c.get("short") or c["label"]
+        out.append("### %s%s%s" % (name, " (%s)" % c["label"] if c["label"] != name else "", "" if c["state"] == "confirmed" else " (draft, not confirmed)"))
+        out += ["", c["text"], "", "- Stage: **%s**%s%s — %s" % (STAGE_WORD[c.get("stage", "hypothesis")], " (set by you)" if c.get("stage_by") == "you" else "",
+                                                            " · %s claim" % c["scope"] if c.get("scope") else "", c.get("stage_why", "")),
+                "- Evidence: %s%s" % (EVID[c["status"]], " — recheck: %s" % c["recheck"] if c["recheck"] else "")]
+        for x in c.get("experiments") or []:
+            out.append("- Experiment: %s (%s)" % (x["name"], x["state"] if x["state"] != "none" else "no comparison"))
         if c.get("loc"):
             out.append("- Where: `%s:%s`" % (c["loc"]["path"], c["loc"]["line"]))
         for s in c["support"]:

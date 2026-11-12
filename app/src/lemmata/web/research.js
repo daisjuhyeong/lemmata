@@ -8,6 +8,31 @@ const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: n
 const RX_TABS = { review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
+// One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
+const RX_STAGE = { hypothesis: ['○', 'Hypothesis', 'plain', 'hyp'], testing: ['◐', 'Being tested', 'look', 'partial'], finding: ['●', 'Finding', 'fine', 'supported'], refuted: ['✕', 'Not supported', 'fix', 'unsupported'], exploration: ['◌', 'Exploration', 'ign', 'explore'] };
+const RX_STAGES = ['finding', 'testing', 'hypothesis', 'refuted', 'exploration'];
+const RX_SCOPE = { new: ['New', 'A claim of this work'], original: ['Original', 'A claim of the paper this work extends, re-checked here'] };
+function rxSt(stage) { return ' st-' + (RX_STAGE[stage] || RX_STAGE.hypothesis)[3]; }
+function rxStageChip(c) { const s = RX_STAGE[c.stage] || RX_STAGE.hypothesis; const ch = plainChip(s[0], s[1], s[2]); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || ''); return ch; }
+function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
+function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
+// Why we experiment: the experiments run because of this claim, and how each came out.
+function rxWhyRows(c) {
+  const xs = c.experiments || [];
+  if (!xs.length) return c.formal ? null : h('div', { class: 'rx-why none' }, 'No experiment tests this yet.');
+  return h('div', { class: 'rx-why' }, h('div', { class: 'rx-why-h' }, 'Experiments run for this'), xs.map(x => { const g = RX_XSTATE[x.state] || RX_XSTATE.none;
+    return h('button', { class: 'rx-why-r', onclick: () => rxOpenExp(x.id), title: 'Open this experiment' }, h('span', { class: 'rx-m-g x-' + x.state }, g[0]), h('b', null, x.name),
+      h('span', { class: 'muted' }, !x.connected ? 'No results yet' : x.gap != null ? g[1] + (x.state === 'tie' ? ' with ' : ' ' + (x.state === 'ahead' ? 'of ' : '')) + trunc(x.vs, 22) + (x.gap ? ' by ' + rxFmt(Math.abs(x.gap)) : '') : g[1]),
+      h('span', { class: 'grow' }), x.check ? plainChip('!', 'To check', 'look') : null, x.stale ? plainChip('↻', 'Old result', 'look') : null); }));
+}
+function rxStageSelect(c) {
+  if (READONLY || c.id === 'core') return null;
+  const auto = RX_STAGE[c.stage_auto] || RX_STAGE.hypothesis;
+  const s = h('select', { 'aria-label': 'Stage', class: 'rx-stage-sel', title: 'Lemmata sets the stage from the evidence. Choose one yourself to overrule it.' },
+    h('option', { value: 'auto', selected: c.stage_by !== 'you' }, 'Stage: from the evidence (' + auto[1] + ')'), Object.keys(RX_STAGE).map(k => h('option', { value: k, selected: c.stage_by === 'you' && c.stage === k }, 'Stage: ' + RX_STAGE[k][1] + ' (my call)')));
+  s.addEventListener('change', async () => { const r = await rxPost('/api/claims', { id: c.id, stage: s.value }); if (r) { RX.claims = r; rxTrack('claim_stage_set'); await rxRefresh(); } });
+  return s;
+}
 const RX_KIND = { contribution: 'Contribution', question: 'Research question', theorem: 'Theorem', lemma: 'Lemma', proposition: 'Proposition', corollary: 'Corollary', claim: 'Claim', core: 'Core message' };
 
 function rxTrack(event, extra) {
@@ -104,26 +129,28 @@ function rxEditDialog(c) {
     { label: 'Save', primary: true, fn: async () => { const r = await rxPost('/api/claims', { id: c.id, text: ta.value, note: note.value }); if (r) { RX.claims = r; renderPage(true); } } }]);
 }
 function rxClaimCard(c) {
-  const open = RX.open[c.id] != null ? RX.open[c.id] : (c.status !== 'supported' || !!c.recheck || c.state === 'proposed');
+  const open = RX.open[c.id] != null ? RX.open[c.id] : (c.stage === 'testing' || c.stage === 'refuted' || !!c.recheck || c.state === 'proposed');
   const real = c.support.filter(s => s.how !== 'suggested'), sug = c.support.filter(s => s.how === 'suggested');
   const setState = async st => { const r = await rxPost('/api/claims', { id: c.id, state: st }); if (r) { RX.claims = r; if (st !== 'proposed') rxTrack(st === 'confirmed' ? 'claim_confirmed' : 'claim_rejected'); renderPage(true); renderLeft(); } };
-  return h('article', { class: 'card rx-claim st-' + c.status + (c.state === 'rejected' ? ' rejected' : ''), id: 'cl-' + c.id.replace(/[^\w]/g, '_') },
+  return h('article', { class: 'card rx-claim' + rxSt(c.stage) + (c.state === 'rejected' ? ' rejected' : ''), id: 'cl-' + c.id.replace(/[^\w]/g, '_') },
     h('button', { class: 'rx-claim-h', 'aria-expanded': String(open), onclick: () => { RX.open[c.id] = !open; renderPage(true); } },
-      h('span', { class: 'caret' }, open ? '▾' : '▸'), h('span', { class: 'rx-label' }, c.label), rxChip(c.status),
-      c.recheck ? plainChip('↻', 'Recheck', 'look') : null, c.state === 'proposed' ? plainChip('✎', 'Draft', 'proposed') : null, c.manual ? plainChip('+', 'Yours', 'plain') : null,
-      h('span', { class: 'grow' }), h('span', { class: 'muted small' }, RX_KIND[c.kind] || '')),
+      h('span', { class: 'caret' }, open ? '▾' : '▸'), h('span', { class: 'rx-label' }, c.short || c.label), rxStageChip(c), rxScopeTag(c),
+      c.recheck ? plainChip('↻', 'Recheck', 'look') : null, c.state === 'proposed' ? plainChip('✎', 'Draft', 'proposed') : null,
+      h('span', { class: 'grow' }), h('span', { class: 'muted small', title: 'Where it comes from' }, c.label !== c.short && !/^Your claim$/.test(c.label) ? c.label : (RX_KIND[c.kind] || ''))),
     h('div', { class: 'rx-text serif' }, rxMath(c.text)),
     open ? h('div', { class: 'rx-body' },
+      c.stage_why ? h('div', { class: 'rx-stage-why small' }, h('b', null, (RX_STAGE[c.stage] || RX_STAGE.hypothesis)[1] + (c.stage_by === 'you' ? ' (my call)' : '') + ': '), c.stage_by === 'you' ? 'The evidence alone says “' + (RX_STAGE[c.stage_auto] || RX_STAGE.hypothesis)[1] + '”. ' + c.stage_why : c.stage_why) : null,
       c.loc ? h('div', { class: 'muted small' }, 'In the paper: ', rxWhere(c.loc)) : null,
+      rxWhyRows(c),
       c.recheck ? h('div', { class: 'rx-warn' }, '↻ Something behind this claim changed: ' + c.recheck) : null,
       c.issues.map(i => h('div', { class: 'rx-warn' }, '! ' + i)),
-      real.length ? real.map(s => rxSupportRow(c, s)) : h('div', { class: 'rx-none' }, c.formal ? 'No proof found. If the proof is elsewhere, write “Proof of Theorem~\\ref{…}” at its start so Lemmata can connect it.' : 'Nothing backs this claim yet. Link the table, figure, section or result file that shows it.'),
+      real.length ? real.map(s => rxSupportRow(c, s)) : (c.experiments || []).length ? null : h('div', { class: 'rx-none' }, c.formal ? 'No proof found. If the proof is elsewhere, write “Proof of Theorem~\\ref{…}” at its start so Lemmata can connect it.' : 'Nothing backs this claim yet. Link the table, figure, section or result file that shows it.'),
       sug.map(s => rxSupportRow(c, s)),
       c.note ? h('div', { class: 'rx-note' }, h('b', null, 'Your note: '), c.note) : null,
       READONLY ? null : h('div', { class: 'btnrow' },
         c.state !== 'confirmed' ? h('button', { class: 'btn primary', onclick: () => setState('confirmed') }, 'Confirm') : h('button', { class: 'btn', onclick: () => setState('proposed') }, 'Back to draft'),
         h('button', { class: 'btn', onclick: () => rxLinkDialog(c) }, '+ Evidence'),
-        h('button', { class: 'btn', onclick: () => rxEditDialog(c) }, 'Edit'),
+        h('button', { class: 'btn', onclick: () => rxEditDialog(c) }, 'Edit'), rxStageSelect(c),
         h('span', { class: 'grow' }),
         c.manual ? h('button', { class: 'linkbtn', onclick: async () => { const r = await rxPost('/api/claims/remove', { id: c.id }); if (r) { RX.claims = r; renderPage(true); renderLeft(); } } }, 'Delete')
           : c.state !== 'rejected' ? h('button', { class: 'linkbtn', onclick: () => setState('rejected') }, 'Not a claim') : h('button', { class: 'linkbtn', onclick: () => setState('proposed') }, 'Bring back'))) : null);
@@ -155,10 +182,12 @@ function pageClaims() {
   if (d.core) root.append(rxCoreCard(d.core));
   const live = d.claims.filter(c => c.state !== 'rejected'), gone = d.claims.filter(c => c.state === 'rejected');
   const F = RX.filter;
-  const pass = c => F === 'all' || (F === 'draft' ? c.state === 'proposed' : F === 'recheck' ? !!c.recheck : c.status === F);
-  const chips = [['all', 'All', live.length], ['unsupported', 'Not supported', cc.unsupported], ['partial', 'Partly', cc.partial], ['supported', 'Supported', cc.supported], ['recheck', 'Recheck', cc.recheck], ['draft', 'Drafts', cc.proposed]];
+  const pass = c => F === 'all' || (F === 'draft' ? c.state === 'proposed' : F === 'recheck' ? !!c.recheck : F === 'new' || F === 'original' ? c.scope === F : true);
+  const chips = [['all', 'All', live.length], ['recheck', 'Recheck', cc.recheck], ['draft', 'Drafts', cc.proposed]].concat(live.some(c => c.scope) ? [['new', 'New', live.filter(c => c.scope === 'new').length], ['original', 'Original', live.filter(c => c.scope === 'original').length]] : []);
+  if (!chips.some(x => x[0] === F)) RX.filter = 'all';
   root.append(h('div', { class: 'fchips' }, chips.map(([k, l, n]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.filter = k; renderPage(true); } }, l + ' ', h('span', { class: 'n' }, n)))));
-  const groups = [['What the paper contributes', c => c.kind === 'contribution' || c.kind === 'claim'], ['Questions it asks', c => c.kind === 'question'], ['Formal statements', c => !!c.formal]];
+  const TITLE = { finding: 'Findings', testing: 'Being tested', hypothesis: 'Hypotheses', refuted: 'Not supported', exploration: 'Explorations' };
+  const groups = RX_STAGES.map(k => [TITLE[k], c => c.stage === k]);
   for (const [title, fn] of groups) {
     const list = live.filter(fn).filter(pass);
     if (!live.filter(fn).length) continue;
@@ -171,12 +200,12 @@ function pageClaims() {
 function rxCoreCard(core) {
   const cc = RX.claims.counts;
   const full = h('details', { class: 'details' }, h('summary', null, 'Abstract'), h('div', { class: 'serif' }, rxMath(core.abstract || '')));
-  return h('section', { class: 'rx-core st-' + core.status },
-    h('div', { class: 'rx-core-h' }, h('span', { class: 'rx-label' }, 'Core message'), rxChip(core.status), core.recheck ? plainChip('↻', 'Recheck', 'look') : null, h('span', { class: 'grow' }),
+  return h('section', { class: 'rx-core' + rxSt(core.stage) },
+    h('div', { class: 'rx-core-h' }, h('span', { class: 'rx-label' }, 'Core message'), rxStageChip(core), core.recheck ? plainChip('↻', 'Recheck', 'look') : null, h('span', { class: 'grow' }),
       READONLY ? null : h('button', { class: 'linkbtn small', onclick: () => rxEditDialog(core) }, 'Reword'), rxWhere(core.loc)),
     h('div', { class: 'rx-core-t serif' }, rxMath(core.text)),
-    h('div', { class: 'rx-meter', role: 'img', 'aria-label': cc.supported + ' supported, ' + cc.partial + ' partly, ' + cc.unsupported + ' not supported' },
-      cc.total ? [['supported', cc.supported], ['partial', cc.partial], ['unsupported', cc.unsupported]].filter(x => x[1]).map(([k, n]) => h('span', { class: 'seg ' + k, style: 'flex:' + n }, String(n))) : null),
+    h('div', { class: 'rx-meter', role: 'img', 'aria-label': RX_STAGES.map(k => cc.stages[k] + ' ' + RX_STAGE[k][1].toLowerCase()).join(', ') },
+      cc.total ? RX_STAGES.filter(k => cc.stages[k]).map(k => h('span', { class: 'seg ' + RX_STAGE[k][3], style: 'flex:' + cc.stages[k], title: cc.stages[k] + ' ' + RX_STAGE[k][1].toLowerCase() }, RX_STAGE[k][0] + ' ' + cc.stages[k])) : null),
     core.abstract ? full : null);
 }
 
@@ -244,7 +273,7 @@ function rxTree(opts) {
     const a = P[e.from], b = P[e.to]; if (!a || !b) continue;
     const to = N.get(e.to), fromRoot = N.get(e.from) && N.get(e.from).layer === 'root';
     let cls = 'e e-' + e.kind + (e.how === 'suggested' ? ' sug' : '') + (e.stale ? ' stale' : ''), w = 1.6, d;
-    if (e.kind === 'branch') { cls += ' st-' + to.status; w = 2 + Math.min(4, (nRoots.get(e.to) || 0) + kidsCount(T, e.to)); d = curve(a, b); }
+    if (e.kind === 'branch') { cls += rxSt(to.stage); w = 2 + Math.min(4, (nRoots.get(e.to) || 0) + kidsCount(T, e.to)); d = curve(a, b); }
     else if (e.kind === 'uses') { const mx = (a.x + b.x) / 2, my = Math.min(a.y, b.y) - 30; d = 'M' + a.x + ',' + a.y + ' Q' + mx + ',' + my + ' ' + b.x + ',' + b.y; }
     else d = curve(a, b, !fromRoot);
     const p = sv('path', { d, class: cls, 'stroke-width': w, fill: 'none' }); gE.append(p); edgeEls.push({ e, el: p });
@@ -253,18 +282,19 @@ function rxTree(opts) {
   const half = r => 'M0,' + (-r) + ' A' + r + ',' + r + ' 0 0,0 0,' + r + ' Z';
   for (const n of T.nodes) {
     const p = P[n.id]; if (!p) continue;
-    const g = sv('g', { class: 'n n-' + n.layer + (n.status ? ' st-' + n.status : '') + (n.state === 'proposed' ? ' draft' : '') + (RX.sel === n.id ? ' sel' : ''), transform: 'translate(' + p.x + ',' + p.y + ')', tabindex: '0' });
+    const g = sv('g', { class: 'n n-' + n.layer + (n.stage ? rxSt(n.stage) : '') + (n.exp ? ' x-' + n.state : '') + (n.state === 'proposed' ? ' draft' : '') + (RX.sel === n.id ? ' sel' : ''), transform: 'translate(' + p.x + ',' + p.y + ')', tabindex: '0' });
     const inner = sv('g', { class: 'sprout' }); g.append(inner);
     if (n.layer === 'core') {
       const fo = sv('foreignObject', { x: -L.coreW / 2, y: -118, width: L.coreW, height: 96 });
       fo.append(h('div', { class: 'rx-coretext serif', title: READONLY ? '' : 'Click to reword' }, h('span', null, rxMath(n.title || 'No core message found. Click to write it.'))));
-      inner.append(fo, sv('circle', { r: 13, class: 'dot' }), n.status === 'partial' ? sv('path', { d: half(13), class: 'halfdot' }) : null, n.recheck ? sv('circle', { r: 18, class: 'ring' }) : null);
+      inner.append(fo, sv('circle', { r: 13, class: 'dot' }), sv('path', { d: half(13), class: 'halfdot' }), n.recheck ? sv('circle', { r: 18, class: 'ring' }) : null);
     } else if (n.layer === 'claim') {
       const r = n.depth > 1 ? 12 : 16;
       inner.append(sv('circle', { r: r + 12, class: 'hit' }), n.recheck ? sv('circle', { r: r + 5, class: 'ring' }) : null, n.formal ? sv('rect', { x: -r, y: -r, width: 2 * r, height: 2 * r, rx: 3, class: 'dot' }) : sv('circle', { r, class: 'dot' }),
-        n.status === 'partial' ? (n.formal ? sv('rect', { x: -r, y: -r, width: r, height: 2 * r, class: 'halfdot' }) : sv('path', { d: half(r), class: 'halfdot' })) : null,
+        n.formal ? sv('rect', { x: -r, y: -r, width: r, height: 2 * r, class: 'halfdot' }) : sv('path', { d: half(r), class: 'halfdot' }),
+        sv('text', { y: 4.5, class: 'glyph xmark' }, '✕'),
         sv('text', { x: r + 7, y: 4, class: 'lab side' }, n.short + (n.state === 'proposed' ? ' ✎' : '')), n.recheck ? sv('text', { x: -r - 14, y: -r + 4, class: 'badge' }, '↻') : null,
-        sv('title', null, n.label + ' — ' + RX_STATUS[n.status][1] + (n.recheck ? ', recheck' : '') + (n.state === 'proposed' ? ' (draft)' : '') + '\n' + n.title));
+        sv('title', null, n.short + ' — ' + (RX_STAGE[n.stage] || RX_STAGE.hypothesis)[1] + (n.scope ? ', ' + RX_SCOPE[n.scope][0].toLowerCase() : '') + (n.recheck ? ', recheck' : '') + (n.state === 'proposed' ? ' (draft)' : '') + '\n' + n.title));
     } else {
       const miss = n.kind === 'missing', pic = n.img && !READONLY;
       if (pic) {   // the figure itself
@@ -272,12 +302,13 @@ function rxTree(opts) {
         im.addEventListener('error', () => { im.replaceWith(sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind])); });
         inner.append(sv('rect', { x: -34, y: -25, width: 68, height: 50, rx: 3, class: 'box pic' + (n.traced === false ? ' untraced' : '') }), im, sv('text', { y: 37, class: 'lab' }, n.short));
       } else inner.append(sv('rect', { x: -18, y: -14, width: 36, height: 28, rx: n.band === 1 ? 14 : 6, class: 'box' + (miss ? ' miss' : '') + (n.traced === false && !miss ? ' untraced' : '') }),
-        sv('text', { y: 4.5, class: 'glyph' }, RX_GLYPH[n.kind] || '•'), sv('text', { y: 30, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short));
+        sv('text', { y: 4.5, class: 'glyph' }, n.exp ? (RX_XSTATE[n.state] || RX_XSTATE.none)[0] : RX_GLYPH[n.kind] || '•'), sv('text', { y: 30, class: 'lab' + (n.band > 1 ? ' hov' : '') }, miss ? '' : n.short));
       inner.append(n.shared > 1 ? sv('text', { x: pic ? 38 : 19, y: pic ? -18 : -8, class: 'badge' }, '×' + n.shared) : null,
         n.caveat ? sv('g', { transform: 'translate(' + (pic ? -34 : -15) + ',' + (pic ? -25 : -12) + ')' }, sv('circle', { r: 7, class: 'cav' }), sv('text', { y: 3.5, class: 'cavt' }, '!')) : null,
-        sv('title', null, (RX_KINDWORD[n.kind] || n.kind) + (miss ? '' : ': ' + n.title) + (n.traced === false && !miss ? '\nNot traced to a result file or script' : '')));
+        sv('title', null, (RX_KINDWORD[n.kind] || n.kind) + (miss ? '' : ': ' + n.title) + (n.exp ? '\n' + (n.traced ? (RX_XSTATE[n.state] || RX_XSTATE.none)[1] : 'No results yet') : n.traced === false && !miss ? '\nNot traced to a result file or script' : '')));
     }
     const pick = () => {
+      if (n.exp) return rxOpenExp(n.exp);
       if (n.layer === 'root') { if (n.node_id) { RX.sel = RX.sel === n.id ? null : n.id; if (!opts.scrub) renderPage(true); else { RX.view = 'tree'; openTab('claims'); } } else if (n.loc) rxShowLines('paper', n.loc); else if (n.kind === 'missing') { const cid = n.id.slice(8); RX.sel = cid; const c = RX.claims.claims.find(x => x.id === cid); if (c && !READONLY) rxLinkDialog(c); renderPage(true); } return; }
       RX.sel = RX.sel === n.id ? null : n.id; if (!opts.scrub) renderPage(true); else { RX.view = 'tree'; openTab('claims'); }
     };
@@ -303,6 +334,11 @@ function rxTree(opts) {
   function setTime(frac) {
     const now = t0 + (t1 - t0) * frac + 1; let shown = 0;
     els.forEach((el, id) => { const b = bornOf(id); const hide = frac < 1 && b != null && b > now; el.classList.toggle('unborn', hide); if (!hide) shown++; });
+    // a claim's stage at that moment: a hypothesis until its first results, then whatever the results of the day said
+    const at = n => { const st = n.stages || []; if (frac >= 1 || !st.length) return n.stage; const past = st.filter(x => Date.parse(x.t) <= now).pop(); return past ? past.stage : st[0].by === 'history' ? 'hypothesis' : n.stage; };
+    const paint = (el, stage) => { ['hyp', 'partial', 'supported', 'unsupported', 'explore'].forEach(k => el.classList.remove('st-' + k)); el.classList.add(rxSt(stage).trim()); };
+    T.nodes.forEach(n => { if (n.stage && els.has(n.id)) paint(els.get(n.id), at(n)); });
+    edgeEls.forEach(({ e, el }) => { if (e.kind === 'branch' && N.get(e.to).stage) paint(el, at(N.get(e.to))); });
     edgeEls.forEach(({ e, el }) => { const hide = frac < 1 && [e.from, e.to].some(id => { const b = bornOf(id); return b != null && b > now; }); el.classList.toggle('unborn', hide); });
     return { now, shown };
   }
@@ -346,13 +382,12 @@ function rxEvidenceCard(nodeId, onChange) {
 function kidsCount(T, id) { return T.nodes.filter(n => n.parent === id).length; }
 function rxLegend(T) {
   const has = f => T.nodes.some(f), hasE = f => T.edges.some(f);
-  const dot = cls => { const s = sv('svg', { viewBox: '-10 -10 20 20', width: 14, height: 14, class: 'rx-tree mini' }); s.append(sv('g', { class: 'n n-claim ' + cls }, sv('circle', { r: 7, class: 'dot' }), cls.includes('partial') ? sv('path', { d: 'M0,-7 A7,7 0 0,0 0,7 Z', class: 'halfdot' }) : null)); return s; };
-  const items = [
-    has(n => n.status === 'supported') ? [dot('st-supported'), 'Supported'] : null, has(n => n.status === 'partial') ? [dot('st-partial'), 'Partly'] : null,
-    has(n => n.status === 'unsupported') ? [dot('st-unsupported'), 'Not supported'] : null, has(n => n.recheck) ? [h('span', { class: 'lg-ring' }, '↻'), 'Recheck'] : null,
+  const dot = cls => { const s = sv('svg', { viewBox: '-10 -10 20 20', width: 14, height: 14, class: 'rx-tree mini' }); s.append(sv('g', { class: 'n n-claim ' + cls }, sv('circle', { r: 7, class: 'dot' }), sv('path', { d: 'M0,-7 A7,7 0 0,0 0,7 Z', class: 'halfdot' }))); return s; };
+  const items = RX_STAGES.map(k => has(n => n.layer === 'claim' && n.stage === k) ? [dot(rxSt(k).trim()), RX_STAGE[k][1]] : null).concat([
+    has(n => n.recheck) ? [h('span', { class: 'lg-ring' }, '↻'), 'Recheck'] : null,
     has(n => n.formal) ? [h('span', { class: 'lg-g' }, '□'), 'Theorem / lemma'] : null, hasE(e => e.how === 'suggested') ? [h('span', { class: 'lg-g' }, '┄'), 'Suggested'] : null,
     has(n => n.kind === 'missing') ? [h('span', { class: 'lg-g' }, '?'), 'Missing'] : null, has(n => n.state === 'proposed' && n.layer === 'claim') ? [h('span', { class: 'lg-g' }, '✎'), 'Draft'] : null,
-  ].filter(Boolean);
+  ]).filter(Boolean);
   const kinds = [...new Set(T.nodes.filter(n => n.layer === 'root' && n.kind !== 'missing').map(n => n.kind))];
   return h('div', { class: 'rx-legend' }, items.map(([g, l]) => h('span', null, g, ' ' + l)), kinds.map(k => h('span', null, h('span', { class: 'lg-g' }, RX_GLYPH[k] || '•'), ' ' + (RX_KINDWORD[k] || k))));
 }
@@ -398,7 +433,7 @@ function pageTimeline() {
   }
   const host = root; const stepsBox = h('details', { class: 'details' }, h('summary', null, 'Steps (' + tl.steps.length + ')'));
   root.append(stepsBox);
-  const label = id => { const c = RX.claims && (RX.claims.claims.find(x => x.id === id) || (RX.claims.core && RX.claims.core.id === id && RX.claims.core)); return c ? c.label : id; };
+  const label = id => { const c = RX.claims && (RX.claims.claims.find(x => x.id === id) || (RX.claims.core && RX.claims.core.id === id && RX.claims.core)); return c ? (c.short || c.label) : id; };
   const steps = tl.steps.filter(s => F === 'all' || (F === 'decisions' ? s.decision : F === 'claims' ? s.affects.length : s.role === F)).slice().reverse();
   stepsBox.open = !!RX.stepsOpen; stepsBox.addEventListener('toggle', () => { RX.stepsOpen = stepsBox.open; });
   stepsBox.append(h('div', { class: 'fchips' }, [['all', 'All', tl.steps.length], ['decisions', 'Decisions', tl.decisions], ['claims', 'Touching a claim', tl.steps.filter(s => s.affects.length).length], ['code', 'Code', null], ['paper', 'Paper', null]]
@@ -509,6 +544,11 @@ function rxExpDetail(id) {
     const sm = x.summary, gh = u => u ? h('a', { class: 'ghl', href: u, target: '_blank', rel: 'noopener noreferrer' }, '↗') : null;
     const blk = (title, ...kids) => h('section', { class: 'rx-x-b' }, h('h4', null, title), kids);
     const out = [];
+    // why this experiment exists: the claim it was run to test
+    const why = x.why || x.questions || [], cl = id => RX.claims && RX.claims.claims.find(c => c.id === id);
+    if (x.map || why.length) out.push(h('div', { class: 'rx-x-why' }, h('span', { class: 'rx-why-h' }, 'Why'), why.length ? why.map(q => { const c = cl(q.id);
+      return h('button', { class: 'rx-why-r', title: 'Open this claim', onclick: () => { RX.sel = q.id; RX.view = 'tree'; openTab('claims'); } }, h('b', null, c ? c.short : q.label), c ? rxStageChip(c) : null, h('span', { class: 'serif' }, rxMath(trunc(q.text, 140)))); })
+      : h('span', { class: 'rx-why none' }, 'This experiment tests no claim yet. Add the claim it is for to the project map, or it has no reason to be in the paper.')));
     if (x.caveats.length) out.push(h('div', { class: 'rx-x-cav' }, x.caveats.map(c => plainChip(c.k === 'stale' ? '↻' : '!', c.t, 'look'))));
     // result
     if (sm && x.table) {
@@ -536,7 +576,7 @@ function rxExpDetail(id) {
       sm && sm.baselines.length ? [h('dt', null, 'Compared with'), h('dd', null, sm.baselines.map(b => h('span', { class: 'rx-code' }, b)))] : null,
       sm && sm.cols.length ? [h('dt', null, sm.datasets && sm.datasets.length ? 'Datasets' : 'Columns'), h('dd', null, (sm.datasets && sm.datasets.length ? sm.datasets : sm.cols).map(b => h('span', { class: 'rx-code' }, b)))] : null,
       d.values.length ? [h('dt', null, 'Settings'), h('dd', null, d.values.slice(0, 14).map(v => h('span', { class: 'rx-code mono', title: v.file }, v.key.split('.').pop() + ' = ' + v.value)))] : null,
-      x.questions && x.questions.length ? [h('dt', null, 'Tests'), h('dd', null, x.questions.map(q => h('button', { class: 'chip-btn', title: q.text, onclick: () => { RX.sel = q.id; RX.view = 'tree'; openTab('claims'); } }, '◆ ' + q.label)))] : null)));
+      x.questions && x.questions.length ? [h('dt', null, 'Tests'), h('dd', null, x.questions.map(q => h('button', { class: 'chip-btn', title: q.text, onclick: () => { RX.sel = q.id; RX.view = 'tree'; openTab('claims'); } }, '◆ ' + ((cl(q.id) || {}).short || q.label))))] : null)));
     // history
     if (x.history && x.history.length) {
       const hs = x.history, chart = hs.length > 1 ? rxHistoryChart(hs, sm) : null;
@@ -617,7 +657,8 @@ function rxUnmapped(U) {
 }
 /* The map: ours on the left, the questions it must answer, and the experiments behind each. Click a question for its
    progress, an experiment for its detail. Positions are computed, never dragged. */
-function rxExpState(x, X) {
+function rxExpState(x, X) { return rxExpState0(x, X); }
+function rxExpState0(x, X) {
   const sm = x.summary; if (x.tuning || !sm) return { k: 'none', g: null };
   const g = X ? (sm.base ? sm.base.gap : null) : sm.gap;
   return { k: g == null ? 'none' : g > 0 ? 'ahead' : g < 0 ? 'behind' : 'tie', g };
@@ -625,8 +666,10 @@ function rxExpState(x, X) {
 const RX_XSTATE = { ahead: ['▲', 'Ahead'], behind: ['▼', 'Behind'], tie: ['=', 'Level'], none: ['·', 'No comparison'] };
 function rxExpMap(E, renderSec) {
   const X = E.extends, secs = E.sections, vs = X ? X.base.name : 'the best other method';
-  const exps = [], seen = new Map();
-  secs.forEach(s => s.experiments.forEach(x => { if (!seen.has(x.id)) { seen.set(x.id, x); exps.push(x); } }));
+  const exps = [], seen = new Map(), own = new Set();
+  secs.forEach(s => s.experiments.forEach(x => { if (!seen.has(x.id)) { seen.set(x.id, x); exps.push(x); } if (s.scope !== 'base') own.add(x.id); }));
+  // an experiment that only re-checks the original paper's claim compares that paper's method with the others, as the paper did
+  const rxExpState = (x, X_) => rxExpState0(x, X_ && own.has(x.id) ? X_ : null);
   const RH = 44, QH = 108, GAP = 14, CX = [0, 225, 555], CW = [195, 290, 245], W = CX[2] + CW[2];
   const ey = new Map(exps.map((x, i) => [x.id, i * RH]));
   const qy = new Map(); let bottom = 0, sc0;
@@ -652,11 +695,11 @@ function rxExpMap(E, renderSec) {
     h('span', { class: 'rx-m-sub' }, cmp ? 'Ahead of ' + trunc(vs, 18) + ' in ' + all.ahead + ' of ' + cmp : 'Nothing to compare yet'), all.check ? h('span', { class: 'rx-m-chk' }, '! ' + all.check + ' to check') : null));
   let lastScope;
   secs.forEach(s => {
-    const y = qy.get(s.id), t = tally(s.experiments), c = t.ahead + t.behind + t.tie, st = RX_STATUS[s.status];
+    const y = qy.get(s.id), t = tally(s.experiments), c = t.ahead + t.behind + t.tie, st = s.stage ? RX_STAGE[s.stage] : RX_STATUS[s.status];
     svg.append(sv('path', { d: curve(CW[0], rootY + 70, CX[1], y + QH / 2), class: 'me' + dim(litQ, s.id) }));
-    if (X && s.scope !== lastScope && s.kind !== 'other') { box.append(h('span', { class: 'rx-m-scope', style: 'left:' + CX[1] + 'px;top:' + (y - 24) + 'px' }, s.scope === 'extension' ? 'Extension' : s.scope === 'base' ? 'Original paper' : '')); lastScope = s.scope; }
-    box.append(h('button', { class: 'rx-m-q st-' + s.status + (selQ === s.id ? ' sel' : '') + dim(litQ, s.id), style: 'left:' + CX[1] + 'px;top:' + y + 'px;width:' + CW[1] + 'px;height:' + QH + 'px', 'aria-pressed': String(selQ === s.id), onclick: () => pick('q:' + s.id) },
-      h('span', { class: 'rx-m-qh' }, h('b', null, s.label), s.source === 'notes' ? h('span', { class: 'tag', title: 'From your notes, not stated in the paper' }, 'notes') : null, h('span', { class: 'grow' }), h('span', { class: 'sg ' + st[2], title: s.experiments.length ? (s.status === 'supported' ? 'Tested, nothing to check' : 'Something to check') : 'Not tested' }, st[0])),
+    if (X && s.scope !== lastScope && s.kind !== 'other') { box.append(h('span', { class: 'rx-m-scope', style: 'left:' + CX[1] + 'px;top:' + (y - 24) + 'px' }, s.scope === 'extension' ? 'New claims' : s.scope === 'base' ? 'Original paper, re-checked' : '')); lastScope = s.scope; }
+    box.append(h('button', { class: 'rx-m-q' + (s.stage ? rxSt(s.stage) : ' st-' + s.status) + (selQ === s.id ? ' sel' : '') + dim(litQ, s.id), style: 'left:' + CX[1] + 'px;top:' + y + 'px;width:' + CW[1] + 'px;height:' + QH + 'px', 'aria-pressed': String(selQ === s.id), onclick: () => pick('q:' + s.id) },
+      h('span', { class: 'rx-m-qh' }, h('b', null, s.short || s.label), s.stage ? h('span', { class: 'rx-m-stage ' + st[2], title: s.stage_why || '' }, st[0] + ' ' + st[1]) : null, h('span', { class: 'grow' }), s.stage ? null : h('span', { class: 'sg ' + st[2] }, st[0])),
       h('span', { class: 'rx-m-qt serif' }, rxMath(trunc(s.text, 96))),
       s.experiments.length ? h('span', { class: 'rx-m-qf' }, meter(s.experiments), h('span', { class: 'rx-m-sub' }, c ? t.ahead + ' of ' + c + ' ahead' : plural(s.experiments.length, 'experiment'))) : h('span', { class: 'rx-m-qf' }, h('span', { class: 'rx-m-chk bad' }, 'Not tested yet'))));
     s.experiments.forEach(x => { const es = rxExpState(x, X); svg.append(sv('path', { d: curve(CX[1] + CW[1], y + QH / 2, CX[2], ey.get(x.id) + RH / 2), class: 'me x-' + es.k + (sel && !(litQ.has(s.id) && litX.has(x.id)) ? ' dim' : '') })); });
@@ -670,7 +713,7 @@ function rxExpMap(E, renderSec) {
     h('div', { class: 'rx-legend' }, Object.keys(RX_XSTATE).map(k => h('span', null, h('span', { class: 'rx-m-g x-' + k }, RX_XSTATE[k][0]), ' ' + RX_XSTATE[k][1] + (k === 'ahead' || k === 'behind' ? ' ' + (k === 'ahead' ? 'of ' : '') + trunc(vs, 22) : ''))), h('span', null, '! to check'))];
   if (selQ) { const s = secs.find(q => q.id === selQ); if (s) out.push(renderSec(s)); }
   else if (selX && seen.has(selX)) { const x = seen.get(selX); out.push(h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-x-h' }, h('b', null, x.name), x.caption ? h('span', { class: 'muted' }, trunc(x.caption, 110)) : null), h('div', { class: 'rx-m-detail' }, rxExpDetail(x.id)))); }
-  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a question or an experiment.'));
+  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a claim to see the experiments run for it, or an experiment to see why it was run.'));
   return out;
 }
 function pageExperiments() {
@@ -685,16 +728,16 @@ function pageExperiments() {
   const X = E.extends;
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
     X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal')));
-  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' questions'), h('span', null, h('b', null, c.experiments), ' experiments'), 
+  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.questions), ' claims'), h('span', null, h('b', null, c.experiments), ' experiments'), c.no_claim ? h('span', { class: 'warn', title: 'Experiments that test no claim' }, h('b', null, c.no_claim), ' without a claim') : null, 
     c.untested ? h('span', { class: 'bad' }, h('b', null, c.untested), ' not tested') : null, c.attention ? h('span', { class: 'warn' }, h('b', null, c.attention), ' to check') : null));
   const head = () => h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, X ? 'Ours vs ' + trunc(X.base.name, 12) : 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
   const WORD = { supported: 'Tested, nothing to check', partial: 'Something to check', unsupported: 'Not tested' };
   const renderSec = s => {
     const st = RX_STATUS[s.status], cid = mapped ? s.claim_id : s.id;
-    const sec = h('section', { class: 'rx-x-sec st-' + s.status },
-      h('div', { class: 'rx-x-h' }, h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
-        cid ? h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } }, s.kind === 'question' || mapped ? s.label : 'H · ' + s.label) : h('span', { class: 'rx-x-q static' }, s.label),
-        s.source === 'notes' ? h('span', { class: 'tag warn', title: 'Taken from your notes, not stated in the paper' }, 'notes') : null,
+    const sec = h('section', { class: 'rx-x-sec' + (s.stage ? rxSt(s.stage) : ' st-' + s.status) },
+      h('div', { class: 'rx-x-h' }, s.stage ? null : h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
+        cid ? h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } }, s.short || s.label) : h('span', { class: 'rx-x-q static' }, s.label),
+        s.stage ? rxStageChip(s) : null,
         h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
     else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),
@@ -705,7 +748,7 @@ function pageExperiments() {
   else {
     let lastScope;
     for (const s of E.sections) {
-      if (X && s.scope !== lastScope && s.kind !== 'other') { root.append(h('h2', { class: 'rx-ext-h' }, s.scope === 'extension' ? 'The extension' : s.scope === 'base' ? 'The original paper’s claims, re-checked' : 'Other questions')); lastScope = s.scope; }
+      if (X && s.scope !== lastScope && s.kind !== 'other') { root.append(h('h2', { class: 'rx-ext-h' }, s.scope === 'extension' ? 'New claims' : s.scope === 'base' ? 'The original paper’s claims, re-checked' : 'Other questions')); lastScope = s.scope; }
       root.append(renderSec(s));
     }
   }
@@ -996,7 +1039,7 @@ function rxNavRows() {
   const act = k => { const t = S.tabs[S.active]; return !!t && t.k === k; };
   return [
     navRow('Review', '◎', () => openTab('review'), null, act('review')),
-    navRow('Claims', '◆', () => openTab('claims'), cc ? (cc.unsupported + cc.partial) || null : null, act('claims')),
+    navRow('Claims', '◆', () => openTab('claims'), cc && cc.stages ? (cc.stages.testing + cc.stages.refuted) || null : null, act('claims')),
     navRow('Notation', '𝑥', () => openTab('notation'), RX.notation && RX.notation.counts ? RX.notation.issues.length || null : null, act('notation')),
     navRow('Timeline', '⚑', () => openTab('timeline'), null, act('timeline')),
     navRow('Experiments', '▦', () => openTab('experiments'), RX.experiments ? (RX.experiments.counts.attention + RX.experiments.counts.untested) || null : (lc ? lc.stale || null : null), act('experiments')),

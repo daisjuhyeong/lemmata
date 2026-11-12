@@ -451,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
                 return v
             with self.app.lock:
                 if r == "/claims":
-                    return self._json(need("set_claim")(txt("id", True), txt("state"), txt("text"), txt("note")))
+                    return self._json(need("set_claim")(txt("id", True), txt("state"), txt("text"), txt("note"), txt("stage")))
                 if r == "/claims/link":
                     return self._json(need("link_claim")(txt("id", True), txt("target", True), body.get("on", True) is not False))
                 if r == "/claims/add":

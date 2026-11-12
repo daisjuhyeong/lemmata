@@ -140,7 +140,11 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
         x = {"id": xid, "name": spec["name"], "kind": "group", "type": spec["type"], "caption": spec.get("note") or "", "map": True,
              "loc": G.nodes[tnode].get("loc") if tnode else None, "repo": repo, "result": None, "connected": bool(hit), "image": False,
              "summary": None, "tally": None, "problems": [], "caveats": [], "stale": None, "history_n": 0, "spark": [], "files_n": len(hit),
-             "paper": [{"node_id": p, "name": G.nodes[p]["name"], "kind": G.nodes[p]["kind"]} for p in papers], "tests": spec["tests"]}
+             "paper": [{"node_id": p, "name": G.nodes[p]["name"], "kind": G.nodes[p]["kind"]} for p in papers], "tests": spec["tests"],
+             # why this experiment exists: the claims it was run to test
+             "why": [{"id": qs[t].get("claim_id") or qs[t]["id"], "label": qs[t]["label"], "text": qs[t]["text"]} for t in spec["tests"] if t in qs]}
+        if not x["why"]:
+            x["caveats"].append({"k": "why", "t": "Tests no claim"})
         stale = [led[n] for _, _, n, _ in hit if n in led and led[n]["status"] == "stale"]
         if stale:
             x["stale"] = {"file": stale[0]["name"] + (" and %d more" % (len(stale) - 1) if len(stale) > 1 else ""), "newer": stale[0]["newer"][:3]}
@@ -187,9 +191,9 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                     last[(ev.get("time") or "")[:10]] = ev
                 return list(last.values())[-MAX_DAYS:]
             hist = history(events, infos, G.nodes, repo, None, ours, col, lower, is_result=lambda p: any(r.match(p) for r, _ in rx),
-                           table_at=table_at, versions=per_day) if not tuning else []
+                           table_at=table_at, versions=per_day, ref=((s or {}).get("base") or {}).get("label")) if not tuning else []
             x["history_n"] = len(hist)
-            x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
+            x["spark"] = [{"o": h["ours"], "b": h["best"], "s": h["ref"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
             if not tuning:
                 if s and s["n"] <= 1 and s.get("std") is None:
                     x["caveats"].append({"k": "seeds", "t": "One run, no spread"})
@@ -264,13 +268,13 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
         sections.sort(key=lambda s_: {"extension": 0, None: 1, "base": 2}.get(s_.get("scope"), 1))
     rest = sorted((built[x["id"]] for x in m["experiments"] if not x["tests"]), key=key)
     if rest:
-        sections.append({"id": "other", "claim_id": None, "kind": "other", "label": "Other", "text": "Experiments the map ties to no question", "status": "partial",
+        sections.append({"id": "other", "claim_id": None, "kind": "other", "label": "No claim yet", "text": "Experiments that test no claim. What were they for?", "status": "partial",
                          "state": "confirmed", "recheck": False, "experiments": rest, "suggested": [], "evidence": []})
     cov = und.coverage(m, G, trees)
     allx = list(built.values())
     return {"schema": SCHEMA, "sections": sections, "unassigned": [], "unmapped": cov,
             "extends": {"base": base, "goal": m.get("goal")} if base else None,
             "map": {"state": state or "confirmed", "method": method, "questions": len(m["questions"]), "experiments": len(m["experiments"])},
-            "counts": {"questions": len(m["questions"]), "untested": sum(1 for s in sections if s["kind"] != "other" and s["status"] == "unsupported"),
+            "counts": {"questions": len(m["questions"]), "no_claim": len(rest), "untested": sum(1 for s in sections if s["kind"] != "other" and s["status"] == "unsupported"),
                        "experiments": len(allx), "attention": sum(1 for x in allx if x["attention"]), "versions": sum(x["history_n"] for x in allx),
                        "files": cov["matched"], "unmapped": cov["n_files"]}}
