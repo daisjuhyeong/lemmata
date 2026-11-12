@@ -9,7 +9,7 @@ last_reviewed: 2026-11-02
 - [Vision](vision/vision.md)
 - [Decisions (ADRs)](decisions/README.md) — [ADR template](decisions/ADR-000-template.md) · [ADR-002: Localhost demo](decisions/ADR-002-localhost-demo.md) — proposed · [ADR-003: macOS desktop app](decisions/ADR-003-macos-desktop-app.md) — proposed · [ADR-004: Hub on the Mac mini over Tailscale](decisions/ADR-004-hub-on-mac-mini.md) — proposed · [ADR-005: No Overleaf, paper on GitHub](decisions/ADR-005-no-overleaf-paper-on-github.md) — proposed · [ADR-006: Public multi-user site](decisions/ADR-006-public-multi-user-site.md) — proposed · [ADR-007: Project map, two phases](decisions/ADR-007-project-map-two-phases.md) — proposed
 - [Architecture](architecture/README.md) — [Demo architecture (S02)](architecture/demo-architecture.md) · [Data model and API contract](architecture/data-model.md) — proposed · [Desktop architecture (S03)](architecture/desktop-architecture.md) — proposed · [Threat model: hub mode](architecture/threat-model.md) — proposed · [Architecture overview (after S06)](architecture/overview.md) — proposed
-- [Design](design/README.md) — [Design system tokens](design/DESIGN.md) · [Demo screen specs](design/screens/demo-screens.md) · [Desktop launcher (S03)](design/screens/desktop-launcher.md) · [S06 Obsidian-style redesign](design/screens/s06-obsidian-redesign.md)
+- [Design](design/README.md) — [Design system tokens](design/DESIGN.md) · [Demo screen specs](design/screens/demo-screens.md) · [Desktop launcher (S03)](design/screens/desktop-launcher.md) · [S06 Obsidian-style redesign](design/screens/s06-obsidian-redesign.md) · [S18 DAIS-aligned UI spec](design/screens/S18-dais-ui.md) (replaces the earlier UI direction)
 - [Agents and handoff protocol](agents/handoff-protocol.md)
 - [Sprints](sprints/README.md) — [task card template](sprints/task-card-template.md)
   - S02 localhost demo: [S02-01 pipeline-eng](sprints/S02/S02-01-pipeline-eng.md) · [S02-02 web-eng](sprints/S02/S02-02-web-eng.md) · [S02-03 qa](sprints/S02/S02-03-qa.md) · [S02-04 lead](sprints/S02/S02-04-lead.md) · handoffs: [pipeline-eng](sprints/S02/handoff-pipeline-eng.md), [web-eng](sprints/S02/handoff-web-eng.md) · [QA report](sprints/S02/qa-S02-localhost-demo.md) · [lead handoff](sprints/S02/handoff-lead.md)
@@ -28,6 +28,7 @@ last_reviewed: 2026-11-02
   - S15 Run capture in VS Code and the coding agent: [brief](sprints/S15/S15-brief.md) · guide: `docs/RUN-CAPTURE.md`
   - S16 Lemmata pages in a VS Code tab: [brief](sprints/S16/S16-brief.md)
   - S17 claim stages and the reason for each experiment: [brief](sprints/S17/S17-brief.md)
+  - S18 DAIS-aligned UI, compact VS Code design: [task card S18-01](sprints/S18/S18-01-lead.md) · spec: [S18 UI style spec](design/screens/S18-dais-ui.md) — open, assigned to CTO
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)
