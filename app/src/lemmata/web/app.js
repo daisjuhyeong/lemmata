@@ -381,7 +381,8 @@ function typeOfItem(it) {
   return it.kind === 'thesis' ? 'thesis' : it.kind === 'rq' ? 'question' : it.kind === 'section' ? 'section' : it.kind === 'reference' ? 'reference' : 'paper';
 }
 const TCOL = {};
-function tcol(t) { let c = TCOL[t]; if (!c) { const v = TYPES[t].v; c = TCOL[t] = { s: css('--layer-' + v), t: css('--layer-' + v + '-t'), dash: !!TYPES[t].dash }; } return c; }
+const TYPE_TOKEN = { thesis: '--accent-dark', question: '--accent-vivid', section: '--accent', paper: '--accent-vivid', result: '--accent-dark', code: '--accent-light', run: '--accent-light', reference: '--muted' };
+function tcol(t) { let c = TCOL[t]; if (!c) { const v = TYPES[t].v; c = TCOL[t] = { s: css(TYPE_TOKEN[v] || '--accent-vivid'), t: css('--accent-pale'), dash: !!TYPES[t].dash }; } return c; }
 const tdot = t => h('span', { class: 'tdot t-' + t, 'aria-hidden': 'true' });
 const FILE_WORD = { asset: 'A figure file', result: 'A result file', run: 'A run', code: 'A script', config: 'A settings file', data: 'A data file', doc: 'A document' };
 const EV_GROUPS = [['Results and figures', ['result', 'asset']], ['Scripts', ['code']], ['Runs', ['run']], ['Settings', ['config']], ['Data', ['data', 'doc']]];
@@ -852,7 +853,8 @@ function makeGraph(host, o) {
   const pos = o.pos || new Map();
   let hover = null, sel = null, kfocus = null, alpha = 0, raf = 0, needFit = true, labelTop = new Set(), fadeSel = false, emphNid = null, animUntil = 0;
   let C = {};
-  const readColours = () => { C = {}; for (const k of ['ink', 'paper', 'surface', 'border', 'border-strong', 'muted', 'verify', 'amber', 'amber-text', 'red', 'up', 'down-stroke', 'sunken', 'amber-bg', 'red-bg', 'verify-bg']) C[k] = css('--' + k); C.font = css('--font-sans'); C.mono = css('--font-mono'); };
+  const COLMAP = { ink: '--text', paper: '--bg', surface: '--bg', border: '--border', 'border-strong': '--border-strong', muted: '--muted', verify: '--success', amber: '--warning', 'amber-text': '--text-secondary', red: '--error', up: '--accent-dark', 'down-stroke': '--accent-vivid', sunken: '--surface', 'amber-bg': '--surface', 'red-bg': '--surface', 'verify-bg': '--surface' };
+  const readColours = () => { C = {}; for (const k in COLMAP) C[k] = css(COLMAP[k]); C.font = css('--font-sans'); C.mono = css('--font-mono'); };
   readColours();
   const widths = new Map();
   function tw(text, font) { const k = font + '|' + text; let w = widths.get(k); if (w == null) { ctx.font = font; w = ctx.measureText(text).width; widths.set(k, w); } return w; }
@@ -1631,7 +1633,9 @@ function pageChecks() {
 }
 
 /* ---------- History ---------- */
-function pageHistory() {
+function weekStart(t) { const d = new Date(t.slice(0, 10) + 'T00:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); const p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+function pageHistory(opts) {
+  opts = opts || {};
   S.outline = [];
   const root = doc(h('h1', { class: 'ptitle' }, 'History'));
   const evs = ((S.events && S.events.events) || []).slice();
@@ -1648,8 +1652,8 @@ function pageHistory() {
   for (const r of all) {
     const iso = r.ev ? r.ev.time : r.mark ? r.mark.created_at : r.rule.created_at;
     if (r.rule) { root.append(h('div', { class: 'cprule' }, h('span', null, 'Last looked at: ' + absTime(cp.created_at)))); continue; }
-    const day = dayHeader(iso);
-    if (day !== lastDay) { root.append(h('div', { class: 'dayhead' }, day === 'Today' || day === 'Yesterday' ? day : dmon(iso) + (dayDiff(iso) > 300 ? ' ' + iso.slice(0, 4) : ''))); lastDay = day; }
+    const day = opts.weekly ? 'Week of ' + dmon(weekStart(iso)) : dayHeader(iso);
+    if (day !== lastDay) { root.append(h('div', { class: 'dayhead' }, opts.weekly ? day : day === 'Today' || day === 'Yesterday' ? day : dmon(iso) + (dayDiff(iso) > 300 ? ' ' + iso.slice(0, 4) : ''))); lastDay = day; }
     if (r.mark) root.append(h('div', { class: 'evline' }, h('span', { class: 'eg', 'aria-hidden': 'true' }, '⚑'), h('div', { class: 'evtx' }, 'You marked everything as looked at', r.mark.note ? h('span', { class: 'muted' }, ' · “' + r.mark.note + '”') : null, h('span', { class: 'muted' }, ' · ' + absTime(r.mark.created_at)))));
     else root.append(h('div', { class: 'hrow' }, eventLine(r.ev, { subject: true, clock: true }), h('span', { class: 'muted rw' }, repoWord(r.ev.repo)), cpT != null ? h('span', { class: 'tag' }, r.t > cpT ? 'Since then' : 'Before') : null));
   }
@@ -1697,7 +1701,7 @@ function graphSpec(opts) {
         const sorted = owned.map((id, i) => [id, rank(id), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
         owned = sorted.slice(0, MAXSAT).map(x => x[0]); more = sorted.length - MAXSAT;
       }
-      if (more) { const mid = 'sat:more@' + it.id; nodes.push({ id: mid, sat: true, more: true, parent: it.id, r: 11, kind: 'file', type: 'code', status: 'ok', imp: 0, label: '+' + more + ' more', title: more + ' more files behind this item', nid: null, tint: css('--sunken'), col: css('--border-strong'), glyph: '…' }); edges.push({ a: it.id, b: mid, sat: true }); }
+      if (more) { const mid = 'sat:more@' + it.id; nodes.push({ id: mid, sat: true, more: true, parent: it.id, r: 11, kind: 'file', type: 'code', status: 'ok', imp: 0, label: '+' + more + ' more', title: more + ' more files behind this item', nid: null, tint: css('--surface'), col: css('--border-strong'), glyph: '…' }); edges.push({ a: it.id, b: mid, sat: true }); }
       for (const nid of owned) { const n = IX.node.get(nid); if (!n || (!open && !cats[n.kind])) continue; const sat = addSat(nid, it.id); if (open) made.set(nid, sat.id); }
     }
     if (evItem) for (const t of S.ev.trail || []) {   // a satellite is open too: show what it rests on
@@ -1709,7 +1713,7 @@ function graphSpec(opts) {
       }
     }
     if (gf.unused && !allowed) {
-      for (const n of M.unused.slice(0, 60)) nodes.push({ id: 'sat:u:' + n.id, sat: true, parent: null, r: 8, kind: 'file', type: typeOfFile(n.kind), status: 'ok', imp: 0, label: basename(pathOf(n)), title: pathOf(n), nid: n.id, tint: css('--sunken'), col: css('--border-strong'), glyph: '' });
+      for (const n of M.unused.slice(0, 60)) nodes.push({ id: 'sat:u:' + n.id, sat: true, parent: null, r: 8, kind: 'file', type: typeOfFile(n.kind), status: 'ok', imp: 0, label: basename(pathOf(n)), title: pathOf(n), nid: n.id, tint: css('--surface'), col: css('--border-strong'), glyph: '' });
     }
   }
   return { nodes, edges };
@@ -1945,11 +1949,10 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'review', 'claims', 'timeline', 'experiments', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
-  if (!S.tabs.length) { S.tabs = [{ k: 'claims' }, { k: 'changes' }, { k: 'graph' }]; S.active = 0; }
+  if (!S.tabs.length) { S.tabs = [{ k: 'claims' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
-  if (innerWidth < 1280 && !u) S.rightOpen = false;
 }
 function pruneTabs() {
   const keep = S.tabs.filter(t => (t.k === 'item' ? M.byId.has(t.id) : t.k === 'node' ? IX.node.has(t.id) : true));
@@ -1959,14 +1962,14 @@ const tabKey = t => t.k + (t.id ? '|' + t.id : '');
 function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
-    case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History';
+    case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
     case 'review': case 'claims': case 'timeline': case 'experiments': case 'tasks': case 'ask': case 'notation': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
   return '';
 }
-const TAB_GLYPH = { changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', review: '◎', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?', notation: '𝑥' };
+const TAB_GLYPH = { digest: '',  changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', review: '◎', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?', notation: '𝑥' };
 function openTab(k, id, opts) {
   opts = opts || {};
   const key = tabKey({ k, id });
@@ -1994,7 +1997,7 @@ function activate(i, noNav) {
   S.active = i; const t = S.tabs[i]; t.used = Date.now();
   if (t.k === 'item') S.sel = t.id;
   if (!noNav) { S.nav = S.nav.slice(0, S.navPos + 1); S.nav.push(tabKey(t)); S.navPos = S.nav.length - 1; }
-  persistUI(); const pgel = $('#page'); if (pgel && !noNav) pgel.scrollTop = 0; renderAll();
+  persistUI(); if (!noNav) window.scrollTo(0, 0); renderAll();
 }
 function closeTab(i) {
   S.tabs.splice(i, 1);
@@ -2008,202 +2011,64 @@ function navGo(d) {
   if (i >= 0) activate(i, true); else { const [k, id] = key.split('|'); S.tabs.push({ k, id }); activate(S.tabs.length - 1, true); }
 }
 
-/* ---------- shell DOM ---------- */
+/* ---------- shell DOM (S18): band, one column, footer ---------- */
+/* The four top-level pages. Every other page belongs to one of them (shown as active) and is reached from a link on that page or from the footer. */
+const NAV = [['claims', 'Claims'], ['experiments', 'Experiments'], ['digest', 'Digest'], ['review', 'Review']];
+const NAV_OF = { claims: 'claims', timeline: 'claims', notation: 'claims', graph: 'claims', item: 'claims', node: 'claims', experiments: 'experiments', digest: 'digest', tasks: 'digest', history: 'digest', ask: 'digest', review: 'review', changes: 'review', checks: 'review' };
+const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
-  const rb = (id, glyph, label, fn, cls) => h('button', { class: 'rbtn ' + (cls || ''), id, 'aria-label': label, title: label, onclick: fn }, glyph);
   app.append(
-    h('nav', { id: 'ribbon', 'aria-label': 'Main' },
-      rb('rb-claims', '◆', 'Claims', () => openTab('claims')), rb('rb-changes', '◔', 'Changes', () => openTab('changes')), rb('rb-ask', '?', 'Ask', () => openTab('ask')), rb('rb-search', '⌕', 'Search (Ctrl+O)', () => quickSwitcher()), rb('rb-graph', '◉', 'Graph', () => openTab('graph')), rb('rb-cmd', '⌘', 'Command palette (Ctrl+P)', () => palette()),
-      h('span', { class: 'grow' }),
-      rb('rb-sync', '⟳', 'Sync now', () => syncNow()), rb('rb-help', 'ⓘ', 'How Lemmata works', () => intro(true)), rb('rb-menu', '⋯', 'Project menu', ev => projectMenu(ev.currentTarget))),
-    h('aside', { id: 'left', 'aria-label': 'Explorer' },
-      h('div', { class: 'lsearch' }, h('input', { type: 'search', id: 'lsearch', placeholder: 'Search items, files and checks', 'aria-label': 'Search items, files and checks', oninput: ev => { S.query = ev.target.value; renderLeft(); } })),
-      h('div', { id: 'lefttree' })),
-    h('div', { class: 'resizer', id: 'lres', role: 'separator', 'aria-label': 'Resize explorer', onmousedown: ev => startResize(ev, 'left') }),
-    h('main', { id: 'centre' }, h('div', { id: 'banner', class: 'hidden', role: 'alert' }), h('div', { id: 'tabbar', role: 'tablist' }), h('div', { id: 'page', tabindex: '-1' })),
-    h('div', { class: 'resizer', id: 'rres', role: 'separator', 'aria-label': 'Resize side panel', onmousedown: ev => startResize(ev, 'right') }),
-    h('aside', { id: 'right', 'aria-label': 'Links for the open item' }),
+    h('header', { id: 'band' }, h('h1', { class: 'bt' }, PRODUCT), h('p', { class: 'bsub', id: 'bsub' }, ''), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
+    h('div', { id: 'banner', class: 'hidden', role: 'alert' }),
+    h('main', { id: 'page', tabindex: '-1' }),
     h('footer', { id: 'status' }),
     h('div', { id: 'extras' }));
-  layoutShell();
 }
 function renderShellExtras() {
   const ex = clear($('#extras'));
   const hc = hubControls();
   if (HUB_ON && !READONLY && hc.zipInput) ex.append(h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }));
 }
-function layoutShell() {
-  const app = $('#app');
-  app.style.setProperty('--lw', S.leftOpen ? S.leftW + 'px' : '0px'); app.style.setProperty('--rw', S.rightOpen ? S.rightW + 'px' : '0px');
-  app.classList.toggle('noleft', !S.leftOpen); app.classList.toggle('noright', !S.rightOpen);
-}
-function toggleSide(which) { if (which === 'left') S.leftOpen = !S.leftOpen; else S.rightOpen = !S.rightOpen; layoutShell(); persistUI(); setTimeout(() => GR.g && GR.g.resize(), 160); }
-function startResize(ev, which) {
-  ev.preventDefault(); const x0 = ev.clientX, w0 = which === 'left' ? S.leftW : S.rightW;
-  const mv = e => { const d = e.clientX - x0; if (which === 'left') S.leftW = Math.max(220, Math.min(380, w0 + d)); else S.rightW = Math.max(260, Math.min(420, w0 - d)); layoutShell(); };
-  const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); persistUI(); if (GR.g) GR.g.resize(); };
-  window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
-}
+function layoutShell() { }
+function toggleSide() { }
 function projectMenu(anchor) {
   const hc = hubControls();
   const es = [{ head: S.project ? S.project.name : PRODUCT }];
   if (!READONLY) es.push({ label: 'Export report (HTML)', hint: 'A single file you can share', href: apiUrl('/api/export'), download: true });
   es.push({ label: 'Sync now', fn: () => syncNow(), disabled: READONLY });
   if (hc.menu.length) { es.push({ sep: true }); hc.menu.forEach(m => es.push(m)); }
-  es.push({ sep: true }, { label: 'Show "How Lemmata works"', fn: () => intro(true) }, { label: S.leftOpen ? 'Hide explorer' : 'Show explorer', fn: () => toggleSide('left') }, { label: S.rightOpen ? 'Hide side panel' : 'Show side panel', fn: () => toggleSide('right') });
-  menuPop(anchor, es, { up: true, side: true });
+  es.push({ sep: true }, { label: 'Show "How Lemmata works"', fn: () => intro(true) });
+  menuPop(anchor, es, { up: true });
 }
 
 /* ---------- left sidebar ---------- */
 const sgl = st => h('span', { class: 'sg ' + st, 'aria-hidden': 'true' }, ST[st].glyph);
-function treeRow(depth, o) {
-  const row = h('div', { class: 'trow' + (o.active ? ' active' : '') + (o.cls ? ' ' + o.cls : ''), style: { paddingLeft: (8 + depth * 14) + 'px' }, role: 'treeitem', 'aria-expanded': o.open == null ? null : String(o.open), title: o.tooltip || null },
-    o.caret ? h('button', { class: 'caret', 'aria-label': o.open ? 'Collapse' : 'Expand', onclick: ev => { ev.stopPropagation(); o.toggle(); } }, o.open ? '▾' : '▸') : h('span', { class: 'caret ph' }),
-    o.type ? tdot(o.type) : null,
-    o.status ? sgl(o.status) : null,
-    h('button', { class: 'tlabel' + (o.serif ? ' serif' : ''), onclick: ev => o.click(ev) }, h('span', { class: 'tt1' }, o.title), o.sub ? h('span', { class: 'tsub' }, o.sub) : null),
-    o.roll ? h('span', { class: 'roll', title: o.roll + ' items need a second look' }, '↻ ' + o.roll) : null,
-    o.right ? h('span', { class: 'tkind' }, o.right) : null);
-  return row;
-}
-function secHead(key, title, count, open) {
-  return h('div', { class: 'lsec' }, h('button', { class: 'lsh', 'aria-expanded': String(open), onclick: () => { S.treeOpen[key] = !open; persistUI(); renderLeft(); } }, h('span', { class: 'caret' }, open ? '▾' : '▸'), title), count != null ? h('span', { class: 'lcount' }, count) : null);
-}
-function navRow(label, glyph, onclick, badge, active) {
-  return h('button', { class: 'navrow' + (active ? ' active' : ''), onclick }, h('span', { class: 'ng', 'aria-hidden': 'true' }, glyph), h('span', null, label), badge ? h('span', { class: 'badge', title: badge + ' to look at' }, badge) : null);
-}
 function activeIs(k, id) { const t = S.tabs[S.active]; return !!t && t.k === k && (id == null || t.id === id); }
-function rollUp(it) {
-  let n = 0; const seen = new Set();
-  const walk = id => { for (const x of M.nbOut.get(id) || []) if (x.rel === 'contains' && !seen.has(x.id)) { seen.add(x.id); const c = M.byId.get(x.id); if (c && (c.status === 'look' || c.status === 'fix')) n++; walk(x.id); } };
-  walk(it.id); return n;
-}
-function paperRows(parent, depth, out, visited) {
-  const kids = (M.nbOut.get(parent.id) || []).filter(x => x.rel === 'contains').map(x => M.byId.get(x.id)).filter(c => c && !c.ref && M.parent.get(c.id) === parent.id).sort(itemSort);
-  for (const c of kids) {
-    if (visited.has(c.id)) continue; visited.add(c.id);
-    const sub = (M.nbOut.get(c.id) || []).some(x => x.rel === 'contains');
-    const open = S.treeOpen['p:' + c.id] != null ? S.treeOpen['p:' + c.id] : true;
-    if (S.onlyLook && c.status !== 'look' && c.status !== 'fix' && !rollUp(c)) continue;
-    out.push(treeRow(depth, { type: typeOfItem(c), title: c.short, serif: c.kind === 'section', status: c.status, caret: sub, open, toggle: () => { S.treeOpen['p:' + c.id] = !open; renderLeft(); }, click: ev => openItem(c.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', c.id), roll: sub && !open ? rollUp(c) || null : null, tooltip: ST[c.status].word + ' · ' + c.title }));
-    if (sub && open) paperRows(c, depth + 1, out, visited);
-  }
-}
-function paperSection() {
-  const open = S.treeOpen.paper != null ? S.treeOpen.paper : true, out = [];
-  const real = M.items.filter(i => !i.ref && !i.shared && !i.readme);
-  out.push(secHead('paper', 'Paper', null, open));
-  if (!open) return out;
-  const body = h('div', { class: 'tree', role: 'tree' });
-  if (M.noPaper) {
-    body.append(h('div', { class: 'lempty' }, 'No paper connected yet.', h('div', null, h('button', { class: 'linkbtn', onclick: ev => projectMenu($('#rb-menu')) }, 'Connect your paper'))));
-    for (const it of M.items.filter(i => i.readme).sort((a, b) => cmpNum(a.title, b.title))) body.append(treeRow(0, { type: typeOfItem(it), title: it.short, status: it.status, click: ev => openItem(it.id), active: activeIs('item', it.id), right: it.kindWord }));
-  } else {
-    const th = real.find(i => i.kind === 'thesis'); const visited = new Set();
-    if (th) body.append(treeRow(0, { type: 'thesis', title: 'Main claim', status: th.status, click: ev => openItem(th.id), active: activeIs('item', th.id) }));
-    const rqs = real.filter(i => i.kind === 'rq').sort((a, b) => cmpNum(a.node.name, b.node.name));
-    if (rqs.length) {
-      const o = S.treeOpen.rqs != null ? S.treeOpen.rqs : true; body.append(treeRow(0, { title: 'Research questions', caret: true, open: o, toggle: () => { S.treeOpen.rqs = !o; renderLeft(); }, click: () => { S.treeOpen.rqs = !o; renderLeft(); }, roll: !o ? rqs.filter(r => r.status === 'look' || r.status === 'fix').length || null : null }));
-      if (o) rqs.forEach(r => body.append(treeRow(1, { type: 'question', title: r.title, status: r.status, click: ev => openItem(r.id), active: activeIs('item', r.id) })));
-    }
-    const tops = real.filter(i => i.kind === 'section' && (!M.parent.get(i.id) || (M.byId.get(M.parent.get(i.id)) || {}).kind === 'thesis')).sort(itemSort);
-    let appDiv = false;
-    for (const s of tops) {
-      if (s.node.attrs.in_appendix && !appDiv) { appDiv = true; body.append(h('div', { class: 'ldiv' }, 'Appendix')); visited.add('x'); }
-      const sub = (M.nbOut.get(s.id) || []).some(x => x.rel === 'contains'), o = S.treeOpen['p:' + s.id] != null ? S.treeOpen['p:' + s.id] : true;
-      if (S.onlyLook && s.status !== 'look' && s.status !== 'fix' && !rollUp(s)) continue;
-      const rows = [];
-      rows.push(treeRow(0, { type: 'section', title: s.short, serif: true, status: s.status, caret: sub, open: o, toggle: () => { S.treeOpen['p:' + s.id] = !o; renderLeft(); }, click: ev => openItem(s.id, ev.metaKey || ev.ctrlKey), active: activeIs('item', s.id), roll: sub && !o ? rollUp(s) || null : null, tooltip: ST[s.status].word + ' · ' + s.title }));
-      visited.add(s.id); if (sub && o) paperRows(s, 1, rows, visited);
-      rows.forEach(r => body.append(r));
-    }
-    const orphans = real.filter(i => ['figure', 'table', 'equation'].includes(i.kind) && !M.parent.get(i.id)).sort(itemSort);
-    if (orphans.length) { body.append(h('div', { class: 'ldiv' }, 'Other items')); orphans.forEach(c => body.append(treeRow(0, { type: 'paper', title: c.short, status: c.status, click: ev => openItem(c.id), active: activeIs('item', c.id) }))); }
-    body.append(h('label', { class: 'lfoot' }, h('input', { type: 'checkbox', checked: S.onlyLook ? '' : null, onchange: ev => { S.onlyLook = ev.target.checked; renderLeft(); } }), ' Only things to look at'));
-  }
-  out.push(body); return out;
-}
-function startOf(n) { const t = (n.attrs || {}).started_at; return t ? dmon(t) + ' ' + t.slice(11, 16) : ''; }
-function experimentsSection() {
-  const open = S.treeOpen.exp != null ? S.treeOpen.exp : M.noPaper, out = [], runs = (S.graph.nodes || []).filter(n => n.kind === 'run');
-  out.push(secHead('exp', 'Experiments', runs.length || null, open));
-  if (!open) return out;
-  const body = h('div', { class: 'tree', role: 'tree' });
-  if (!runs.length) body.append(h('div', { class: 'lempty' }, 'No runs recorded yet. Lemmata finds runs from files like runs/train_main.json.'));
-  const groups = new Map();
-  for (const r of runs) { const ex = (IX.pout.get(r.id) || []).find(e => e.kind === 'executes'); const key = ex ? pathOf(IX.node.get(ex.to) || { name: ex.to }) : 'Other runs'; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); }
-  for (const [k, rs] of groups) {
-    body.append(treeRow(0, { title: k === 'Other runs' ? k : 'Experiment: ' + basename(k), cls: 'grp', click: () => { }, tooltip: k }));
-    for (const r of rs) { const it = itemFor(r.id); body.append(treeRow(1, { type: 'run', title: r.name.replace(/^run\s+/, '') + (startOf(r) ? ' · ' + startOf(r) : ''), status: it ? it.status : null, click: () => openNode(r.id), tooltip: ((r.attrs || {}).command || '') + (startOf(r) ? ' — started ' + startOf(r) : '') })); }
-  }
-  out.push(body); return out;
-}
 function usedByText(nid) {
   const its = (M.itemsOf.get(nid) || []).map(i => M.byId.get(i));
   if (!its.length) return 'Not used by the paper';
   if (its[0].shared) return 'Shared by ' + its[0].users.map(u => lead(M.byId.get(u))).slice(0, 3).join(' and ');
   return 'Part of ' + lead(its[0]);
 }
-function codeSection() {
-  const open = S.treeOpen.code != null ? S.treeOpen.code : M.noPaper, out = [];
-  const codeRepos = new Set(((S.project && S.project.repos) || []).filter(r => r.role === 'code').map(r => r.id));
-  const files = (S.graph.nodes || []).filter(n => ['code', 'config', 'data', 'doc', 'result', 'asset'].includes(n.kind) && (codeRepos.size ? codeRepos.has(n.repo) : true));
-  out.push(secHead('code', 'Code', files.length || null, open));
-  if (!open) return out;
-  const body = h('div', { class: 'tree', role: 'tree' });
-  if (!files.length) body.append(h('div', { class: 'lempty' }, 'No code connected. Connect your code repo in the project menu.'));
-  const root = { dirs: new Map(), files: [] };
-  for (const f of files) { let d = root; const parts = pathOf(f).split('/'); for (const p of parts.slice(0, -1)) { if (!d.dirs.has(p)) d.dirs.set(p, { dirs: new Map(), files: [] }); d = d.dirs.get(p); } d.files.push(f); }
-  const draw = (d, depth, prefix) => {
-    for (const [name, sub] of [...d.dirs].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      const key = 'c:' + prefix + name, o = !!S.treeOpen[key];
-      body.append(treeRow(depth, { title: name + '/', caret: true, open: o, toggle: () => { S.treeOpen[key] = !o; renderLeft(); }, click: () => { S.treeOpen[key] = !o; renderLeft(); }, cls: 'folder' }));
-      if (o) draw(sub, depth + 1, prefix + name + '/');
-    }
-    for (const f of d.files.sort((a, b) => (a.name < b.name ? -1 : 1))) body.append(treeRow(depth, { type: typeOfFile(f.kind), title: basename(pathOf(f)), sub: usedByText(f.id), click: () => openNode(f.id), active: activeIs('item', (itemFor(f.id) || {}).id) || activeIs('node', f.id), tooltip: pathOf(f) }));
-  };
-  draw(root, 0, '');
-  if (M.readmeOnly.length) { body.append(h('div', { class: 'ldiv' }, 'Listed in README, not found in the paper')); M.readmeOnly.forEach(n => body.append(treeRow(0, { title: n.name, click: () => openTab('node', n.id, { replace: true }) }))); }
-  out.push(body); return out;
-}
-function searchResults() {
-  const q = S.query.trim().toLowerCase(), words = q.split(/\s+/);
-  const ok = s => words.every(w => s.toLowerCase().includes(w));
-  const rows = [];
-  for (const it of M.items) if ((!it.ref || S.gf.refs) && ok(it.title + ' ' + it.kindWord)) rows.push({ t: it.title, k: it.kindWord, st: it.status, fn: () => openItem(it.id) });
-  for (const n of S.graph.nodes) if (FILEK.has(n.kind) && ok(pathOf(n))) rows.push({ t: pathOf(n), k: FILE_WORD[n.kind].replace(/^An? /, ''), fn: () => openNode(n.id) });
-  for (const f of (S.findings && S.findings.findings) || []) { const s = findingSentence(f); if (ok(s)) rows.push({ t: s, k: 'Check', fn: () => { S.focusFinding = f.id; openTab('checks'); } }); }
-  const box = h('div', { class: 'tree' }, h('div', { class: 'ldiv' }, 'Results'));
-  if (!rows.length) box.append(h('div', { class: 'lempty' }, 'Nothing matches "' + S.query + '".'));
-  rows.slice(0, 50).forEach(r => box.append(treeRow(0, { title: r.t, status: r.st, right: r.k, click: () => { r.fn(); } })));
-  return box;
-}
-function renderLeft() {
-  const box = clear($('#lefttree'));
-  if (S.query.trim()) { box.append(searchResults()); return; }
-  const nCards = M.todo;
-  const nChecks = ((S.findings && S.findings.findings) || []).length;
-  box.append(rxNavRows(), h('div', { class: 'ldiv' }, 'Project'), navRow('Changes', '◔', () => openTab('changes'), nCards || null, activeIs('changes')), paperSection(), experimentsSection(), codeSection(),
-    navRow('Checks', '!', () => openTab('checks'), nChecks || null, activeIs('checks')), navRow('History', '⚑', () => openTab('history'), null, activeIs('history')));
-}
+function renderLeft() { }   // S18: no sidebar; the counts that lived here are in the nav and the footer
 
 /* ---------- tab bar, page ---------- */
 function renderTabbar() {
-  const bar = clear($('#tabbar'));
-  bar.append(h('button', { class: 'tbtn', 'aria-label': 'Back', title: 'Back (Ctrl+[)', disabled: S.navPos <= 0, onclick: () => navGo(-1) }, '←'),
-    h('button', { class: 'tbtn', 'aria-label': 'Forward', title: 'Forward (Ctrl+])', disabled: S.navPos >= S.nav.length - 1, onclick: () => navGo(1) }, '→'),
-    h('button', { class: 'tbtn', 'aria-label': S.leftOpen ? 'Hide explorer' : 'Show explorer', title: 'Explorer (Ctrl+\\)', onclick: () => toggleSide('left') }, '☰'));
-  S.tabs.forEach((t, i) => {
-    bar.append(h('div', { class: 'tab' + (i === S.active ? ' on' : ''), role: 'tab', 'aria-selected': String(i === S.active) },
-      h('button', { class: 'tlink', onclick: () => activate(i), onauxclick: ev => { if (ev.button === 1) closeTab(i); }, title: tabTitle(t) }, h('span', { class: 'tg', 'aria-hidden': 'true' }, TAB_GLYPH[t.k]), ' ' + tabTitle(t)),
-      h('button', { class: 'tx', 'aria-label': 'Close ' + tabTitle(t), onclick: () => closeTab(i) }, '×')));
+  const bar = clear($('#topnav')); if (!bar) return;
+  const t = S.tabs[S.active], cur = t ? NAV_OF[t.k] : null;
+  const badge = k => k === 'claims' ? ((RX.claims && RX.claims.counts && RX.claims.counts.stages) ? (RX.claims.counts.stages.testing + RX.claims.counts.stages.refuted) || 0 : 0)
+    : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0) : k === 'review' ? M.todo || 0 : (RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0);
+  NAV.forEach(([k, label]) => {
+    const on = k === cur, n = badge(k);
+    bar.append(h('button', { class: 'navtab' + (on ? ' on' : ''), role: 'tab', 'aria-selected': String(on), 'aria-label': label + (n ? ', ' + n + ' to look at' : ''), title: label, onclick: () => openTab(k) },
+      h('span', { class: 'navl', 'data-full': label }, label), n ? h('span', { class: 'navn' }, ' ' + n) : null));
   });
-  bar.append(h('button', { class: 'tbtn', 'aria-label': 'New tab', title: 'Open an item (Ctrl+O)', onclick: () => quickSwitcher() }, '+'), h('span', { class: 'grow' }),
-    h('button', { class: 'tbtn', 'aria-label': S.rightOpen ? 'Hide side panel' : 'Show side panel', title: 'Side panel (Ctrl+Shift+\\)', onclick: () => toggleSide('right') }, '◨'));
+  fitTabs();
+  const sub = $('#bsub'); if (sub) sub.textContent = S.project ? S.project.name : '';
 }
 function renderPage(keepScroll) {
-  const pg = $('#page'), st = pg.scrollTop, t = S.tabs[S.active];
+  const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
   clear(pg); pg.className = t.k === 'graph' ? 'graph' : '';
@@ -2218,8 +2083,10 @@ function renderPage(keepScroll) {
   else if (t.k === 'history') el = pageHistory();
   else if (RX_PAGES[t.k]) el = RX_PAGES[t.k]();
   pg.append(el);
+  if (t.k === 'item' || t.k === 'graph') pg.append(h('aside', { id: 'right', 'aria-label': 'Links for the open item' }));
+  if (S.navPos > 0 && !NAV.some(n => n[0] === t.k)) pg.prepend(h('button', { class: 'linkbtn backlink', onclick: () => navGo(-1) }, '← Back'));
   if (t.k === 'graph') afterGraphAttach();
-  if (keepScroll) pg.scrollTop = st;
+  if (keepScroll) window.scrollTo(0, st);
   else if (t.k === 'checks' && S.focusFinding) { const f = $('#f-' + S.focusFinding.replace(/[^\w]/g, '_')); if (f) f.scrollIntoView({ block: 'center' }); }
   renderOutlineSoon();
 }
@@ -2243,7 +2110,8 @@ function rrow(label, rel, st, onclick, hov, type) {
   return h('button', { class: 'rrow', onclick, onmouseenter: hov ? () => { if (RG.g) RG.g.hl(hov); } : null }, type ? tdot(type) : null, st ? sgl(st) : h('span', { class: 'sg ph' }), h('span', { class: 'rl' }, label), h('span', { class: 'rrel' }, rel));
 }
 function renderRight() {
-  const box = clear($('#right'));
+  const rbox = $('#right'); if (!rbox) { if (RG.g) { RG.g.destroy(); RG.g = null; } return; }
+  const box = clear(rbox);
   if (RG.g) { RG.g.destroy(); RG.g = null; }
   const tb = S.tabs[S.active];
   if (tb && tb.k === 'graph' && S.ev.item && M.byId.has(S.ev.item)) { renderEvidenceSide(box, M.byId.get(S.ev.item)); return; }
@@ -2280,15 +2148,16 @@ function renderStatus() {
   const bar = clear($('#status')); if (!bar) return;
   const cp = S.alarms && S.alarms.checkpoint, hc = hubControls();
   const nChecks = ((S.findings && S.findings.findings) || []).length;
-  bar.append(
-    h('button', { class: 'sbtn', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
-    h('button', { class: 'sbtn', onclick: () => openTab('changes') }, plural(M.todo || 0, 'thing') + ' to look at'),
-    h('button', { class: 'sbtn', onclick: () => openTab('checks') }, plural(nChecks, 'check')),
-    h('span', { class: 'grow' }),
-    BUSY ? h('span', { class: 'sbusy', role: 'status' }, BUSY) : null,
-    !BUSY && hc.status ? h('span', { class: 'sbtn static' }, hc.status) : null,
-    !BUSY && S.project && !hc.status ? h('span', { class: 'sbtn static' }, 'Files read ' + agoText(S.project.scanned_at)) : null,
-    READONLY ? null : h('button', { class: 'sbtn', disabled: !!BUSY, onclick: () => syncNow() }, 'Sync now'));
+  const embed = !!window.LEMMATA_EMBED;
+  const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
+  const more = [link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('History', () => openTab('history')), link('Graph', () => openTab('graph')),
+    link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher())];
+  bar.append(h('div', { class: 'flinks' }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
+    h('div', { class: 'fstate' },
+      h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
+      ' · ', plural(M.todo || 0, 'thing') + ' to look at',
+      BUSY ? h('span', { role: 'status' }, ' · ' + BUSY) : !hc.status && S.project ? ' · Files read ' + agoText(S.project.scanned_at) : hc.status ? ' · ' + hc.status : null,
+      READONLY ? null : [' · ', h('button', { class: 'linkbtn flink', disabled: !!BUSY, onclick: () => syncNow() }, 'Sync now')]));
 }
 
 /* ---------- palette / switcher / intro ---------- */
@@ -2444,11 +2313,34 @@ async function autoRefreshTick() {
   } catch (e) { /* server briefly busy: try again next tick */ }
   refreshBusy = false;
 }
+/* In VS Code the four tabs stay on one row: when they do not fit, the active one keeps its name and the others shorten to their first letter. */
+function fitTabs() {
+  const bar = $('#topnav'); if (!bar || !window.LEMMATA_EMBED) return;
+  const inactive = bar.querySelectorAll('.navtab:not(.on) .navl');
+  inactive.forEach(s => { s.textContent = s.dataset.full; });
+  if (bar.scrollWidth > bar.clientWidth + 1) inactive.forEach(s => { s.textContent = navShort(s.dataset.full); });
+}
+/* In VS Code, arrow keys move between rows and Enter opens one, as in the file explorer (the Claims tree has its own keys). */
+const ROW_KEYS = '.row-line button, .rx-x-main, button.rx-rv-r, button.rx-rv-b, button.rx-rv-check, .rrow';
+function rowKeys() {
+  if (!window.LEMMATA_EMBED) return;
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    const a = document.activeElement;
+    if (!a || !a.matches || !a.matches(ROW_KEYS)) return;
+    const all = Array.from(document.querySelectorAll(ROW_KEYS)).filter(e => e.offsetParent), nx = all[all.indexOf(a) + (ev.key === 'ArrowDown' ? 1 : -1)];
+    if (nx) { ev.preventDefault(); nx.focus(); }
+  });
+}
+function watchWidth() {   // the width modes themselves are CSS container queries; only the tab labels are measured
+  if (!window.ResizeObserver) return;
+  new ResizeObserver(() => fitTabs()).observe($('#app'));
+}
 function boot() {
   restoreUI();
   S.graph = { nodes: [], edges: [] }; rebuildIndex();
   buildShell();
-  renderAll();
+  renderAll(); watchWidth(); rowKeys();
   detectHub().then(loadAll).then(() => {
     if (!READONLY) { setInterval(autoRefreshTick, 5000); document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); }); }
     if (HUB_ON) { lsSet('lemmata.seen_intro', true); rxStartView().then(rxUsefulBar); }   // the hub's own tutorial already explained Lemmata
