@@ -75,6 +75,7 @@
   function route() {
     stopPoll();
     document.body.classList.remove('wide');
+    const bsub = document.getElementById('bsub'); if (bsub) bsub.textContent = '';
     renderWho();
     if (!pairedOf(S.status)) return isPublic() ? viewLanding() : viewPair();
     const u = ghUser(S.status);
@@ -515,15 +516,16 @@
     clear(root);
     document.body.classList.add('wide');
     const signin = h('div', { id: 'signin' });
+    // S18: the tagline sits in the band; the page is one sentence, the numbered steps, then the one sign-in button
+    const bsub = document.getElementById('bsub'); if (bsub) bsub.textContent = 'Know what your paper claims, and whether your repository still backs it up.';
     root.append(
       h('div', { class: 'hero' },
-        h('h1', null, 'Know what your paper claims, and whether your repository still backs it up.'),
         h('p', { class: 'lede' }, 'Lemmata reads your LaTeX and your GitHub repository together. It lays out the core message, the claims under it, and the proof, experiment and result file behind each one, then tells you what to recheck when something changes.'),
         h('p', { class: 'muted' }, 'Use AI, don’t depend on it: Lemmata shows you the evidence and where it is missing. You decide what is true.')),
+      h('h2', null, 'How it works'), howSteps(),
       signin,
-      h('h3', null, 'How it works'), howSteps(),
-      h('h3', null, 'Four ways it can help'), waysGrid(),
-      h('h3', null, 'Before you sign in'), privacyList(),
+      h('h2', null, 'Four ways it can help'), waysGrid(),
+      h('h2', null, 'Before you sign in'), privacyList(),
       h('p', { class: 'muted small', style: 'margin-top:24px' }, S.status.signup === 'invite' ? 'This site is invite-only for now. If GitHub sign-in is refused, ask the person who sent you the link to add your GitHub name.' : ''));
     signInCard(signin, null, { kind: 'login', title: 'Start with GitHub', button: 'Sign in with GitHub',
       text: 'No separate account or password. Choose how much Lemmata may see:' });

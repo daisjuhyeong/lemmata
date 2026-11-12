@@ -1,0 +1,41 @@
+/* Lemmata design tokens (S18, wiki/design/screens/S18-dais-ui.md). The only place colours are defined for the website, the app
+   and the hub pages. Values are the :root variables of https://dais.korea.ac.kr/styles.css. The VS Code tab overrides some of
+   them in vscode/media/vscode.css. Fonts (@font-face) are in fonts.css. */
+:root {
+  --bg: #fafcfb;            /* page */
+  --bg-2: #e9f0ef;
+  --surface: #F3F7F4;       /* selected row, detail panel */
+  --surface-hover: #EDF3EF; /* row hover */
+  --text: #1A1A1A;
+  --text-secondary: #464f4a;
+  --muted: #707B74;
+  --muted-light: #959f99;   /* tags, footer */
+  --border: #CCD6D0;        /* all hairlines */
+  --border-strong: #B8C5BE;
+  --accent: #819A91;        /* header band */
+  --accent-dark: #50645b;   /* links, active states on light bg */
+  --accent-vivid: #5e917e;  /* graph nodes: strong */
+  --accent-light: #A7C1A8;
+  --accent-pale: #D4DDD6;   /* graph nodes: weak; text on band */
+  --highlight: #dac88e;     /* the one item needing attention */
+  --success: #6F9A76;
+  --warning: #C9A66B;
+  --error: #B87474;
+
+  --font-serif: "Source Serif 4", Georgia, "Noto Serif KR", "Noto Serif CJK KR", AppleMyungjo, Batang, serif;
+  --font-sans: "Source Sans 3", "Helvetica Neue", Helvetica, Arial, "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "D2Coding", monospace;
+
+  --fs-tag: 12.8px;
+  --fs-body: 15px;
+  --fs-sub: 14.4px;
+  --fs-h2: 20px;
+  --fs-h1: 32px;
+  --fs-code: 13px;
+  --lh-body: 1.75;
+  --col: 800px;
+  --col-wide: 1100px;
+  --radius: 2px;
+  --motion: 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
