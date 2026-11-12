@@ -3,9 +3,12 @@
 // passed to the extension, checked here, and sent to the hub with the stored token.
 
 /** Files the extension itself fetches from the hub to build the page (public code, no project data). */
-export const ASSETS = { appJs: '/app.js', researchJs: '/research.js', appCss: '/app.css', katexJs: '/vendor/katex/katex.min.js', katexCss: '/vendor/katex/katex.min.css' };
+export const ASSETS = { appJs: '/app.js', researchJs: '/research.js', appCss: '/app.css', tokensCss: '/tokens.css', fontsCss: '/fonts.css', katexJs: '/vendor/katex/katex.min.js', katexCss: '/vendor/katex/katex.min.css' };
 export const KATEX_FONT_DIR = '/vendor/katex/fonts/';
-export const VIEWS = ['review', 'claims', 'experiments', 'timeline', 'tasks', 'notation', 'changes', 'graph', 'ask'] as const;
+/** Where the hub keeps its own fonts (Source Serif 4 for headings). The sans font is not sent: the tab uses the editor's font. */
+export const FONT_DIR = '/fonts/';
+export const TAB_FONTS = /^SourceSerif4-/;
+export const VIEWS = ['review', 'claims', 'experiments', 'digest', 'timeline', 'tasks', 'notation', 'changes', 'graph', 'ask'] as const;
 export type View = typeof VIEWS[number];
 
 export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -63,10 +66,18 @@ export function inlineFonts(css: string, fonts: { [name: string]: string }): str
       Object.prototype.hasOwnProperty.call(fonts, name) ? 'url(data:font/woff2;base64,' + fonts[name] + ')' : all);
 }
 
-export interface PageParts { nonce: string; pid: string; embedJs: string; katexJs: string; appJs: string; researchJs: string; katexCss: string; appCss: string }
+export interface PageParts {
+  nonce: string; pid: string; embedJs: string; katexJs: string; appJs: string; researchJs: string; katexCss: string; appCss: string;
+  /** The hub's tokens.css and fonts.css (fonts as data: URLs), put before app.css. Left out by an older hub. */
+  tokensCss?: string;
+  /** media/vscode.css: the editor-theme mapping and the compact layout. Placed after app.css so it wins; every rule is under html.embed. */
+  vscodeCss?: string;
+  /** The hub's web address, for the "Open on website" link. */
+  site?: string;
+}
 
-/** Styles only the tab needs: keep the app usable in a narrow editor column (it scrolls sideways instead of refusing). */
-const TAB_CSS = 'html.embed, html.embed body { height: 100%; } html.embed body { min-width: 1024px; overflow-x: auto; padding: 0; } html.embed #narrow { display: none !important; }';
+/** Styles only the tab needs. There is no minimum width: the page follows the width of the view (three modes, see media/vscode.css). */
+export const TAB_CSS = 'html.embed, html.embed body { height: 100%; } html.embed body { padding: 0; overflow-x: hidden; } html.embed #narrow { display: none !important; }';
 
 /** The whole page. Scripts run only with the nonce; nothing can be loaded from the network. */
 export function buildPage(p: PageParts): string {
@@ -76,9 +87,10 @@ export function buildPage(p: PageParts): string {
   return ['<!doctype html>', '<html lang="en">', '<head>', '<meta charset="utf-8">',
     '<meta http-equiv="Content-Security-Policy" content="' + csp + '">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">', '<title>Lemmata</title>',
-    '<style>' + safeInlineStyle(p.katexCss) + '</style>', '<style>' + safeInlineStyle(p.appCss) + '</style>', '<style>' + TAB_CSS + '</style>',
+    '<style>' + safeInlineStyle(p.katexCss) + '</style>', ...(p.tokensCss ? ['<style>' + safeInlineStyle(p.tokensCss) + '</style>'] : []), '<style>' + safeInlineStyle(p.appCss) + '</style>',
+    ...(p.vscodeCss ? ['<style>' + safeInlineStyle(p.vscodeCss) + '</style>'] : []), '<style>' + TAB_CSS + '</style>',
     '</head>', '<body>', '<div id="app"></div>', '<div id="narrow" role="alert"></div>',
-    s('window.__LEMMATA_TAB__ = ' + safeJson({ pid: p.pid }) + ';'), s(p.embedJs), s(p.katexJs), s(p.appJs), s(p.researchJs),
+    s('window.__LEMMATA_TAB__ = ' + safeJson(p.site ? { pid: p.pid, site: p.site } : { pid: p.pid }) + ';'), s(p.embedJs), s(p.katexJs), s(p.appJs), s(p.researchJs),
     '</body>', '</html>'].join('\n');
 }
 

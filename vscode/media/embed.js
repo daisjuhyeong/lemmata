@@ -92,6 +92,7 @@
 
   window.LEMMATA_EMBED = {
     pid: cfg.pid,
+    site: typeof cfg.site === 'string' && /^https?:\/\//i.test(cfg.site) ? cfg.site : '',
     open: path => vscode.postMessage({ t: 'open', path: String(path) }),
     openFile: (repo, path, line) => vscode.postMessage({ t: 'openFile', repo: String(repo || ''), path: String(path || ''), line: Number(line) || 1 }),
   };

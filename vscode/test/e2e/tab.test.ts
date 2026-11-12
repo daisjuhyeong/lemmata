@@ -160,6 +160,38 @@ test('links: a file opens in the editor, claims.md opens as a document, web link
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 
+test('S18 width modes: narrow, medium and wide switch without a reload, and the page never scrolls sideways', { skip }, async () => {
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'claims');
+  await settle(2500);
+  const before = navigations;
+  const probe = () => page.evaluate(() => {
+    const vis = (sel: string) => { const e = document.querySelector(sel); return !!e && getComputedStyle(e).display !== 'none'; };
+    const de = document.documentElement;
+    const bar = document.getElementById('topnav') as HTMLElement;
+    return { tag: vis('.rtag'), tabs: Array.from(document.querySelectorAll('.navtab .navl')).map((b: HTMLElement) => b.innerText.trim()), active: (document.querySelector('.navtab.on .navl') as HTMLElement).innerText.trim(),
+      tabsFit: bar.scrollWidth <= bar.clientWidth + 1, outline: vis('.rxt-caret'), pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft,
+      wide: (document.getElementById('page') as HTMLElement).getBoundingClientRect().width, sideways: de.scrollWidth > de.clientWidth + 1, band: getComputedStyle(document.querySelector('#band .bt') as HTMLElement).display, embed: de.classList.contains('embed') };
+  });
+  await page.setViewportSize({ width: 300, height: 800 }); await settle(500);
+  const narrow = await probe();
+  assert.equal(narrow.embed, true);
+  assert.equal(narrow.sideways, false, 'no sideways scrolling at 300px');
+  assert.equal(narrow.pad, '12px'); assert.equal(narrow.tag, false, 'no bracket tag on screen when narrow');
+  assert.equal(narrow.band, 'none', 'no header band in VS Code');
+  assert.equal(narrow.tabs.length, 4); assert.equal(narrow.tabsFit, true, 'the four tabs fit on one row'); assert.equal(narrow.active, 'Claims', 'the active tab keeps its name');
+  assert.ok(narrow.tabs.every((t: string) => t.length === 1 || ['Claims', 'Experiments', 'Digest', 'Review'].includes(t)), 'a tab is either its full name or its first letter');
+  assert.equal(narrow.outline, true, 'Claims is an outline with collapse arrows when narrow');
+  await page.setViewportSize({ width: 500, height: 800 }); await settle(500);
+  const medium = await probe();
+  assert.equal(medium.pad, '16px'); assert.equal(medium.sideways, false); assert.equal(medium.tag, true, 'bracket tags are back from 360px');
+  assert.deepEqual(medium.tabs, ['Claims', 'Experiments', 'Digest', 'Review'], 'all four names fit from 360px');
+  await page.setViewportSize({ width: 1200, height: 800 }); await settle(500);
+  const wide = await probe();
+  assert.equal(wide.sideways, false); assert.ok(wide.wide <= 800, 'content is capped at 800px in a wide tab');
+  assert.equal(navigations, before, 'the mode changed without a reload');
+  assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
+});
+
 test('a hub that is too old, or unreachable, gets a plain message instead of a broken page', { skip }, async () => {
   const t2 = new LemmataTab({ subscriptions: [], extensionPath: path.resolve(__dirname, '..', '..', '..') } as any, host);
   await t2.open(new HubClient('http://127.0.0.1:9', fx.token), 'http://127.0.0.1:9', 'p-offline', 'X');

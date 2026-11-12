@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { HubClient, HubError } from './core/client';
-import { ASSETS, KATEX_FONT_DIR, View, VIEWS, allowedRequest, buildPage, fontNames, inlineFonts, openKind, suggestedName } from './core/embed';
+import { ASSETS, FONT_DIR, KATEX_FONT_DIR, TAB_FONTS, View, VIEWS, allowedRequest, buildPage, fontNames, inlineFonts, openKind, suggestedName } from './core/embed';
 
 export interface TabHost {
   log(msg: string): void;
@@ -22,7 +22,7 @@ interface Open { panel: vscode.WebviewPanel; client: HubClient; pid: string; rea
 
 export class LemmataTab {
   private readonly tabs = new Map<string, Open>();      // project id -> its tab
-  private assets: { base: string; parts: { katexJs: string; appJs: string; researchJs: string; katexCss: string; appCss: string } } | null = null;
+  private assets: { base: string; parts: { katexJs: string; appJs: string; researchJs: string; katexCss: string; appCss: string; tokensCss: string } } | null = null;
 
   constructor(private readonly ctx: vscode.ExtensionContext, private readonly host: TabHost) { }
 
@@ -43,7 +43,8 @@ export class LemmataTab {
     try {
       const parts = await this.load(client, base);
       const embedJs = await fs.readFile(path.join(this.ctx.extensionPath, 'media', 'embed.js'), 'utf8');
-      panel.webview.html = buildPage({ nonce: randomBytes(16).toString('hex'), pid, embedJs, ...parts });
+      const vscodeCss = await fs.readFile(path.join(this.ctx.extensionPath, 'media', 'vscode.css'), 'utf8');
+      panel.webview.html = buildPage({ nonce: randomBytes(16).toString('hex'), pid, embedJs, vscodeCss, site: base.replace(/\/+$/, '') + '/p/' + encodeURIComponent(pid) + '/', ...parts });
     } catch (e) {
       const offline = e instanceof HubError && e.offline;
       panel.webview.html = this.note(offline ? 'Your Lemmata hub cannot be reached from this machine. Check the connection, then close this tab and open it again.'
@@ -77,7 +78,17 @@ export class LemmataTab {
     await Promise.all(fontNames(katexCssRaw).map(async n => {
       try { const r = await client.raw('GET', KATEX_FONT_DIR + n, undefined, 2 * 1024 * 1024, 30000); if (r.status === 200) fonts[n] = r.data.toString('base64'); } catch { /* math falls back to a system font */ }
     }));
-    const parts = { katexJs, appJs, researchJs, katexCss: inlineFonts(katexCssRaw, fonts), appCss };
+    // S18: the hub's tokens and headline font. An older hub has neither: the tab then keeps that hub's own look.
+    let tokensCss = '';
+    try {
+      const [tokens, fontsRaw] = await Promise.all([text(ASSETS.tokensCss), text(ASSETS.fontsCss)]);
+      const own: { [name: string]: string } = {};
+      await Promise.all(fontNames(fontsRaw).filter(n => TAB_FONTS.test(n)).map(async n => {
+        try { const r = await client.raw('GET', FONT_DIR + n, undefined, 2 * 1024 * 1024, 30000); if (r.status === 200) own[n] = r.data.toString('base64'); } catch { /* headings fall back to Georgia */ }
+      }));
+      tokensCss = tokens + '\n' + inlineFonts(fontsRaw, own);
+    } catch { /* keep the hub's own stylesheet */ }
+    const parts = { katexJs, appJs, researchJs, katexCss: inlineFonts(katexCssRaw, fonts), appCss, tokensCss };
     this.assets = { base, parts };
     return parts;
   }

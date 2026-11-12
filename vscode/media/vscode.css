@@ -1,0 +1,80 @@
+/* The Lemmata tab inside VS Code (S18, wiki/design/screens/S18-dais-ui.md, part 2).
+   buildPage() adds this stylesheet after the hub's own app.css, only in the tab; embed.js sets html.embed. Every rule is scoped to
+   html.embed. Neutral colours come from the editor theme; the DAIS sage and the state colours stay (they carry meaning).
+   The three width modes (narrow < 360px, medium 360 to 700px, wide > 700px) are container queries on #app, not on the window,
+   because the same page can sit in a sidebar, a split or a full editor tab. The tokens (--bg, --accent ...) are defined in the hub's
+   tokens.css. This file defines no colour value of its own. */
+html.embed {
+  --bg: var(--vscode-editor-background);
+  --surface: var(--vscode-editorWidget-background);
+  --surface-hover: var(--vscode-list-hoverBackground);
+  --text: var(--vscode-foreground);
+  --text-secondary: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --muted-light: var(--vscode-descriptionForeground);
+  --border: var(--vscode-panel-border, var(--vscode-widget-border));
+  --border-strong: var(--vscode-panel-border, var(--vscode-widget-border));
+  --fs-body: var(--vscode-font-size, 13px);
+  --fs-tag: 11px;
+  --fs-h2: 14px;
+  --lh-body: 1.5;
+  --font-sans: var(--vscode-font-family), sans-serif;
+  --font-mono: var(--vscode-editor-font-family), monospace;
+  --font-serif: "Source Serif 4", Georgia, "Noto Serif KR", serif;
+}
+html.embed body.vscode-dark, html.embed body.vscode-high-contrast:not(.vscode-high-contrast-light) { --accent-dark: var(--accent-light); }
+html.embed body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: var(--fs-body); }
+html.embed code, html.embed pre, html.embed .mono, html.embed .hash, html.embed .code { font-family: var(--font-mono); }
+
+/* no band: VS Code shows the tab title. One sticky row of four text tabs, 12px. */
+html.embed #band { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 0 8px; border-bottom: 1px solid var(--border); text-align: left; }
+html.embed #band .bt, html.embed #band .bsub { display: none; }
+html.embed #topnav { justify-content: flex-start; flex-wrap: nowrap; overflow: hidden; }
+html.embed .navtab { color: var(--text-secondary); font: 400 12px/1.5 var(--font-sans); padding: 4px 10px 3px; border-bottom: 2px solid transparent; white-space: nowrap; }
+html.embed .navtab + .navtab::before { display: none; }
+html.embed .navtab:hover { background: var(--surface-hover); border-bottom-color: var(--border); }
+html.embed .navtab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent-dark); }
+html.embed .navn { color: var(--muted); }
+html.embed .navtab:focus-visible { outline-color: var(--vscode-focusBorder, var(--accent-dark)); }
+html.embed :focus-visible { outline-color: var(--vscode-focusBorder, var(--accent-dark)); }
+
+/* rows: padding 3px, line-height 1.5; headings serif 14px with a hairline, margin 16px 0 4px */
+html.embed #page { max-width: var(--col); padding: 12px 16px 24px; }
+html.embed .row-line, html.embed .evline, html.embed .hrow, html.embed .rrow, html.embed .rx-why-r, html.embed .rx-x-r { padding-top: 3px; padding-bottom: 3px; }
+html.embed .dsec > h3, html.embed .rx-ext-h, html.embed .rh { font: 700 14px/1.4 var(--font-serif); margin: 16px 0 4px; padding: 0 0 4px; }
+html.embed .doc > .dsec:first-child > h3 { margin-top: 8px; }
+html.embed .ptitle, html.embed h1.ptitle { font: 700 14px/1.4 var(--font-serif); margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+html.embed .rx-x-q { font: 700 14px/1.4 var(--font-serif); }
+html.embed .rx-x-h { padding-top: 16px; }
+html.embed .rtag, html.embed .chip, html.embed .tag, html.embed .rx-label, html.embed .rxt-n { font-size: 11px; color: var(--muted); }
+html.embed .rxt-row { font-size: var(--fs-body); }
+html.embed .rxt-core { font-size: 14px; line-height: 1.4; }
+html.embed .rxt-row:hover, html.embed .row-line:hover { background: var(--vscode-list-hoverBackground); }
+html.embed .rxt-li.sel > .rxt-row { background: var(--vscode-list-inactiveSelectionBackground, var(--surface)); }
+html.embed .rxt-row:focus-visible { background: var(--vscode-list-activeSelectionBackground, var(--surface)); color: var(--vscode-list-activeSelectionForeground, var(--text)); }
+html.embed .btn { height: 24px; padding: 0 8px; font-size: 12px; color: var(--vscode-button-secondaryForeground, var(--text)); }
+html.embed .btn.primary { color: var(--vscode-textLink-foreground, var(--accent-dark)); border-color: var(--vscode-textLink-foreground, var(--accent-dark)); }
+html.embed a, html.embed .linkbtn, html.embed .ilink { color: var(--vscode-textLink-foreground, var(--accent-dark)); }
+html.embed input[type=text], html.embed input[type=search], html.embed select, html.embed textarea { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-color: var(--vscode-input-border, var(--border)); font: inherit; }
+
+/* no footer: those are VS Code commands. What stays is one line of links to the other pages and "Open on website". */
+html.embed #status { max-width: var(--col); margin: 0 auto; padding: 0 16px 16px; text-align: left; font-size: 11px; }
+html.embed .fstate { display: none; }
+html.embed .flinks { justify-content: flex-start; gap: 0 12px; }
+
+/* figures are thumbnails; equations scroll inside their own row instead of widening the view; no sideways scrolling of the page */
+html.embed .rx-ev-pic img, html.embed .rx-x-fig { max-height: 160px; max-width: 100%; }
+html.embed .rx-math.disp, html.embed .katex-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+html.embed body { overflow-x: hidden; }
+html.embed .code, html.embed .rx-ev-tablewrap { max-width: 100%; overflow-x: auto; }
+
+/* width modes. Wide (> 700px) is the website's layout minus the band and the footer: nothing to add. */
+@container app (max-width: 700px) {
+  html.embed #page { padding: 12px 16px 24px; }
+}
+@container app (max-width: 359px) {
+  html.embed #page { padding: 8px 12px 16px; }
+  html.embed .row-line .rtext, html.embed .rxt-lab { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  html.embed .rtag { display: none; }
+  html.embed .rx-rv-two, html.embed .rx-rv-checks { grid-template-columns: minmax(0, 1fr); }
+}
