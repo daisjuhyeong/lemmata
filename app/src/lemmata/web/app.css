@@ -815,3 +815,11 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .rx-bt-g.fine { color:var(--success); } .rx-bt-g.fix { color:var(--error); } .rx-bt-g.ign { color:var(--muted); }
 .rx-bt-n { padding-top:var(--s-2, 6px); }
 .rx-x-ed { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+/* S20: next experiments planned by Claude Code */
+.rx-pl-box { display:flex; flex-direction:column; gap:var(--s-2, 8px); margin:var(--s-2, 8px) 0; }
+.rx-pl { border:1px solid var(--border); border-radius:var(--radius); padding:var(--s-2, 8px) var(--s-3, 12px); background:var(--surface); display:flex; flex-direction:column; gap:4px; }
+.rx-pl.used { background:none; }
+.rx-pl-h { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; } .rx-pl-h .muted { margin-left:auto; }
+.rx-pl-l { font-size:var(--fs-13, 13px); } .rx-pl-l > .muted:first-child { display:inline-block; min-width:72px; }
+.rx-pl-d summary { cursor:pointer; color:var(--text-secondary); font-size:var(--fs-13, 13px); }
+textarea.rx-pl-p { width:100%; box-sizing:border-box; font-size:12px; line-height:1.45; margin-top:6px; resize:vertical; }

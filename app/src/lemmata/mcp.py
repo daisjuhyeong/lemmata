@@ -719,6 +719,30 @@ def t_report_confounds(ctx, args):
     return "\n".join(d["notes"]) + "\nStored. The researcher sees it on the Review page and decides what to do about each confound.", {"notes": d["notes"]}, "Nothing to narrow."
 
 
+def t_experiment_brief(ctx, args):
+    pid, eng = _project(ctx, args)
+    t = args.get("target")
+    if not isinstance(t, str) or not re.match(r"^[qx]:.{1,300}$", t):
+        raise _Fail("Argument 'target' must be 'q:<claim id>' or 'x:<experiment id>' (Lemmata's Plan button gives you the target; claim ids are in project_map).")
+    d = eng.plan_brief(t)
+    guide = d.pop("how_to_propose")
+    return guide + "\n" + _quote([json.dumps(d, ensure_ascii=False, indent=1)]), dict(d, how_to_propose=guide), "Open the scripts and settings themselves for more."
+
+
+def t_propose_experiments(ctx, args):
+    pid, eng = _project(ctx, args)
+    t = args.get("target")
+    if not isinstance(t, str) or not isinstance(args.get("proposals"), list):
+        raise _Fail("Arguments 'target' (text) and 'proposals' (a list) are required. Call experiment_brief for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.propose_plans(t, args["proposals"])
+    else:
+        d = eng.propose_plans(t, args["proposals"])
+    return "\n".join(d["notes"]) + "\nStored as drafts. The researcher reads them under Next experiments in Lemmata, edits a prompt if needed and copies it into Claude Code. Do not run them now.", {"notes": d["notes"]}, "Nothing to narrow."
+
+
 def t_project_map(ctx, args):
     pid, eng = _project(ctx, args)
     d = eng.project_map()
@@ -877,6 +901,19 @@ TOOLS = [
                     "or code. Only call it when the user asked you to check confounds.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "findings": {"type": "array", "items": {"type": "object"}, "description": "One entry per question; see confound_brief."}}, ["project", "findings"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "experiment_brief", "fn": t_experiment_brief, "title": "Brief for planning the next experiment", "max_text": 30000,
+     "description": "For planning the next experiment for one claim ('q:<id>') or one experiment ('x:<id>'). Returns the claim, its checklist "
+                    "gaps, how each experiment was made (scripts, settings, commands, results), where ours is behind a baseline, open confounds, "
+                    "and how to propose experiments. Read it, open the scripts and settings, then call propose_experiments.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "target": {"type": "string", "description": "'q:<claim id>' or 'x:<experiment id>'."}}, ["project", "target"]),
+     "annotations": dict(_RO)},
+    {"name": "propose_experiments", "fn": t_propose_experiments, "title": "Propose next experiments",
+     "description": "Submit up to three experiments for a target, each with a complete prompt a fresh Claude Code session can run. Lemmata drops "
+                    "proposals whose file quotes are not in the files or whose prompt names none of them, and stores the rest as drafts for the "
+                    "researcher. It runs nothing and never edits code or the paper. Only call it when the user asked you to plan experiments.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "target": {"type": "string", "description": "The target given to experiment_brief."},
+                             "proposals": {"type": "array", "items": {"type": "object"}, "description": "Up to three; see experiment_brief for the format."}}, ["project", "target", "proposals"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
 ]
 _BY_NAME = {t["name"]: t for t in TOOLS}
 

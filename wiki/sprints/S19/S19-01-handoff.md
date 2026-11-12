@@ -23,7 +23,7 @@ baseline comparison easier to check against the main method. He chose "both" way
 - Extension 0.4.0 (`vscode/lemmata-0.4.0.vsix`, replaces 0.3.0; docs updated).
 
 ## Verified
-Python 170 passed / 2 skipped; extension unit 69 (new `link.test.ts`); end-to-end 9/9 with Chrome (new S19 test:
+Python 170 passed / 2 skipped; extension unit 66 (new `link.test.ts`); end-to-end 9/9 with Chrome (new S19 test:
 link selection reaches the page, an experiment's file opens through the bridge, no vscode:// links inside the tab).
 Screenshots: `screenshots/review-baseline-table-{1280,360}.png` (test project, local mode).
 

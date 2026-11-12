@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -436,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review")
+        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -478,6 +478,8 @@ class Handler(BaseHTTPRequestHandler):
                     if (rs is not None and (not isinstance(rs, int) or isinstance(rs, bool))) or (mine is not None and not isinstance(mine, bool)) or days not in (30, 7, 1):
                         raise ApiError(400, "bad_request", "resolve must be a number, mine true or false, days 30, 7 or 1")
                     return self._json(need("set_review")(txt("hoped"), txt("question"), rs, mine, days))
+                if r == "/plans":     # the researcher keeps, edits or drops a planned experiment
+                    return self._json(need("set_plan")(txt("id", True), txt("state"), txt("prompt")))
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):

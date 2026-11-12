@@ -335,6 +335,48 @@ class MapTest(unittest.TestCase):
         subprocess.run(["git", "-C", R + "/code", "add", "-A"], check=True, capture_output=True)
         subprocess.run(["git", "-C", R + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "undo"], check=True, capture_output=True)
 
+    def test_plans(self):
+        """S20: the agent plans the next experiment from a brief; Lemmata keeps only proposals grounded in real files."""
+        from lemmata.engine.errors import NotFound as NF
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        E = self.e.experiments()
+        q = next(s for s in E["sections"] if s["kind"] != "other")
+        b = self.e.plan_brief("q:" + q["id"])
+        self.assertEqual((b["kind"], b["claims"][0]["id"]), ("claim", q["id"]))
+        self.assertTrue(b["experiments"] and "scripts" in b["experiments"][0] and "checklist" in b["claims"][0])
+        self.assertIn("propose_experiments", b["how_to_propose"])
+        x = q["experiments"][0]
+        bx = self.e.plan_brief("x:" + x["id"])
+        self.assertEqual((bx["kind"], bx["experiments"][0]["id"]), ("experiment", x["id"]))
+        self.assertTrue(any(c["id"] == q["id"] for c in bx["claims"]), "an experiment's brief carries the claim it tests")
+        with self.assertRaises(NF):
+            self.e.plan_brief("q:nope")
+        prompt = "Goal: rerun the main comparison with seeds 3 and 4. Edit train.py only if needed; run python train.py --dataset Electricity --seed 3. Do not edit the paper. Report the fp numbers."
+        good = {"kind": "seeds", "title": "Two more seeds", "why": "Only two runs per method.", "expected": "fp stays below the baselines.",
+                "files": [{"path": "train.py", "quote": 'add_argument("--dataset")'}], "prompt": prompt}
+        r = self.e.propose_plans("q:" + q["id"], [good,
+            dict(good, title="Fake quote", files=[{"path": "train.py", "quote": "this text is not in the file"}]),
+            dict(good, title="Prompt names no file", prompt="Run more experiments somehow and report back the numbers in a table, please, with seeds."),
+            dict(good, title="Fourth")])
+        self.assertEqual([p["title"] for p in r["plans"]], ["Two more seeds"])
+        n = "\n".join(r["notes"])
+        self.assertIn("no file whose quote", n); self.assertIn("names none of its files", n); self.assertIn("only the first 3", n)
+        self.assertIn("kind must be", "\n".join(self.e.propose_plans("q:" + q["id"], [dict(good, kind="party")])["notes"]))
+        p = r["plans"][0]
+        self.assertEqual((p["state"], p["files"][0]["path"], p["files"][0]["line"]), ("draft", "train.py", 3))
+        self.e.set_plan(p["id"], "copied", "Edited prompt mentioning train.py")
+        self.assertEqual([(x["state"], x["edited"]) for x in self.e.plans()["plans"]], [("copied", True)])
+        self.e.propose_plans("q:" + q["id"], [dict(good, title="Second round")])      # new drafts replace drafts, copied ones stay
+        self.assertEqual(sorted(x["title"] for x in self.e.plans()["plans"]), ["Second round", "Two more seeds"])
+        d = next(x for x in self.e.plans()["plans"] if x["title"] == "Second round")
+        self.e.set_plan(d["id"], "dropped")
+        self.assertEqual([x["title"] for x in self.e.plans()["plans"]], ["Two more seeds"])
+        with self.assertRaises(NF):
+            self.e.set_plan("p_nope", "copied")
+        with self.assertRaises(BadRequest):
+            self.e.propose_plans("q:" + q["id"], [])
+
     def test_review(self):
         """Should I continue: three checks, the five-item checklist, and confounds reported by an agent."""
         from datetime import datetime, timezone

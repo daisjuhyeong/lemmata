@@ -19,6 +19,7 @@ from . import store
 from . import track as trackmod
 from . import tree as treemod
 from . import review as reviewmod
+from . import plans as plansmod
 from . import runs as runsmod
 from . import triage as triagemod
 from . import understand as undmod
@@ -562,6 +563,31 @@ class Engine:
         notes = reviewmod.report(st, findings, E, s["trees"], by, now_iso())
         self.hub.write_json("review.json", st)
         return {"notes": notes, "review": reviewmod.build(E, st)}
+
+    # ------------------------------------------------------------------ next experiments (S20: planned by the user's own agent)
+    def plans(self):
+        return plansmod.view(plansmod.load(self.hub))
+
+    def plan_brief(self, target):
+        E = self._exp()
+        try:
+            rv = reviewmod.build(E, reviewmod.load(self.hub))
+        except Exception:
+            rv = None
+        return dict(plansmod.brief(E, rv, self._exp, target, plansmod.load(self.hub)), how_to_propose=plansmod.GUIDE)
+
+    def propose_plans(self, target, proposals, by="agent"):
+        s = self._ensure()
+        st = plansmod.load(self.hub)
+        notes = plansmod.propose(st, self._exp(), s["trees"], target, proposals, by, now_iso())
+        self.hub.write_json("plans.json", st)
+        return {"notes": notes, "plans": plansmod.view(st)["plans"]}
+
+    def set_plan(self, plan_id, state=None, prompt=None):
+        st = plansmod.load(self.hub)
+        plansmod.decide(st, plan_id, state, prompt, now_iso())
+        self.hub.write_json("plans.json", st)
+        return plansmod.view(st)
 
     # ------------------------------------------------------------------ project map (phase 1: understand)
     def brief(self):

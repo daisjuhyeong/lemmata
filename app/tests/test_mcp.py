@@ -99,7 +99,7 @@ class McpTest(unittest.TestCase):
         st, r = self.post(rpc("tools/list"))
         tools = r["result"]["tools"]
         self.assertEqual({t["name"] for t in tools}, {"list_projects", "project_status", "alarms", "explain", "findings", "node", "search",
-                                                       "set_triage", "sync", "claims", "timeline", "experiments", "runs", "log_run", "tasks", "add_feedback", "notation", "project_brief", "project_map", "propose_map", "confound_brief", "report_confounds"})
+                                                       "set_triage", "sync", "claims", "timeline", "experiments", "runs", "log_run", "tasks", "add_feedback", "notation", "project_brief", "project_map", "propose_map", "confound_brief", "report_confounds", "experiment_brief", "propose_experiments"})
         for t in tools:
             self.assertGreater(len(t["description"]), 60)
             s = t["inputSchema"]
@@ -118,6 +118,23 @@ class McpTest(unittest.TestCase):
         self.assertTrue(ro["alarms"])
 
     # ---------------------------------------------------------------- tools
+    def test_experiment_planning_tools(self):
+        """S20: experiment_brief needs a real target; propose_experiments reports what it dropped."""
+        bad = self.call("experiment_brief", {"project": "sample", "target": "nonsense"})
+        self.assertTrue(bad["isError"])
+        from lemmata.engine.api import Engine
+        secs = [s for s in Engine(self.root).experiments()["sections"] if s.get("experiments")]
+        if not secs:
+            self.skipTest("the sample has no experiments")
+        t = "x:" + secs[0]["experiments"][0]["id"]
+        res = self.call("experiment_brief", {"project": "sample", "target": t})
+        self.assertFalse(res["isError"], res["content"][0]["text"][:300])
+        self.assertEqual(res["structuredContent"]["target"], t)
+        self.assertIn("propose_experiments", res["content"][0]["text"])
+        res = self.call("propose_experiments", {"project": "sample", "target": t, "proposals": [{"kind": "rerun", "title": "x", "why": "y", "expected": "z", "prompt": "too short"}]})
+        self.assertFalse(res["isError"])
+        self.assertIn("dropped (proposal 1)", res["content"][0]["text"])
+
     def test_list_projects(self):
         res = self.ok("list_projects", {})
         p = res["structuredContent"]["projects"][0]

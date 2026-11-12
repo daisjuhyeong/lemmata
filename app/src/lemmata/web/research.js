@@ -68,6 +68,7 @@ async function rxLoad() {
     let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
     let map = null; try { map = await apiGet('/api/map'); } catch (e) { /* older data has no map */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
+    if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
     Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
@@ -566,6 +567,7 @@ function rxExpDetail(id) {
       sm && sm.cols.length ? [h('dt', null, sm.datasets && sm.datasets.length ? 'Datasets' : 'Columns'), h('dd', null, (sm.datasets && sm.datasets.length ? sm.datasets : sm.cols).map(b => h('span', { class: 'rx-code' }, b)))] : null,
       d.values.length ? [h('dt', null, 'Settings'), h('dd', null, d.values.slice(0, 14).map(v => h('span', { class: 'rx-code mono', title: v.file }, v.key.split('.').pop() + ' = ' + v.value)))] : null,
       x.questions && x.questions.length ? [h('dt', null, 'Tests'), h('dd', null, x.questions.map(q => h('button', { class: 'chip-btn', title: q.text, onclick: () => { RX.sel = q.id; RX.view = 'tree'; openTab('claims'); } }, '◆ ' + ((cl(q.id) || {}).short || q.label))))] : null)));
+    if (!READONLY) out.push(blk('Next experiments', rxPlanBox('x:' + id, 'experiment', false)));
     // history
     if (x.history && x.history.length) {
       const hs = x.history, chart = hs.length > 1 ? rxHistoryChart(hs, sm) : null;
@@ -806,6 +808,36 @@ function rxBaselineTable(b, ours) {
 /* Review: should I continue? Three checks on top, the questions under them, the checklist one click down. */
 const RX_VERDICT = { yes: ['✓', 'Yes', 'fine'], partly: ['◐', 'Partly', 'look'], no: ['✕', 'No', 'fix'], none: ['○', 'Not yet', 'ign'] };
 const RX_CONF_PROMPT = name => 'Use Lemmata to check confounds for the project "' + name + '": call confound_brief, open the scripts and settings it names, then report_confounds for every question.';
+/* S20 next experiments: Claude Code (the researcher's own) plans them from experiment_brief; the researcher reviews and copies the prompt. */
+const RX_PLAN_PROMPT = (name, target, what) => 'Use Lemmata to plan the next experiment for the ' + what + ' "' + target + '" in the project "' + name + '": call experiment_brief with that target, open the scripts and settings it names, then call propose_experiments with up to three options, each with a complete prompt a fresh Claude Code session could run. Plan only: do not change code or run anything.';
+const RX_PLAN_KIND = { rerun: 'Rerun', seeds: 'More seeds', baseline: 'Baseline', ablation: 'Ablation', sensitivity: 'Sensitivity', new: 'New', fix: 'Fix' };
+function rxPlanBox(target, what, label) {
+  if (READONLY) return null;
+  const name = S.project ? S.project.name : 'this project';
+  const mine = ((RX.plans && RX.plans.plans) || []).filter(p => p.target === target);
+  const ask = RX_PLAN_PROMPT(name, target, what);
+  const refresh = async () => { try { RX.plans = await apiGet('/api/plans'); } catch (e) { toast(e.message || 'Could not load the plans.'); } renderPage(true); };
+  const set = async (id, body) => { const r = await rxPost('/api/plans', Object.assign({ id }, body)); if (r) { RX.plans = r; renderPage(true); } };
+  const cards = mine.map(p => {
+    const ta = h('textarea', { class: 'rx-ta mono rx-pl-p', rows: '9', spellcheck: 'false', 'aria-label': 'Prompt for Claude Code: ' + p.title }, p.prompt);
+    ta.addEventListener('change', () => { const v = ta.value.trim(); if (v && v !== p.prompt) set(p.id, { prompt: v }); });
+    return h('div', { class: 'rx-pl' + (p.state === 'copied' ? ' used' : '') },
+      h('div', { class: 'rx-pl-h' }, h('span', { class: 'tag' }, RX_PLAN_KIND[p.kind] || p.kind), h('b', null, p.title),
+        p.state === 'copied' ? h('span', { class: 'muted small' }, 'copied ' + dmon(p.copied_at)) : null),
+      h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Why '), p.why),
+      h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Expect '), p.expected),
+      p.files.length ? h('div', { class: 'rx-pl-l' }, h('span', { class: 'muted' }, 'Builds on '), p.files.map((f, i) => [i ? ', ' : null, rxWhere(f, f.repo)])) : null,
+      h('details', { class: 'rx-pl-d' }, h('summary', null, 'Prompt for Claude Code' + (p.edited ? ' (edited by you)' : '')), ta),
+      h('div', { class: 'row rx-rv-act' },
+        h('button', { class: 'btn sm' + (p.state === 'copied' ? '' : ' primary'), title: 'Copy the prompt, then paste it into Claude Code in this project', onclick: () => { const v = ta.value.trim(); copyText(v); set(p.id, v !== p.prompt ? { state: 'copied', prompt: v } : { state: 'copied' }); } }, 'Copy prompt for Claude Code'),
+        h('button', { class: 'linkbtn small', onclick: () => set(p.id, { state: 'dropped' }) }, 'Drop')));
+  });
+  return h('div', { class: 'rx-pl-box' }, label ? h('div', { class: 'rx-label' }, 'Next experiments') : null,
+    cards.length ? cards : h('div', { class: 'muted small' }, 'Claude Code reads this ' + what + ', its gaps and its scripts, and proposes up to three experiments, each with a prompt you can run. They appear here for you to check first.'),
+    h('div', { class: 'row rx-rv-act' },
+      h('button', { class: 'btn sm' + (cards.length ? '' : ' primary'), title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, cards.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
+      h('button', { class: 'linkbtn small', onclick: refresh }, 'Check for new plans')));
+}
 function pageReview() {
   const nr = rxNotReady('Review'); if (nr) return nr;
   S.outline = [];
@@ -858,6 +890,7 @@ function pageReview() {
         rep && rep.confounds.length ? h('div', { class: 'rx-rv-conf' }, rep.confounds.map((c, i) => h('div', { class: 'rx-rv-cf' + (c.resolved ? ' ok' : '') },
           h('input', { type: 'checkbox', checked: c.resolved ? '' : null, disabled: READONLY, 'aria-label': 'Resolved', title: 'Resolved', onchange: () => post({ question: q.id, resolve: i }) }),
           h('span', null, c.text), rxWhere(c.evidence, c.evidence.repo)))) : null,
+        rxPlanBox('q:' + q.id, 'claim', true),
         h('div', { class: 'row rx-rv-act' },
           READONLY ? null : h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
           READONLY ? null : h('button', { class: 'btn sm', title: 'Mark confounds as checked by you, without an agent', onclick: () => post({ question: q.id, mine: !(rep && rep.by === 'you') }) }, rep && rep.by === 'you' ? 'Undo my check' : 'I checked it myself'),
