@@ -647,3 +647,4 @@ button.rx-rv-r:hover { background:var(--tint); } .rx-rv-r.open { background:var(
 .rx-stage-sel { font:var(--fs-12) var(--font-sans); padding:4px 6px; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface); color:var(--ink); max-width:260px; }
 .rx-m-stage { font:var(--fs-11) var(--font-sans); padding:1px 6px; border-radius:var(--r-pill); background:var(--sunken); color:var(--ink); white-space:nowrap; }
 .rx-m-stage.fine { color:var(--verify); background:var(--verify-bg); } .rx-m-stage.look { color:var(--amber-text); background:var(--amber-bg); } .rx-m-stage.fix { color:var(--red); background:var(--red-bg); } .rx-m-stage.ign { color:var(--muted); }
+.rx-rv-q { display:flex; align-items:center; gap:var(--s-2); min-width:0; } .rx-rv-q .rx-rv-t { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

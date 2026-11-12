@@ -242,7 +242,7 @@ def match_targets(text, nodes, claims_doc):
         inter = w & cw
         score = len(inter) / ((len(w) * len(cw)) ** 0.5) if w and cw else 0
         if named or (len(inter) >= 2 and score >= 0.3):
-            cl.append({"id": c["id"], "label": c["label"], "why": "named" if named else "similar wording", "score": round(1.0 if named else score, 2)})
+            cl.append({"id": c["id"], "label": c.get("short") or c["label"], "why": "named" if named else "similar wording", "score": round(1.0 if named else score, 2)})
     cl.sort(key=lambda x: -x["score"])
     return hits, cl[:3]
 
@@ -363,7 +363,8 @@ def digest(project, tl, led, claims_doc, tasks, alarms, now_iso, days=7):
     L.append("• Claims: %d supported, %d partly, %d not supported%s" % (cc["supported"], cc["partial"], cc["unsupported"],
                                                                       ", %d still drafts" % cc["proposed"] if cc["proposed"] else ""))
     for c in weak[:5]:
-        L.append("    – %s: %s%s" % (c["label"], {"supported": "supported", "partial": "partly supported", "unsupported": "not supported"}[c["status"]],
+        L.append("    – %s: %s%s" % (c.get("short") or c["label"], {"hypothesis": "hypothesis", "testing": "being tested", "finding": "finding", "refuted": "not supported", "exploration": "exploration"}.get(
+                                         c.get("stage"), {"supported": "supported", "partial": "partly supported", "unsupported": "not supported"}[c["status"]]),
                                      " — recheck after “%s”" % c["recheck"] if c["recheck"] else ""))
     if stale:
         L.append("• %d result file%s older than the code or settings behind %s:" % (len(stale), "" if len(stale) == 1 else "s", "it" if len(stale) == 1 else "them"))
@@ -387,7 +388,7 @@ def ask(q, nodes, edges, claims_doc, tl, led, tasks, findings):
     all_claims = ([claims_doc["core"]] if claims_doc.get("core") else []) + claims_doc["claims"]
 
     def claim_card(c):
-        return {"type": "claim", "id": c["id"], "title": c["label"], "text": c["text"][:300], "status": c["status"], "recheck": c["recheck"],
+        return {"type": "claim", "id": c["id"], "title": c.get("short") or c["label"], "text": c["text"][:300], "status": c["status"], "recheck": c["recheck"],
                 "support": [{"name": s["name"], "relation": s["relation"], "how": s["how"], "node_id": s.get("node_id"), "traced": s.get("traced")}
                             for s in c["support"]][:8], "issues": c["issues"][:4]}
 

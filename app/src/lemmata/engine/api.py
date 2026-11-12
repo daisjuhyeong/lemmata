@@ -543,10 +543,10 @@ class Engine:
 
     # ------------------------------------------------------------------ review: should I continue?
     def review(self, days=30, now=None):
-        return reviewmod.build(self._exp(), reviewmod.load(self.hub), days, now)
+        return reviewmod.build(self.experiments(), reviewmod.load(self.hub), days, now)
 
     def set_review(self, hoped=None, question=None, resolve=None, mine=None, days=30):
-        E = self._exp()
+        E = self.experiments()
         st = reviewmod.load(self.hub)
         reviewmod.decide(st, {s["id"] for s in E["sections"]}, hoped, question, resolve, mine, now_iso())
         self.hub.write_json("review.json", st)

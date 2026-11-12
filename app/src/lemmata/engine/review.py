@@ -118,6 +118,7 @@ def build(E, store, days=30, now=None):
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     extends = (E.get("extends") or {}).get("base")
+    name = lambda s: s.get("short") or s["label"]      # the claim's one name (C1, C2 ...) when the claims have been numbered
     rows, seen = [], {}
     for s in E["sections"]:
         if s["kind"] == "other":
@@ -129,13 +130,14 @@ def build(E, store, days=30, now=None):
             k, g = _state(x, extends)
             states.append(k)
             if x["id"] not in seen and k != "none":
-                seen[x["id"]] = {"id": x["id"], "name": x["name"], "state": k, "gap": g, "question": s["label"], "question_id": s["id"],
+                seen[x["id"]] = {"id": x["id"], "name": x["name"], "state": k, "gap": g, "question": name(s), "question_id": s["id"],
                                  "since": _behind_since(x) if k == "behind" and not extends else None}
         chk = checklist(s, extends, store["confounds"], last)
         counted = [c for c in chk if c["state"] != "na"]
         moved = bool(times and max(times) >= since)
         trend = "none" if not s["experiments"] else "moved" if moved else "stalled"
-        rows.append({"id": s["id"], "claim_id": s.get("claim_id"), "label": s["label"], "text": s["text"], "scope": s.get("scope"), "kind": s["kind"],
+        rows.append({"id": s["id"], "claim_id": s.get("claim_id"), "label": name(s), "ref": s["label"], "stage": s.get("stage"), "stage_by": s.get("stage_by"),
+                     "stage_why": s.get("stage_why"), "text": s["text"], "scope": s.get("scope"), "kind": s["kind"],
                      "checklist": chk, "done": sum(1 for c in counted if c["state"] == "done"), "of": len(counted),
                      "complete": bool(counted) and all(c["state"] == "done" for c in counted) and bool(s["experiments"]),
                      "started": bool(s["experiments"]), "trend": trend, "last": last, "experiments": len(s["experiments"]),
@@ -157,7 +159,7 @@ def build(E, store, days=30, now=None):
                 st = "ahead" if v["gap"] > 0 else "behind" if v["gap"] < 0 else "tie"
                 b[st] += 1
                 b["experiments"].append({"id": x["id"], "name": x["name"], "state": st, "gap": v["gap"], "metric": sm.get("measure") or sm.get("metric"),
-                                         "question": s["label"] if s["kind"] != "other" else None})
+                                         "question": name(s) if s["kind"] != "other" else None})
     baselines = sorted(bl.values(), key=lambda b: (not b["base"], -(b["ahead"] + b["behind"] + b["tie"]), b["name"].lower()))[:20]
     for b in baselines:
         b["of"] = b["ahead"] + b["behind"] + b["tie"]
@@ -174,7 +176,7 @@ def build(E, store, days=30, now=None):
     period = {30: "the last 30 days", 7: "the last week", 1: "the last day"}[days]
     checks = [
         {"k": "moving", "q": "Any new results in %s?" % period, "help": "A question counts when one of its experiments got a new result file in this period.", "verdict": "none" if not started else "yes" if len(moved) * 2 >= len(rows) else "partly" if moved else "no",
-         "line": "No experiment yet" if not started else "%d of %d questions moved in %s" % (len(moved), len(rows), span),
+         "line": "No experiment yet" if not started else "%d of %d claims moved in %s" % (len(moved), len(rows), span),
          "rows": [r["id"] for r in rows if r["trend"] != "moved"]},
         {"k": "ahead", "q": "How does %s compare with the baselines?" % ours,
          "help": "For each baseline: the experiments where %s scores better on that experiment's metric. Ahead of a baseline means better in more than half of them." % ours,

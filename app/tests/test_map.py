@@ -345,8 +345,9 @@ class MapTest(unittest.TestCase):
         self.assertEqual([(c["k"], c["verdict"]) for c in r["checks"]], [("moving", "yes"), ("ahead", "yes"), ("paper", "no")])
         self.assertEqual([(b["name"], b["ahead"], b["tie"], b["behind"], b["verdict"]) for b in r["baselines"]], [("ADWIN", 1, 1, 0, "ahead"), ("DDM", 1, 1, 0, "ahead")])
         self.assertEqual(r["checks"][1]["line"], "Ahead of 2 of 2 baselines")
-        self.assertEqual(self.e.review(1, now)["checks"][0]["line"], "1 of 3 questions moved in 1 day")
-        q = {x["label"]: x for x in r["questions"]}
+        self.assertEqual(self.e.review(1, now)["checks"][0]["line"], "1 of 3 claims moved in 1 day")
+        q = {x["ref"]: x for x in r["questions"]}
+        self.assertEqual((q["H1"]["label"], q["H1"]["stage"]), ("C2", "finding"))      # the Review names claims as the Claims page does
         self.assertEqual([(c["k"], c["state"]) for c in q["H1"]["checklist"]],
                          [("seeds", "todo"), ("baseline", "done"), ("ablation", "done"), ("paper", "done"), ("confounds", "todo")])
         self.assertEqual((q["RQ1"]["done"], q["RQ1"]["of"]), (2, 5))
@@ -357,12 +358,12 @@ class MapTest(unittest.TestCase):
                                                                {"text": "made up", "evidence": {"path": "train.py", "quote": "not there at all"}}]},
             {"question": "q2", "verdict": "clear"}, {"question": "zz", "verdict": "clear"}])["notes"]
         self.assertEqual(notes, ["dropped (q1): a confound whose quote is not in 'train.py'", "kept (q1): risk, 1 confound", "kept (q2): clear, 0 confounds", "dropped: unknown question 'zz'"])
-        q = {x["label"]: x for x in self.e.review(30, now)["questions"]}
+        q = {x["ref"]: x for x in self.e.review(30, now)["questions"]}
         self.assertEqual((q["RQ1"]["checklist"][4]["state"], q["H1"]["checklist"][4]["state"]), ("todo", "done"))
         r = self.e.set_review(hoped="MCD detects drift earlier.", question="q1", resolve=0)
         self.assertEqual(r["hoped"], "MCD detects drift earlier.")
-        self.assertEqual({x["label"]: x for x in r["questions"]}["RQ1"]["checklist"][4]["state"], "done")
-        self.assertEqual({x["label"]: x for x in self.e.set_review(question="q3", mine=True)["questions"]}["H2"]["checklist"][4]["why"], "Checked by you, none found")
+        self.assertEqual({x["ref"]: x for x in r["questions"]}["RQ1"]["checklist"][4]["state"], "done")
+        self.assertEqual({x["ref"]: x for x in self.e.set_review(question="q3", mine=True)["questions"]}["H2"]["checklist"][4]["why"], "Checked by you, none found")
         self.assertIn("report_confounds", self.e.confound_brief() and __import__("lemmata.engine.review", fromlist=["GUIDE"]).GUIDE)
         os.remove(self.tmp + "/.lemmata/review.json")
 

@@ -844,7 +844,7 @@ function pageReview() {
     const open = RX.rvOpen === q.id, t = TREND[q.trend];
     const segs = q.started ? h('span', { class: 'rx-rv-segs' }, q.checklist.map(c => h('i', { class: 's-' + c.state, title: c.label + ': ' + c.why })), h('span', { class: 'muted small' }, ' ' + q.done + '/' + q.of)) : h('span', { class: 'muted small' }, 'Not started');
     tbl.append(h('button', { class: 'rx-rv-r' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: () => { RX.rvOpen = open ? null : q.id; renderPage(true); } },
-      h('b', null, q.label), h('span', { class: 'serif rx-rv-t' }, rxMath(trunc(q.text, 120))), segs,
+      h('b', { title: q.ref && q.ref !== q.label ? q.ref + ' in the project map' : null }, q.label), h('span', { class: 'rx-rv-q' }, q.stage ? rxStageChip(q) : null, q.scope ? rxScopeTag({ scope: q.scope === 'extension' ? 'new' : q.scope === 'base' ? 'original' : null }) : null, h('span', { class: 'serif rx-rv-t' }, rxMath(trunc(q.text, 120)))), segs,
       h('span', { class: 'rx-rv-tr ' + t[2] }, t[0] + ' ' + (q.behind && q.trend !== 'none' ? 'Behind in ' + q.behind : t[1]))));
     if (open) { const conf = q.checklist.find(c => c.k === 'confounds'), rep = conf && conf.report;
       const G = { done: ['✓', 'fine', 'Done'], todo: ['○', 'look', 'To do'], stale: ['↻', 'look', 'Check again'], na: ['–', 'ign', 'Not applicable'] };
