@@ -13,7 +13,7 @@ const RX_STAGE = { hypothesis: ['○', 'Hypothesis', 'plain', 'hyp'], testing: [
 const RX_STAGES = ['finding', 'testing', 'hypothesis', 'refuted', 'exploration'];
 const RX_SCOPE = { new: ['New', 'A claim of this work'], original: ['Original', 'A claim of the paper this work extends, re-checked here'] };
 function rxSt(stage) { return ' st-' + (RX_STAGE[stage] || RX_STAGE.hypothesis)[3]; }
-function rxStageChip(c) { const s = RX_STAGE[c.stage] || RX_STAGE.hypothesis; const ch = plainChip(s[0], s[1], s[2]); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || ''); return ch; }
+function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', s = RX_STAGE[k]; const ch = plainChip(s[0], s[1], s[2] + ' stg-' + k); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || ''); return ch; }
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
 function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
 // Why we experiment: the experiments run because of this claim, and how each came out.
@@ -707,7 +707,7 @@ function pageExperiments() {
         s.stage ? rxStageChip(s) : null,
         h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
-    else sec.append(h('div', { class: 'rx-x-none' }, h('span', null, 'Not tested yet'),
+    else sec.append(h('div', { class: 'rx-x-none miss' }, h('span', null, 'Not tested yet'),
       READONLY ? null : s.suggested.map(g => h('button', { class: 'chip-btn', title: 'Link this as the experiment for it', onclick: async () => { const r = await rxPost('/api/claims/link', { id: s.id, target: g.node_id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } } }, g.name + '?'))));
     return sec;
   };
@@ -851,12 +851,25 @@ function pageTasks() {
   if (rest.length) root.append(h('details', { class: 'details' }, h('summary', null, 'Done and dropped (' + rest.length + ')'), rest.map(rxTaskCard)));
   return root;
 }
+/* The digest as plain prose: one line each, every line a link to the page it is about (Copy still copies the text as sent). */
+function rxDigestProse(text) {
+  const out = h('div', { class: 'rx-digest-p' });
+  String(text || '').split('\n').forEach(raw => {
+    const line = raw.trim(); if (!line) return;
+    const head = /^\*(.+)\*$/.exec(line);
+    if (head) { out.append(h('p', { class: 'rx-dg-h' }, head[1])); return; }
+    const sub = /^[–-]\s/.test(line), txt = line.replace(/^[•–-]\s*/, '');
+    const to = /result file|results\/|\.(csv|json|ya?ml)\b/i.test(txt) ? 'experiments' : /claim|^C\d+\b/i.test(txt) ? 'claims' : /task|feedback/i.test(txt) ? 'tasks' : /recheck|to look at/i.test(txt) ? 'changes' : 'history';
+    out.append(h('div', { class: 'rx-dg-l' + (sub ? ' sub' : '') }, h('button', { class: 'ilink', onclick: () => openTab(to) }, txt)));
+  });
+  return out;
+}
 function rxDigestBox() {
   const box = h('div', { class: 'card' });
   const paint = () => {
     clear(box);
     if (!RX.digest) { box.append(h('p', { class: 'muted' }, 'Loading…')); return; }
-    box.append(h('pre', { class: 'rx-digest' }, RX.digest.text),
+    box.append(rxDigestProse(RX.digest.text),
       h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => copyText(RX.digest.text) }, 'Copy')));
     if (HUB_ON && RX.hub) {
       const d = RX.hub.digest || {};

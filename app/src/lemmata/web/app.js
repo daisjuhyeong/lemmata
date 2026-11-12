@@ -159,8 +159,10 @@ const ST = {
   fix: { glyph: '✕', word: 'Needs fixing', cls: 'fix', rank: 4, say: 'needs fixing' },
   ign: { glyph: '–', word: 'Ignored', cls: 'ign', rank: 2, say: 'ignored' },
 };
-function chip(st, extra) { const s = ST[st]; return h('span', { class: 'chip ' + s.cls }, s.glyph + ' ' + s.word, extra ? ' ' + extra : null); }
-function plainChip(glyph, word, cls) { return h('span', { class: 'chip ' + (cls || 'plain') }, glyph + ' ' + word); }
+/* S18 state: a bracket tag plus a 6px dot (drawn by CSS from the class). The word carries the meaning; the old glyph is not shown. */
+const tagWord = w => '[' + String(w).toLowerCase() + ']';
+function chip(st, extra) { const s = ST[st]; return h('span', { class: 'chip ' + s.cls }, tagWord(s.word), extra ? ' ' + extra : null); }
+function plainChip(glyph, word, cls) { return h('span', { class: 'chip ' + (cls || 'plain') }, tagWord(word)); }
 const STATE_TO_ST = { reviewed: 'fine', needs_fixing: 'fix', ignored: 'ign', unreviewed: 'look' };
 
 /* ---------- toast / modal / tooltip ---------- */
@@ -366,7 +368,6 @@ const PROPK = new Set(['includes', 'generated_by', 'traces_to', 'produced_by', '
 const STRUCT = new Set(['contains', 'answers', 'refs']);
 const KIND_WORD = { thesis: 'Main claim', rq: 'Research question', section: 'Section', figure: 'Figure', table: 'Table', equation: 'Equation', reference: 'Reference', code: 'Shared code', data: 'Shared data' };
 const KIND_GLYPH = { thesis: '◆', rq: '?', section: '§', figure: '▣', table: '▦', equation: '∑', code: '{ }', data: '{ }', reference: '[ ]' };
-const KIND_TINT = { thesis: '--layer-thesis-t', rq: '--layer-question-t', section: '--layer-section-t', figure: '--layer-paper-t', table: '--layer-paper-t', equation: '--layer-paper-t', code: '--layer-code-t', data: '--layer-result-t', reference: '--layer-reference-t' };
 /* colour by type: every kind of thing has its own layer colour (DESIGN.md --layer-*). Settings and data files use the code colour with a dashed border. */
 const TYPES = {
   thesis: { word: 'Main claim', v: 'thesis', glyph: '◆' }, question: { word: 'Research question', v: 'question', glyph: '?' }, section: { word: 'Section', v: 'section', glyph: '§' },
@@ -1999,12 +2000,6 @@ function activate(i, noNav) {
   if (!noNav) { S.nav = S.nav.slice(0, S.navPos + 1); S.nav.push(tabKey(t)); S.navPos = S.nav.length - 1; }
   persistUI(); if (!noNav) window.scrollTo(0, 0); renderAll();
 }
-function closeTab(i) {
-  S.tabs.splice(i, 1);
-  if (!S.tabs.length) S.tabs.push({ k: 'changes' });
-  S.active = Math.min(S.active > i ? S.active - 1 : S.active, S.tabs.length - 1);
-  activate(S.active, true);
-}
 function navGo(d) {
   const p = S.navPos + d; if (p < 0 || p >= S.nav.length) return;
   S.navPos = p; const key = S.nav[p]; const i = S.tabs.findIndex(t => tabKey(t) === key);
@@ -2030,8 +2025,6 @@ function renderShellExtras() {
   const hc = hubControls();
   if (HUB_ON && !READONLY && hc.zipInput) ex.append(h('input', { type: 'file', id: 'zip-in', accept: '.zip,application/zip', class: 'hidden', 'aria-label': 'Paper zip', onchange: hubUpload }));
 }
-function layoutShell() { }
-function toggleSide() { }
 function projectMenu(anchor) {
   const hc = hubControls();
   const es = [{ head: S.project ? S.project.name : PRODUCT }];
@@ -2215,7 +2208,6 @@ function palette() {
     { label: 'Ignore this item', run: () => setTriageMany(itemTargets(it), 'ignored', noteOf(itemTargets(it))), disabled: !it || READONLY, reason: it ? 'Read-only snapshot' : 'No item open' },
     { label: 'Sync now', run: () => syncNow(), disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'Show files behind items', run: () => { S.gf.files = true; persistUI(); GR.sig = ''; openTab('graph'); } },
-    { label: 'Toggle left sidebar', run: () => toggleSide('left') }, { label: 'Toggle right sidebar', run: () => toggleSide('right') },
     { label: 'Export report (HTML)', run: () => { goTo(apiUrl('/api/export')); }, disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'How Lemmata works', run: () => intro(true) },
   ];
@@ -2248,11 +2240,8 @@ document.addEventListener('keydown', ev => {
   if (mod && !ev.altKey) {
     if ((k === 'p' || k === 'P') && !ev.shiftKey) { ev.preventDefault(); palette(); }
     else if (k === 'o' || k === 'O') { ev.preventDefault(); quickSwitcher(); }
-    else if (k === '\\') { ev.preventDefault(); toggleSide(ev.shiftKey ? 'right' : 'left'); }
     else if (k === '[') { ev.preventDefault(); navGo(-1); }
     else if (k === ']') { ev.preventDefault(); navGo(1); }
-    else if (k === 'w' || k === 'W') { ev.preventDefault(); closeTab(S.active); }
-    else if (/^[1-9]$/.test(k) && S.tabs[+k - 1]) { ev.preventDefault(); activate(+k - 1); }
     return;
   }
   if (ev.altKey || typing(ev.target) || document.querySelector('.scrim')) return;

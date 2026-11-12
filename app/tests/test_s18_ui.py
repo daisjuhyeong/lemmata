@@ -58,6 +58,19 @@ class UiTokensTest(unittest.TestCase):
         self.assertNotIn("1024", html)
 
 
+    def test_export_carries_tokens_and_fonts(self):
+        """The one-file export works offline: tokens and all four fonts are inside it, nothing points at a file or a site."""
+        from lemmata.fixture_engine import FixtureEngine
+        from lemmata.server import App
+        html, _name = App(FixtureEngine("")).export_html()
+        self.assertIn("--bg: #fafcfb;", html)
+        self.assertIn("--accent: #819A91;", html)
+        self.assertEqual(html.count("url(data:font/woff2;base64,"), 4)
+        self.assertNotIn("url(fonts/", html)
+        self.assertNotRegex(html, r'<script[^>]+src=|<link[^>]+href="(?!data:)')
+        self.assertNotIn('href="tokens.css"', html)
+        self.assertNotIn('href="fonts.css"', html)
+
     def test_start_page_is_band_sentence_rows(self):
         html = (WEB / "hub" / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="bsub"', html)

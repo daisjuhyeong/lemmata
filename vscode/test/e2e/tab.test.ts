@@ -185,10 +185,42 @@ test('S18 width modes: narrow, medium and wide switch without a reload, and the 
   const medium = await probe();
   assert.equal(medium.pad, '16px'); assert.equal(medium.sideways, false); assert.equal(medium.tag, true, 'bracket tags are back from 360px');
   assert.deepEqual(medium.tabs, ['Claims', 'Experiments', 'Digest', 'Review'], 'all four names fit from 360px');
+  assert.equal(medium.outline, false, 'medium keeps the vertical graph: no collapse arrows');
   await page.setViewportSize({ width: 1200, height: 800 }); await settle(500);
   const wide = await probe();
   assert.equal(wide.sideways, false); assert.ok(wide.wide <= 800, 'content is capped at 800px in a wide tab');
   assert.equal(navigations, before, 'the mode changed without a reload');
+  assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
+});
+
+test('S18 width modes on Experiments, Digest and Review: usable at 300px, columns per mode, nothing cut off, no reload', { skip }, async () => {
+  const probe = () => page.evaluate(() => {
+    const de = document.documentElement, W = de.clientWidth;
+    const shown = (e: any) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+    const cut = Array.from(document.querySelectorAll('#page button, #page a, #page select, #page input, #page textarea, .navtab'))
+      .filter((e: any) => shown(e) && !e.closest('.rx-math, .katex-display, .code, .rx-ev-tablewrap') && e.getBoundingClientRect().right > W + 1).length;
+    const row = document.querySelector('.rx-x-sec:not(.loose) .rx-x-r:not(.head)') || document.querySelector('button.rx-rv-r');
+    return { sideways: de.scrollWidth > W + 1, cut, cols: row ? Array.from(row.children).filter(shown).length : -1, digest: document.querySelectorAll('.rx-dg-l button').length,
+      pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft };
+  });
+  const want: { [v: string]: number[] } = { experiments: [2, 4, 6], review: [2, 3, 4], digest: [-1, -1, -1] };
+  for (const view of ['experiments', 'review', 'digest']) {
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await tab.open(client, fx.url, fx.pid, 'Demo', view as any);
+    await settle(2500);
+    const before = navigations;
+    const got: any[] = [];
+    for (const w of [300, 500, 1200]) { await page.setViewportSize({ width: w, height: 800 }); await settle(500); got.push(await probe()); }
+    got.forEach((g, i) => {
+      assert.equal(g.sideways, false, view + ' scrolls sideways at ' + [300, 500, 1200][i]);
+      assert.equal(g.cut, 0, view + ': a control is cut off at ' + [300, 500, 1200][i]);
+      assert.equal(g.cols, want[view][i], view + ' columns at ' + [300, 500, 1200][i]);
+    });
+    assert.deepEqual(got.map(g => g.pad), ['12px', '16px', '16px'], view + ' padding per mode');
+    if (view === 'digest') assert.ok(got[0].digest >= 3, 'the digest is lines, each a link');
+    assert.equal(navigations, before, view + ': the mode changed without a reload');
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 

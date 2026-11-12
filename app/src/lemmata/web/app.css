@@ -183,7 +183,7 @@ table.tbl { width:100%; border-collapse:collapse; } table.tbl th { text-align:le
 #toast .linkbtn { color:var(--warning); }
 .tip { position:fixed; z-index:60; background:var(--text); color:var(--bg); font-size:var(--fs-12); padding:4px 8px; border-radius:var(--r-sm); pointer-events:none; max-width:360px; }
 
-/* colour by type (DESIGN.md --layer-*): the node tint and border, the explorer dot, the sidebar dot, the legend swatch */
+/* type dots (graph and item pages): all one sage tint since S18; the type is in the label, not the colour */
 .t-thesis { --tc:var(--accent-vivid); --tt:var(--accent-pale); } .t-question { --tc:var(--accent-vivid); --tt:var(--accent-pale); } .t-section { --tc:var(--accent-vivid); --tt:var(--accent-pale); }
 .t-paper { --tc:var(--accent-vivid); --tt:var(--accent-pale); } .t-result { --tc:var(--accent-vivid); --tt:var(--accent-pale); } .t-code,.t-setting { --tc:var(--accent-vivid); --tt:var(--accent-pale); }
 .t-run { --tc:var(--accent-vivid); --tt:var(--accent-pale); } .t-reference { --tc:var(--accent-vivid); --tt:var(--accent-pale); }
@@ -594,6 +594,11 @@ h1.ptitle { font-size:var(--fs-h2); }
 .chip.proposed::before { background:var(--highlight); border-color:var(--highlight); }
 .chip.ign::before, .chip.plain::before { background:var(--accent-pale); }
 .chip.ok, .chip.fine, .chip.look, .chip.fix, .chip.ign, .chip.plain, .chip.proposed { color:var(--text-secondary); background:none; border:0; }
+.chip::before { order:1; } /* [tag] then the dot, as in rows */
+.chip.stg-hypothesis::before, .chip.stg-exploration::before { background:var(--accent-pale); border-color:var(--border-strong); }
+.chip.stg-testing::before { background:var(--accent-light); border-color:var(--accent-light); }
+.chip.stg-finding::before { background:var(--success); border-color:var(--success); }
+.chip.stg-refuted::before { background:var(--error); border-color:var(--error); }
 .chip.proposed { border:0; }
 .tag { display:inline; padding:0; border:0; background:none; font-size:var(--fs-tag); color:var(--muted); } .tag.warn { color:var(--text-secondary); }
 .sg { font:400 var(--fs-tag) var(--font-sans); min-width:0; width:1.2em; }
@@ -773,7 +778,6 @@ button.rx-rv-r:hover, button.rx-rv-b:hover { background:var(--surface-hover); } 
   .rx-x-r, .rx-x-r.assign, .rx-x-sec.loose .rx-x-r.head { grid-template-columns:minmax(0,1fr) 84px 96px 56px; }
   .rx-x-r > :nth-child(4), .rx-x-r > :nth-child(5) { display:none; }
   .rtag { width:84px; }
-  .rxt-caret { display:inline-block; }
   .rxt-w6 { display:none; } .rxt-w4 { display:inline; }
   .rx-rv-r { grid-template-columns:40px minmax(0,1fr) 96px; } .rx-rv-r > :nth-child(4) { display:none; }
   .rx-rv-b { grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; } .rx-rv-b > :nth-child(3) { display:none; }
@@ -790,7 +794,16 @@ button.rx-rv-r:hover, button.rx-rv-b:hover { background:var(--surface-hover); } 
   .rxt-row { min-height:26px; font-size:var(--vscode-font-size, 13px); }
   .rxt-lab { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
   .row { flex-wrap:wrap; gap:8px; }
+  .rxt-caret { display:inline-block; }
   .rx-rv-r { grid-template-columns:32px minmax(0,1fr); } .rx-rv-r > :nth-child(n+3) { display:none; }
   .rx-rv-b { grid-template-columns:minmax(0,1fr) auto; } .rx-rv-b > :nth-child(2), .rx-rv-b > :nth-child(3) { display:none; }
   .rx-rv-check { grid-template-columns:minmax(0,1fr) auto; column-gap:8px; }
 }
+
+/* S18 QA fixes: no boxed panels on Experiments and Review; the digest is prose */
+.rx-map, .rx-map.none, .rx-map.proposed, .rx-x-sec.loose { box-shadow:none; border:0; border-bottom:1px solid var(--border); border-radius:0; background:none; padding:6px 0; margin:0 0 8px; }
+.rx-x-none, .rx-none { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; background:none; border:0; border-bottom:1px solid var(--border); border-radius:0; padding:6px 0; margin:0; color:var(--text); }
+.rx-x-none.miss::before, .rx-none::before { content:""; flex:none; width:6px; height:6px; border-radius:50%; align-self:center; background:var(--error); }
+.rx-digest-p { margin:0 0 8px; }
+.rx-dg-h { margin:0 0 4px; font-style:italic; color:var(--text-secondary); }
+.rx-dg-l { padding:2px 0; } .rx-dg-l.sub { padding-left:20px; }

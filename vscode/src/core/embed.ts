@@ -66,6 +66,14 @@ export function inlineFonts(css: string, fonts: { [name: string]: string }): str
       Object.prototype.hasOwnProperty.call(fonts, name) ? 'url(data:font/woff2;base64,' + fonts[name] + ')' : all);
 }
 
+/**
+ * The hub's own fonts for the tab: the ones fetched become data: URLs, and every @font-face still pointing at a file is dropped,
+ * so the page never asks for a font the webview's CSP (font-src data:) would block. The tab uses the editor's font for text.
+ */
+export function tabFonts(css: string, fonts: { [name: string]: string }): string {
+  return inlineFonts(css, fonts).replace(/@font-face\s*\{[^}]*url\(\s*["']?(?!data:)[^)]*\)[^}]*\}\s*/g, '');
+}
+
 export interface PageParts {
   nonce: string; pid: string; embedJs: string; katexJs: string; appJs: string; researchJs: string; katexCss: string; appCss: string;
   /** The hub's tokens.css and fonts.css (fonts as data: URLs), put before app.css. Left out by an older hub. */

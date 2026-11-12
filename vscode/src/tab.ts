@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import { HubClient, HubError } from './core/client';
-import { ASSETS, FONT_DIR, KATEX_FONT_DIR, TAB_FONTS, View, VIEWS, allowedRequest, buildPage, fontNames, inlineFonts, openKind, suggestedName } from './core/embed';
+import { ASSETS, FONT_DIR, KATEX_FONT_DIR, TAB_FONTS, View, VIEWS, allowedRequest, buildPage, fontNames, inlineFonts, openKind, suggestedName, tabFonts } from './core/embed';
 
 export interface TabHost {
   log(msg: string): void;
@@ -86,7 +86,7 @@ export class LemmataTab {
       await Promise.all(fontNames(fontsRaw).filter(n => TAB_FONTS.test(n)).map(async n => {
         try { const r = await client.raw('GET', FONT_DIR + n, undefined, 2 * 1024 * 1024, 30000); if (r.status === 200) own[n] = r.data.toString('base64'); } catch { /* headings fall back to Georgia */ }
       }));
-      tokensCss = tokens + '\n' + inlineFonts(fontsRaw, own);
+      tokensCss = tokens + '\n' + tabFonts(fontsRaw, own);
     } catch { /* keep the hub's own stylesheet */ }
     const parts = { katexJs, appJs, researchJs, katexCss: inlineFonts(katexCssRaw, fonts), appCss, tokensCss };
     this.assets = { base, parts };

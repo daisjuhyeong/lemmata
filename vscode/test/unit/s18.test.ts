@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ASSETS, FONT_DIR, TAB_CSS, TAB_FONTS, VIEWS, buildPage, fontNames, inlineFonts } from '../../src/core/embed';
+import { ASSETS, FONT_DIR, TAB_CSS, TAB_FONTS, VIEWS, buildPage, fontNames, tabFonts } from '../../src/core/embed';
 
 const MEDIA = path.resolve(__dirname, '..', '..', '..', 'media');
 const WEB = path.resolve(__dirname, '..', '..', '..', '..', 'app', 'src', 'lemmata', 'web');
@@ -68,17 +68,25 @@ test('views: Digest is a page the extension can open; hub fonts are the headline
   const wanted = fontNames(fontsCss).filter(n => TAB_FONTS.test(n));
   assert.deepEqual(wanted.sort(), ['SourceSerif4-Bold.woff2', 'SourceSerif4-Italic.woff2', 'SourceSerif4-Regular.woff2']);
   assert.equal(FONT_DIR, '/fonts/');
-  const out = inlineFonts(fontsCss, Object.fromEntries(wanted.map(n => [n, 'QUJD'])));
+  const out = tabFonts(fontsCss, Object.fromEntries(wanted.map(n => [n, 'QUJD'])));
   assert.equal((out.match(/data:font\/woff2;base64,QUJD/g) || []).length, 3, 'the webview allows font-src data: only');
-  assert.ok(out.includes('url(fonts/SourceSans3-Variable.woff2)'), 'the sans font is not sent to the tab');
+  assert.equal((out.match(/@font-face/g) || []).length, 3, 'only the inlined serif faces are left');
+  assert.equal(/url\((?!data:)/.test(out), false, 'no @font-face points at a file the CSP would block');
+  assert.equal(out.includes('Source Sans 3'), false, 'the sans font is not sent to the tab (it uses the editor font)');
+  // a font that could not be fetched is dropped too, so the page falls back to Georgia instead of asking for it
+  const partial = tabFonts(fontsCss, { 'SourceSerif4-Bold.woff2': 'QUJD' });
+  assert.equal((partial.match(/@font-face/g) || []).length, 1);
+  assert.equal(/url\((?!data:)/.test(partial), false);
 });
 
-test('Claims tree per width mode: lines and six-word labels when wide, four words from 700px, an outline with arrows under 360px', () => {
+test('Claims tree per width mode: the vertical graph (circles on lines) when wide and medium, four-word labels from 700px, an outline with arrows under 360px', () => {
   const medium = appCss.slice(appCss.indexOf('@container app (max-width: 700px)'), appCss.indexOf('@container app (max-width: 359px)'));
   const narrow = appCss.slice(appCss.indexOf('@container app (max-width: 359px)'));
   assert.match(appCss, /\.rxt-w4 \{ display:none; \}/, 'wide: six-word labels');
   assert.match(medium, /\.rxt-w6 \{ display:none; \} \.rxt-w4 \{ display:inline; \}/, 'medium: four-word labels');
-  assert.match(medium, /\.rxt-caret \{ display:inline-block; \}/, 'collapse arrows from 700px down');
+  assert.doesNotMatch(medium, /\.rxt-caret/, 'medium keeps the graph: no collapse arrows');
+  assert.match(appCss, /\.rxt-caret \{[^}]*display:none;/, 'no arrows by default');
+  assert.match(narrow, /\.rxt-caret \{ display:inline-block; \}/, 'narrow: collapse arrows, as in the file explorer');
   assert.match(narrow, /border-left-color:transparent/, 'narrow: no lines, an indented outline');
   assert.match(narrow, /\.rx-rv-r \{ grid-template-columns:32px minmax\(0,1fr\); \}/, 'narrow: Review rows keep two columns');
 });
