@@ -6,8 +6,10 @@ Additions beyond the contract (read-only, flagged in the handoff): GET /api/file
 """
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,7 +24,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 MAX_FILE = 1024 * 1024
 MAX_RAW = 5 * 1024 * 1024
 STATIC_TYPES = {".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8",
-                ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png"}
+                ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8"}
 
 
 def parse_length(value, default=None):
@@ -225,7 +227,12 @@ class App:
 
         data = (json.dumps(snap, ensure_ascii=False).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
                 .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
-        html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % css.replace("</style", "<\\/style"))
+        tokens = (WEB / "tokens.css").read_text(encoding="utf-8")
+        fonts = (WEB / "fonts.css").read_text(encoding="utf-8")
+        fonts = re.sub(r"url\(fonts/([A-Za-z0-9_-]+\.woff2)\)", lambda m: "url(data:font/woff2;base64,%s)" % base64.b64encode((WEB / "fonts" / m.group(1)).read_bytes()).decode("ascii"), fonts)
+        sheet = "\n".join([tokens, fonts, css])
+        html = html.replace('<link rel="stylesheet" href="tokens.css">\n<link rel="stylesheet" href="fonts.css">\n', "")
+        html = html.replace('<link rel="stylesheet" href="app.css">', "<style>\n%s\n</style>" % sheet.replace("</style", "<\\/style"))
         html = html.replace('<script src="vendor/cytoscape.min.js"></script>', "<script>\n%s\n</script>" % esc_script(vend))
         # the exported file must work offline as one file: no typesetting library, so formulas show as their TeX source
         html = html.replace('<link rel="stylesheet" href="vendor/katex/katex.min.css">\n', "").replace('<script src="vendor/katex/katex.min.js"></script>\n', "")
