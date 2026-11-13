@@ -78,13 +78,16 @@ def now_iso():
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+_FALSE = shutil.which("false") or "/usr/bin/false"     # a program that refuses every password prompt (/bin/false is missing on macOS)
+
+
 def git(cwd, args, token=None, scope_url=None, extra_env=None, timeout=900, user="x-access-token"):
     """Run git hardened: no hooks, no symlink checkout, no submodules, only the allowed protocols, no user/system config.
     The token travels only in the child's environment (GIT_CONFIG_*), scoped to the GitHub URL, never in argv,
     .git/config or logs; stderr is scrubbed before it can reach a caller."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_LFS_SKIP_SMUDGE": "1",
-                "GIT_OPTIONAL_LOCKS": "0", "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"})
+                "GIT_OPTIONAL_LOCKS": "0", "GIT_ASKPASS": _FALSE, "SSH_ASKPASS": _FALSE})
     if token:
         base = (scope_url or "").rstrip("/") + "/"
         env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.%s.extraHeader" % base, "GIT_CONFIG_VALUE_0": git_auth_header(token, user)})
@@ -441,7 +444,10 @@ class Manager:
             args = ["clone", "--depth", "1000", "--no-tags", "--no-recurse-submodules", "--template=" + str(tpl)]
             if branch:
                 args += ["--branch", branch]
-            git(None, args + ["--", url, str(root / "code")], token=token, scope_url=web)
+            try:
+                git(None, args + ["--", url, str(root / "code")], token=token, scope_url=web)
+            except ProjectError as e:
+                raise self._clone_error(e, repo, branch, user)
             got = git(root / "code", ["rev-parse", "--abbrev-ref", "HEAD"])
             paper = root / "paper"
             if ol_id:
@@ -575,6 +581,23 @@ class Manager:
         return git(dest, ["rev-parse", "HEAD"])
 
     # --- GitHub paper source
+    def _clone_error(self, e, repo, branch, user):
+        """A plain reason for a failed copy of the code repository (S22: a private repo with a public-only sign-in)."""
+        t = (e.message or "").lower()
+        if e.code != "git_failed":
+            return e
+        if "remote branch" in t and "not found" in t:
+            return ProjectError(404, "branch_not_found", "GitHub has no branch %r in %s. Push it first (git push -u origin %s)." % (branch, repo, branch))
+        if any(k in t for k in ("not found", "returned error: 40", "authentication failed", "terminal prompts disabled", "could not read username")):
+            info = self.gh.user_public(user) or {}
+            if info.get("needs_reauth"):
+                return ProjectError(401, "github_token_invalid", "GitHub no longer accepts Lemmata's sign-in. Reconnect GitHub on the hub page, then try again.")
+            if not info.get("private_repos"):
+                return ProjectError(403, "github_public_only", "Lemmata's GitHub sign-in covers public repositories only, so it cannot copy %s. "
+                                    "On the hub page, sign out of GitHub and sign in again with access to private repositories, then try again." % repo)
+            return ProjectError(404, "repo_not_found", "GitHub does not let Lemmata's sign-in (%s) read %s. Check the name, or that this account can see it." % (info.get("login") or "?", repo))
+        return e
+
     @staticmethod
     def _check_github_source(repo, branch, subdir):
         """Validated {"kind":"github","repo","branch","subdir"?}; branch None means the repo's default branch (filled in at clone)."""

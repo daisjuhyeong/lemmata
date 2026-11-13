@@ -369,6 +369,27 @@ class HubTest(HubBase):
                 del lemmata.mcp
 
     # ------------------------------------------------------------ GitHub, projects
+    def test_create_explains_a_repo_it_cannot_copy(self):
+        """S22: a private repo with a public-only sign-in, or a missing branch, gets a plain reason instead of git's prompt error."""
+        self.fake.approve()
+        if not self.hub.gh.stored():
+            self.api("POST", "/api/hub/github/start"); self.api("GET", "/api/hub/github/poll")
+        s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/demo-code", "branch": "no-such-branch"})
+        self.assertEqual((s, r["error"]["code"]), (404, "branch_not_found"), r)
+        self.assertIn("git push -u origin no-such-branch", r["error"]["message"])
+        s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/missing-repo"})
+        self.assertEqual((s, r["error"]["code"]), (404, "repo_not_found"), r)
+        real = self.hub.gh.user_public
+        self.hub.gh.user_public = lambda login=None: dict(real(login) or {}, private_repos=False)
+        try:
+            s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/missing-repo"})
+        finally:
+            self.hub.gh.user_public = real
+        self.assertEqual((s, r["error"]["code"]), (403, "github_public_only"), r)
+        self.assertIn("private repositories", r["error"]["message"])
+        self.assertEqual(self.api("GET", "/api/hub/projects")[1]["projects"], [], "nothing is left behind")
+        self.assertFalse(any((self.data / "projects").iterdir()) if (self.data / "projects").exists() else False)
+
     def make_project(self):
         s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/demo-code"})
         self.assertEqual(s, 201, r)
