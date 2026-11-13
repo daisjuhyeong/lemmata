@@ -1950,7 +1950,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (!S.tabs.length) { S.tabs = [{ k: 'claims' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
@@ -1964,13 +1964,13 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
-    case 'review': case 'claims': case 'timeline': case 'experiments': case 'tasks': case 'ask': case 'notation': return RX_TABS[t.k][1];
+    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'notation': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
   return '';
 }
-const TAB_GLYPH = { digest: '',  changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', review: '◎', claims: '◆', timeline: '⚑', experiments: '▦', tasks: '☑', ask: '?', notation: '𝑥' };
+const TAB_GLYPH = { digest: '',  changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', review: '◎', claims: '◆', timeline: '⚑', experiments: '▦', setup: '⊞', tasks: '☑', ask: '?', notation: '𝑥' };
 function openTab(k, id, opts) {
   opts = opts || {};
   const key = tabKey({ k, id });
@@ -2008,8 +2008,8 @@ function navGo(d) {
 
 /* ---------- shell DOM (S18): band, one column, footer ---------- */
 /* The four top-level pages. Every other page belongs to one of them (shown as active) and is reached from a link on that page or from the footer. */
-const NAV = [['claims', 'Claims'], ['experiments', 'Experiments'], ['digest', 'Digest'], ['review', 'Review']];
-const NAV_OF = { claims: 'claims', timeline: 'claims', notation: 'claims', graph: 'claims', item: 'claims', node: 'claims', experiments: 'experiments', digest: 'digest', tasks: 'digest', history: 'digest', ask: 'digest', review: 'review', changes: 'review', checks: 'review' };
+const NAV = [['claims', 'Claims'], ['experiments', 'Experiments'], ['setup', 'Setup'], ['digest', 'Digest'], ['review', 'Review']];
+const NAV_OF = { claims: 'claims', timeline: 'claims', notation: 'claims', graph: 'claims', item: 'claims', node: 'claims', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'digest', ask: 'digest', review: 'review', changes: 'review', checks: 'review' };
 const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
@@ -2051,7 +2051,7 @@ function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;
   const t = S.tabs[S.active], cur = t ? NAV_OF[t.k] : null;
   const badge = k => k === 'claims' ? ((RX.claims && RX.claims.counts && RX.claims.counts.stages) ? (RX.claims.counts.stages.testing + RX.claims.counts.stages.refuted) || 0 : 0)
-    : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0) : k === 'review' ? M.todo || 0 : (RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0);
+    : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0) : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : (RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0);
   NAV.forEach(([k, label]) => {
     const on = k === cur, n = badge(k);
     bar.append(h('button', { class: 'navtab' + (on ? ' on' : ''), role: 'tab', 'aria-selected': String(on), 'aria-label': label + (n ? ', ' + n + ' to look at' : ''), title: label, onclick: () => openTab(k) },
@@ -2064,7 +2064,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
@@ -2199,7 +2199,7 @@ function currentItemCmd(state) {
 function palette() {
   const it = S.tabs[S.active] && S.tabs[S.active].k === 'item' ? M.byId.get(S.tabs[S.active].id) : null;
   const cmds = [
-    { label: 'Go to Review', run: () => openTab('review') }, { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Notation', run: () => openTab('notation') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
+    { label: 'Go to Review', run: () => openTab('review') }, { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Notation', run: () => openTab('notation') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Setup (metrics, datasets, baselines)', run: () => openTab('setup') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
     { label: 'Go to Changes', run: () => openTab('changes') }, { label: 'Go to Graph', run: () => openTab('graph') }, { label: 'Go to Checks', run: () => openTab('checks') }, { label: 'Go to History', run: () => openTab('history') },
     { label: 'Open item…', hint: 'Ctrl+O', run: () => quickSwitcher() },
     { label: 'Mark everything as looked at', run: () => markAllDialog(), disabled: READONLY, reason: 'Read-only snapshot' },

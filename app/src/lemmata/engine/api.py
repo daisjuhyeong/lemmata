@@ -21,6 +21,7 @@ from . import tree as treemod
 from . import review as reviewmod
 from . import plans as plansmod
 from . import runs as runsmod
+from . import setup as setupmod
 from . import triage as triagemod
 from . import understand as undmod
 from .errors import BadRequest, NotFound
@@ -522,6 +523,11 @@ class Engine:
 
     def experiment(self, exp_id):
         return self._exp(exp_id)
+
+    def setup(self):
+        """The metrics, datasets and methods the experiments use, each with how every experiment uses it (S23)."""
+        s = self._ensure()
+        return setupmod.build(self.experiments(), s["G"], s["trees"])
 
     def set_experiment(self, exp_id, ours=None, metric=None, lower=None, measure=None):
         s = self._ensure()

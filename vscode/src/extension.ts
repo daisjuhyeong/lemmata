@@ -471,7 +471,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const t = await pickProject(it); if (!t) return;
       await vscode.env.openExternal(vscode.Uri.parse(CTRL.serverBase() + '/p/' + encodeURIComponent(t.pid) + '/'));
     }),
-    ...(['', 'review', 'claims', 'experiments'] as const).map(v => c('lemmata.openTab' + (v ? '.' + v : ''), async (arg?: Item | string) => {
+    ...(['', 'review', 'claims', 'experiments', 'setup'] as const).map(v => c('lemmata.openTab' + (v ? '.' + v : ''), async (arg?: Item | string) => {
       const t = await pickProject(typeof arg === 'string' ? undefined : arg); if (!t) return;
       const view: View | undefined = v || (isView(arg) ? arg : undefined);
       const b = CTRL.bound.find(x => x.binding.project.id === t.pid);

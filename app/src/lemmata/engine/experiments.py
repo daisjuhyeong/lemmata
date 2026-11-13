@@ -442,6 +442,9 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
             x["summary"] = dict(s or {}, ours_label=ours, ours_by=how, metric=col, lower=lower, metric_by="you" if e.get("metric") in tab["cols"] else "first column",
                                 methods=[r["label"] for r in tab["rows"]], baselines=[r["label"] for r in tab["rows"] if r["label"] != ours],
                                 cols=tab["cols"], datasets=tab["datasets"] or ([c for c in tab["cols"]] if len(tab["cols"]) > 1 and tab["metrics"] and len(tab["metrics"]) == 1 and tab["datasets"] else []))
+            main = tab["metrics"][0] if len(tab["metrics"]) == 1 else col.rsplit(" · ", 1)[-1]
+            x["grid"] = {"cols": tab["cols"], "rows": [{"label": r["label"], "values": r["values"], "n": r["n"]} for r in tab["rows"][:40]],
+                         "datasets": tab["datasets"], "metric": main, "measures": tab["metrics"], "tuning": False}
             hist = history(events, infos, G.nodes, rn["repo"], rn["loc"]["path"], ours, col, lower)
             x["history_n"] = len(hist)
             x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]

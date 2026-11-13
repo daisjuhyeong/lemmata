@@ -8,7 +8,7 @@ export const KATEX_FONT_DIR = '/vendor/katex/fonts/';
 /** Where the hub keeps its own fonts (Source Serif 4 for headings). The sans font is not sent: the tab uses the editor's font. */
 export const FONT_DIR = '/fonts/';
 export const TAB_FONTS = /^SourceSerif4-/;
-export const VIEWS = ['review', 'claims', 'experiments', 'digest', 'timeline', 'tasks', 'notation', 'changes', 'graph', 'ask'] as const;
+export const VIEWS = ['review', 'claims', 'experiments', 'setup', 'digest', 'timeline', 'tasks', 'notation', 'changes', 'graph', 'ask'] as const;
 export type View = typeof VIEWS[number];
 
 export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';

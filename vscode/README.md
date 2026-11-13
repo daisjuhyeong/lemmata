@@ -8,9 +8,9 @@ The extension only talks to your own Lemmata hub (the Mac mini). No telemetry, n
 
 ## Install
 
-The packaged file is `vscode/lemmata-0.5.0.vsix`.
+The packaged file is `vscode/lemmata-0.6.0.vsix`.
 
-- Command line: `code --install-extension vscode/lemmata-0.5.0.vsix`
+- Command line: `code --install-extension vscode/lemmata-0.6.0.vsix`
 - Or in VS Code: Extensions view -> `...` menu (top right) -> **Install from VSIX...** -> pick the file.
 
 Requires VS Code 1.93 or newer and `git` on your PATH. Run capture from the terminal needs VS Code's shell integration (on by default for bash, zsh, fish and PowerShell).
@@ -48,7 +48,7 @@ A hub path such as `code/configs/default.yaml` or `paper/main.tex` is mapped ont
 
 ## The Lemmata tab (since 0.3.0)
 
-**Lemmata: Open Lemmata (in a tab)**, or the button at the top of the panel, opens the hub's own pages inside VS Code: Review, the Claims tree, Experiments, Timeline, Tasks, Notation, Changes and the graph. **Open Review**, **Open Claims tree** and **Open Experiments** go straight to one page. It is the same app as the website, so what you edit here (a hoped conclusion, a confirmed claim, a checklist item) is saved on the hub.
+**Lemmata: Open Lemmata (in a tab)**, or the button at the top of the panel, opens the hub's own pages inside VS Code: Review, the Claims tree, Experiments, Setup, Timeline, Tasks, Notation, Changes and the graph. **Open Review**, **Open Claims tree**, **Open Experiments** and **Open Setup** go straight to one page. It is the same app as the website, so what you edit here (a hoped conclusion, a confirmed claim, a checklist item) is saved on the hub.
 
 - **It works over Remote-SSH.** The page has no network access of its own. Every request it makes is passed to the extension, which calls the hub with your token. Only the extension needs to reach the hub.
 - **The token never enters the page**, and the page can only reach its own project: requests for other projects, tokens, devices or users are refused by the extension.
@@ -99,5 +99,5 @@ npm run compile
 npm test                    # unit tests (node's test runner)
 npm run test:integration    # real hub + fake GitHub, needs python3 and git
 npm run test:host           # optional: extension-host smoke test (downloads VS Code)
-npx @vscode/vsce package    # -> lemmata-0.5.0.vsix
+npx @vscode/vsce package    # -> lemmata-0.6.0.vsix
 ```

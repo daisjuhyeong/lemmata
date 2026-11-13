@@ -159,6 +159,9 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             target = spec.get("target")
             lower = True if target is not None else e["lower"] if "lower" in e else spec["lower"] if spec.get("lower") is not None else lower_better(tab["metric"])
             raw, tab = tab, toward(tab, target)
+            # the raw numbers per method and column, small enough for every list: the Setup page reads them
+            x["grid"] = {"cols": raw["cols"], "rows": [{"label": r["label"], "values": r["values"], "n": r["n"]} for r in raw["rows"][:40]],
+                         "datasets": raw["datasets"], "metric": raw["metric"], "measures": raw["measures"], "tuning": tuning}
             if tuning:
                 vals = [(r["label"], r["values"][col]) for r in tab["rows"] if col in r["values"]]
                 best = (min if lower else max)(vals, key=lambda v: v[1]) if vals else None

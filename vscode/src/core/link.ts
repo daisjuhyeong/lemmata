@@ -7,8 +7,8 @@ export const LINK_AUTHORITY = 'lemmata-local.lemmata';
 export interface OpenLink { pid: string; view: View; sel: string | null }
 
 const PID_RE = /^[a-z0-9-]{1,64}$/;
-/** q:<claim or question id> or x:<experiment id>; ids are node ids, which may hold ':' '/' '.' but no spaces, quotes or control characters. */
-const SEL_RE = /^[qx]:[^\s<>"'`\\\x00-\x1f\x7f]{1,300}$/;
+/** q:<claim or question id>, x:<experiment id>, or on Setup i:<metric, dataset or method>, c:<claim>; ids are node ids, which may hold ':' '/' '.' but no spaces, quotes or control characters. */
+const SEL_RE = /^[qxic]:[^\s<>"'`\\\x00-\x1f\x7f]{1,300}$/;
 
 export function parseOpenLink(path: string, query: string): OpenLink | null {
   if (path !== '/open' && path !== '/open/') return null;

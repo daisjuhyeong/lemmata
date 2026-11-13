@@ -35,3 +35,8 @@ test('the website builds the same link the extension reads', () => {
   assert.equal(pkg.publisher + '.' + pkg.name, LINK_AUTHORITY);
   assert.ok(pkg.activationEvents.includes('onUri'));
 });
+
+test('S23: the Setup page opens from a link with a metric, dataset, method or claim selected', () => {
+  for (const sel of ['i:dataset:electricity', 'i:method:mcd-dd', 'c:mine:1', 'x:map:main']) assert.deepEqual(parse(openLink('mcd-extension-5f70', 'setup', sel)), { pid: 'mcd-extension-5f70', view: 'setup', sel });
+  assert.equal(parse('vscode://' + LINK_AUTHORITY + '/open?pid=mcd-extension-5f70&view=setup&sel=z:nope'), null);
+});

@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -19,12 +19,13 @@ function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = n
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
 function rxGoto(view, sel) {
   if (view === 'experiments' && /^[qx]:/.test(sel || '')) { RX.exView = 'map'; RX.mapSel = sel; RX.exOpen = null; }
+  if (view === 'setup' && /^[ixc]:/.test(sel || '')) RX.suSel = sel;
   openTab(view);
 }
 /* Website only: a link that opens this page in VS Code's Lemmata tab (vscode/src/core/link.ts reads it). */
-function rxVsLink(sel, label) {
+function rxVsLink(sel, label, view) {
   if (EMBED || !PID) return null;
-  return h('a', { class: 'btn sm', href: 'vscode://lemmata-local.lemmata/open?pid=' + encodeURIComponent(PID) + '&view=experiments&sel=' + encodeURIComponent(sel),
+  return h('a', { class: 'btn sm', href: 'vscode://lemmata-local.lemmata/open?pid=' + encodeURIComponent(PID) + '&view=' + (view || 'experiments') + '&sel=' + encodeURIComponent(sel),
     title: 'Open in VS Code, in the Lemmata tab. Needs the Lemmata extension, connected to this hub.' }, label || 'Open in VS Code');
 }
 /* VS Code tab only: buttons that open an experiment's own files (scripts, settings, result) in the editor. */
@@ -67,9 +68,10 @@ async function rxLoad() {
     const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
     let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
     let map = null; try { map = await apiGet('/api/map'); } catch (e) { /* older data has no map */ }
+    let setup = null; try { setup = await apiGet('/api/setup'); } catch (e) { /* older hubs and snapshots: the page says so */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -97,7 +99,7 @@ function rxNodeBtn(nid, label) {
 async function rxPost(path, body, okMsg) {
   try {
     const r = await apiPost(path, body); if (okMsg) toast(okMsg);
-    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; RX.experiments = await apiGet('/api/experiments'); } catch (e) { /* the old tree stays */ } }
+    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; RX.experiments = await apiGet('/api/experiments'); RX.setup = null; } catch (e) { /* the old tree stays */ } }
     else RX.digest = null;
     return r;
   }
@@ -529,7 +531,7 @@ function rxPaperGrid(x) {
 function rxExpDetail(id) {
   const box = h('div', { class: 'rx-x-d' }, h('div', { class: 'muted' }, '…'));
   const load = () => apiGet('/api/experiment?id=' + encodeURIComponent(id)).then(paint).catch(e => { clear(box).append(h('div', { class: 'muted' }, e.message)); });
-  const post = async body => { const r = await rxPost('/api/experiment', Object.assign({ id }, body)); if (r) { try { RX.experiments = await apiGet('/api/experiments'); } catch (e) { /* keep */ } renderPage(true); } };
+  const post = async body => { const r = await rxPost('/api/experiment', Object.assign({ id }, body)); if (r) { try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; } catch (e) { /* keep */ } renderPage(true); } };
   function paint(x) {
     const sm = x.summary, gh = u => u ? h('a', { class: 'ghl', href: u, target: '_blank', rel: 'noopener noreferrer' }, '↗') : null;
     const blk = (title, ...kids) => h('section', { class: 'rx-x-b' }, h('h4', null, title), kids);
@@ -596,7 +598,7 @@ function rxExpDetail(id) {
 const RX_MAP_PROMPT = name => 'Use Lemmata to understand the project "' + name + '": call project_brief (every part), read the paper and code if you have them, then propose_map. If this work extends the linked paper, set base (the original method) and goal (the new target). Fix whatever the checker drops and propose again.';
 function rxMapCard() {
   const M = RX.map, E = RX.experiments; if (!M) return null;
-  const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
+  const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
   const name = S.project ? S.project.name : 'this project';
   if (M.state === 'none') return h('section', { class: 'rx-map none' },
     h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Not mapped yet'), h('span', { class: 'grow' }),
@@ -1135,7 +1137,187 @@ function rxNotationDetail(s, post) {
 }
 
 /* ---------- wiring into the shell ---------- */
-const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, tasks: pageTasks, ask: pageAsk };
+/* ---------- Setup (S23): the metrics, datasets and methods the experiments use ----------
+   Left: every metric, dataset and method found in the experiments' result files. Middle: the experiments. Right: the
+   claims they test. Click any box: what it connects to stays lit, and the panel under the map says how each experiment
+   uses it, where the paper and the code name it, and what to check. Everything comes from /api/setup (rules only). */
+const SU_KIND = { metric: ['Metrics', 'Metric'], dataset: ['Datasets', 'Dataset'], method: ['Methods', 'Method'] };
+const SU_ROLE = { ours: 'Ours', base: 'Extends', baseline: 'Baseline', variant: 'Variant' };
+const SU_XTYPE = { main: 'Main', ablation: 'Ablation', sensitivity: 'Sensitivity', tuning: 'Search', efficiency: 'Cost', analysis: 'Analysis', other: 'Other', table: 'Table', figure: 'Figure', result: 'Result', group: '' };
+function suDir(u) { return u.target != null ? 'closest to ' + rxFmt(u.target) : u.lower ? '↓ lower is better' : '↑ higher is better'; }
+function suDirShort(d) { return !d ? 'recorded only' : d === 'mixed' ? '! direction differs' : d.startsWith('target') ? '→ ' + d.slice(7) + ' is best' : d === 'lower' ? '↓ lower is better' : '↑ higher is better'; }
+function suSub(it, D) {
+  const nx = it.experiments.length, ex = plural(nx, 'experiment');
+  if (it.kind === 'metric') return suDirShort(it.direction) + ' · ' + (it.main_in ? 'main in ' + it.main_in + ' of ' + nx : ex);
+  if (it.kind === 'dataset') return ex + (it.compared ? ' · ours best in ' + it.ours_best + ' of ' + it.compared : '');
+  if (it.role === 'ours') return 'Ours · ' + ex;
+  return (SU_ROLE[it.role] || 'Method') + ' · ' + (it.compared ? 'beats ours in ' + it.wins + ' of ' + it.compared : ex);
+}
+async function suLoad() {
+  if (RX.setupBusy) return; RX.setupBusy = true;
+  try { RX.setup = await apiGet('/api/setup'); RX.setupErr = null; } catch (e) { RX.setupErr = e.status === 404 || e.status === 501 ? 'This hub has no Setup page yet. It appears after the hub updates.' : e.message; }
+  RX.setupBusy = false; const t = S.tabs[S.active]; if (t && t.k === 'setup') renderPage(true);
+}
+function suGotoClaim(cid) { RX.sel = cid; RX.view = 'tree'; openTab('claims'); }
+function suLink(sel, label, cls, title) { return h('button', { class: 'chip-btn su-chip' + (cls ? ' ' + cls : ''), title: title || null, onclick: () => { RX.suSel = sel; renderPage(true); const el = document.querySelector('.su-detail'); if (el) el.scrollIntoView({ block: 'nearest' }); } }, label); }
+function suWhereLine(hit) {
+  const loc = { path: hit.path, line: hit.line };
+  const open = EMBED && hit.repo ? h('button', { class: 'linkbtn mono small', title: 'Open in the editor', onclick: () => EMBED.openFile(hit.repo, hit.path, hit.line || 1) }, hit.path + ':' + hit.line) : rxWhere(loc, hit.repo);
+  return h('div', { class: 'su-hit' }, open, hit.appendix ? h('span', { class: 'tag' }, 'appendix') : null, h('span', { class: 'su-hit-t' + (hit.kind ? ' mono' : ' serif') }, rxMath(hit.text || '')));
+}
+/* The map. Positions are computed; nothing is dragged. */
+function suMap(D, sel, filter) {
+  const kinds = filter === 'all' ? ['metric', 'dataset', 'method'] : [filter];
+  const items = D.items.filter(it => kinds.includes(it.kind));
+  const exps = D.experiments.filter(x => x.items.length || x.claims.length), claims = D.claims;
+  // fit the page (website: up to the wide column; VS Code: its panel), never narrower than the boxes need
+  const pg = document.getElementById('page'), avail = Math.max(700, Math.min(1052, ((pg && pg.clientWidth) || 800) - 48));
+  const CW = [Math.round(avail * .25), Math.round(avail * .22), Math.round(avail * .26)], gap = Math.round((avail - CW[0] - CW[1] - CW[2]) / 2);
+  const IH = 46, HEAD = 26, GAPK = 14, CX = [0, CW[0] + gap, CW[0] + CW[1] + 2 * gap], W = CX[2] + CW[2];
+  const iy = new Map(); let y = 0;
+  kinds.forEach(k => { const its = items.filter(it => it.kind === k); if (!its.length) return; iy.set('h:' + k, y); y += HEAD; its.forEach(it => { iy.set(it.id, y); y += IH; }); y += GAPK; });
+  const XH = 40, CH = 84;
+  const H = Math.max(y - GAPK, exps.length * (XH + 10), claims.length * (CH + 12), 160);
+  const xStep = exps.length ? Math.min(XH + 26, H / exps.length) : 0, cStep = claims.length ? Math.min(CH + 34, H / claims.length) : 0;
+  const x0 = (H - xStep * exps.length) / 2, c0 = (H - cStep * claims.length) / 2;
+  const xy = new Map(exps.map((x, i) => [x.id, x0 + i * xStep + (xStep - XH) / 2])), cy = new Map(claims.map((c, i) => [c.id, c0 + i * cStep + (cStep - CH) / 2]));
+  const byI = new Map(D.items.map(it => [it.id, it])), byX = new Map(D.experiments.map(x => [x.id, x])), byC = new Map(claims.map(c => [c.id, c]));
+  // what stays lit
+  const litI = new Set(), litX = new Set(), litC = new Set();
+  const k = sel ? sel.slice(0, 1) : null, id = sel ? sel.slice(2) : null;
+  if (k === 'i' && byI.has(id)) { litI.add(id); byI.get(id).experiments.forEach(x => litX.add(x)); byI.get(id).claims.forEach(c => litC.add(c)); }
+  if (k === 'x' && byX.has(id)) { litX.add(id); byX.get(id).items.forEach(i => litI.add(i)); byX.get(id).claims.forEach(c => litC.add(c)); }
+  if (k === 'c' && byC.has(id)) { litC.add(id); byC.get(id).experiments.forEach(x => litX.add(x)); byC.get(id).items.forEach(i => litI.add(i)); }
+  const on = sel && (litI.size || litX.size || litC.size);
+  const dim = (set, v) => on && !set.has(v) ? ' dim' : '';
+  const pick = s => { RX.suSel = RX.suSel === s ? null : s; renderPage(true); };
+  const svg = sv('svg', { class: 'rx-m-edges', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'aria-hidden': 'true' });
+  const curve = (x1, y1, x2, y2) => 'M' + x1 + ',' + y1 + ' C' + (x1 + x2) / 2 + ',' + y1 + ' ' + (x1 + x2) / 2 + ',' + y2 + ' ' + x2 + ',' + y2;
+  const box = h('div', { class: 'rx-m su-m', style: 'width:' + W + 'px;height:' + H + 'px' }, svg);
+  // edges: item -> experiment, experiment -> claim
+  exps.forEach(x => {
+    x.items.forEach(i => { if (!iy.has(i)) return; const lit = on && litI.has(i) && litX.has(x.id) && (k !== 'i' || i === id);
+      svg.append(sv('path', { d: curve(CW[0], iy.get(i) + (IH - 6) / 2, CX[1], xy.get(x.id) + XH / 2), class: 'me su-e ' + (byI.get(i) || {}).kind + (lit ? ' lit' : on ? ' dim' : '') })); });
+    x.claims.forEach(c => { if (!cy.has(c)) return; const lit = on && litX.has(x.id) && litC.has(c) && (k !== 'c' || c === id);
+      svg.append(sv('path', { d: curve(CX[1] + CW[1], xy.get(x.id) + XH / 2, CX[2], cy.get(c) + CH / 2), class: 'me su-e' + (lit ? ' lit' : on ? ' dim' : '') })); });
+  });
+  kinds.forEach(kk => { if (iy.has('h:' + kk)) box.append(h('span', { class: 'rx-m-scope su-kh', style: 'left:0;top:' + (iy.get('h:' + kk) + 4) + 'px' }, SU_KIND[kk][0] + ' · ' + items.filter(it => it.kind === kk).length)); });
+  box.append(h('span', { class: 'rx-m-scope su-kh', style: 'left:' + CX[1] + 'px;top:-20px' }, 'Experiments · ' + exps.length), h('span', { class: 'rx-m-scope su-kh', style: 'left:' + CX[2] + 'px;top:-20px' }, 'Claims they test · ' + claims.length));
+  items.forEach(it => {
+    box.append(h('button', { class: 'su-i k-' + it.kind + (it.role ? ' r-' + it.role : '') + (sel === 'i:' + it.id ? ' sel' : '') + dim(litI, it.id), style: 'left:0;top:' + iy.get(it.id) + 'px;width:' + CW[0] + 'px;height:' + (IH - 6) + 'px',
+      'aria-pressed': String(sel === 'i:' + it.id), title: it.name + (it.aliases.length ? ' (also ' + it.aliases.join(', ') + ')' : '') + (it.checks.length ? ' · ' + it.checks.map(c => c.t).join('; ') : ''), onclick: () => pick('i:' + it.id) },
+      h('span', { class: 'su-in' }, h('b', null, it.name), it.checks.length ? h('span', { class: 'rx-m-chk' }, '!') : null), h('span', { class: 'su-is' }, suSub(it, D))));
+  });
+  exps.forEach(x => box.append(h('button', { class: 'rx-m-x su-x' + (sel === 'x:' + x.id ? ' sel' : '') + dim(litX, x.id), style: 'left:' + CX[1] + 'px;top:' + xy.get(x.id) + 'px;width:' + CW[1] + 'px;height:' + XH + 'px',
+    'aria-pressed': String(sel === 'x:' + x.id), title: x.name, onclick: () => pick('x:' + x.id) }, h('span', { class: 'rx-m-xn' }, x.name), SU_XTYPE[x.type] ? h('span', { class: 'rx-m-xv' }, SU_XTYPE[x.type]) : null, x.attention ? h('span', { class: 'rx-m-chk' }, '!') : null)));
+  claims.forEach(c => { const st = c.stage ? RX_STAGE[c.stage] : RX_STATUS[c.status] || RX_STATUS.partial;
+    box.append(h('button', { class: 'rx-m-q su-c' + (c.stage ? rxSt(c.stage) : '') + (sel === 'c:' + c.id ? ' sel' : '') + dim(litC, c.id), style: 'left:' + CX[2] + 'px;top:' + cy.get(c.id) + 'px;width:' + CW[2] + 'px;height:' + CH + 'px',
+      'aria-pressed': String(sel === 'c:' + c.id), onclick: () => pick('c:' + c.id) },
+      h('span', { class: 'rx-m-qh' }, h('b', null, c.label), st ? h('span', { class: 'rx-m-stage ' + st[2] }, st[0] + ' ' + st[1]) : null), h('span', { class: 'rx-m-qt serif' }, rxMath(trunc(c.text, 80))))); });
+  return h('div', { class: 'rx-m-wrap su-wrap' }, box);
+}
+function suUsesTable(it, D) {
+  const byX = new Map(D.experiments.map(x => [x.id, x])), byC = new Map(D.claims.map(c => [c.id, c]));
+  const xcell = u => { const x = byX.get(u.x) || { name: u.x, claims: [] };
+    return h('td', null, h('button', { class: 'ilink', title: 'Open this experiment', onclick: () => rxOpenExp(u.x) }, x.name),
+      h('div', { class: 'su-cl' }, x.claims.map(c => byC.get(c) ? h('button', { class: 'linkbtn small', title: byC.get(c).text, onclick: () => suGotoClaim(c) }, byC.get(c).label) : null))); };
+  const num = (v, cls) => h('td', { class: 'mono' + (cls ? ' ' + cls : '') }, v == null ? '—' : rxFmt(v));
+  const best = b => b ? [h('span', null, rxFmt(b.value)), h('span', { class: 'muted small' }, ' ' + trunc(b.label, 18))] : '—';
+  let head, rows;
+  if (it.kind === 'metric') {
+    head = ['Experiment', 'Role', 'Better', 'Ours', 'Best other', 'Datasets'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', null, u.role === 'main' ? h('b', null, 'Main number') : u.role === 'compared' ? 'In the table' : h('span', { class: 'muted' }, 'Recorded, not compared')),
+      h('td', { class: 'small' }, u.role === 'main' ? suDir(u) : '—'), u.tuning ? h('td', { class: 'small' }, u.best_setting ? ['best ', h('span', { class: 'mono' }, rxFmt(u.best_setting.value)), h('div', { class: 'muted small' }, trunc(u.best_setting.label, 28))] : '—') : num(u.ours),
+      h('td', { class: 'mono' }, u.tuning ? h('span', { class: 'muted' }, plural(u.runs || 0, 'setting')) : best(u.best_other)), h('td', { class: 'small' }, (u.datasets || []).length ? trunc(u.datasets.join(', '), 60) : '—')));
+  } else if (it.kind === 'dataset') {
+    head = ['Experiment', 'Metric', 'Ours', 'Best other', 'Rank of ours', 'Not run'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', { class: 'small' }, h('span', { class: 'mono' }, u.metric), h('div', { class: 'muted small' }, suDir(u))),
+      u.tuning ? h('td', { class: 'small' }, u.best_setting ? ['best ', h('span', { class: 'mono' }, rxFmt(u.best_setting.value)), h('div', { class: 'muted small' }, trunc(u.best_setting.label, 28))] : '—') : num(u.ours, u.rank === 1 ? 'good' : u.rank ? 'bad' : ''),
+      h('td', { class: 'mono' }, u.tuning ? h('span', { class: 'muted' }, plural(u.runs || 0, 'setting')) : best(u.best_other)),
+      h('td', { class: 'small' }, u.rank ? u.rank + ' of ' + u.methods : '—'), h('td', { class: 'small' + ((u.missing || []).length ? ' warn' : ' muted') }, (u.missing || []).length ? trunc(u.missing.join(', '), 50) : 'none')));
+  } else if (it.role === 'ours') {
+    head = ['Experiment', 'Metric', 'Ours', 'Rank', 'Runs per cell'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', { class: 'small' }, h('span', { class: 'mono' }, u.metric), h('div', { class: 'muted small' }, suDir(u) + (u.column && u.column !== u.metric ? ' · ' + u.column : ''))), num(u.value, u.rank === 1 ? 'good' : ''),
+      h('td', { class: 'small' }, u.ours_here ? (u.rank ? u.rank + ' of ' + u.methods : '—') : h('span', { class: 'muted' }, 'not ours here (ours: ' + (u.ours_label || '?') + ')')), h('td', { class: 'small' }, u.runs || '—')));
+  } else {
+    head = ['Experiment', 'Metric', 'This method', 'Ours', 'Ours ahead by', 'Per dataset'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', { class: 'small' }, h('span', { class: 'mono' }, u.metric), h('div', { class: 'muted small' }, suDir(u) + (u.column && u.column !== u.metric ? ' · ' + u.column : ''))),
+      num(u.value), u.ours_here ? h('td', { class: 'small muted' }, 'ours here') : num(u.ours), u.gap == null ? h('td', { class: 'muted' }, '—') : h('td', { class: 'mono ' + (u.gap > 0 ? 'good' : u.gap < 0 ? 'bad' : '') }, (u.gap > 0 ? '+' : u.gap < 0 ? '−' : '') + rxFmt(Math.abs(u.gap))),
+      h('td', null, h('div', { class: 'su-cells' }, (u.cells || []).filter(c => c.dataset).map(c => h('span', { class: 'su-cell' + (c.value == null ? ' miss' : c.better === true ? ' bad' : c.better === false ? ' good' : ''),
+        title: c.dataset + ': ' + (c.value == null ? 'no result' : rxFmt(c.value) + (c.ours != null ? ' vs ours ' + rxFmt(c.ours) + (c.better ? ' (beats ours)' : c.better === false ? ' (ours better)' : '') : '')) + (c.n ? ' · ' + plural(c.n, 'run') : '') },
+        h('span', { class: 'su-cd' }, trunc(c.dataset, 12)), h('span', { class: 'mono' }, c.value == null ? '×' : rxFmt(c.value))))))));
+  }
+  return h('div', { class: 'su-tw' }, h('table', { class: 'tbl su-t' }, h('thead', null, h('tr', null, head.map(t => h('th', null, t)))), h('tbody', null, rows)));
+}
+function suItemDetail(it, D) {
+  const P = it.paper || {}, C = it.code || {};
+  const facts = [];
+  if (it.kind === 'metric') facts.push(suDirShort(it.direction), it.main_in ? 'main number in ' + plural(it.main_in, 'experiment') : 'never the main number');
+  if (it.kind === 'dataset') { facts.push(plural(it.experiments.length, 'experiment')); if (it.compared) facts.push('ours best in ' + it.ours_best + ' of ' + it.compared); if ((it.metrics || []).length) facts.push('scored with ' + it.metrics.join(', ')); }
+  if (it.kind === 'method') { facts.push(SU_ROLE[it.role] || 'Method', plural(it.experiments.length, 'experiment')); if (it.compared) facts.push('beats ours in ' + it.wins + ' of ' + plural(it.compared, 'comparison')); }
+  return h('section', { class: 'rx-x-sec su-detail' },
+    h('div', { class: 'rx-x-h' }, h('span', { class: 'tag' }, SU_KIND[it.kind][1]), h('b', { class: 'su-dn' }, it.name), it.aliases.length ? h('span', { class: 'muted small' }, 'also ' + it.aliases.join(', ')) : null, h('span', { class: 'grow' }),
+      rxVsLink('i:' + it.id, null, 'setup'), h('button', { class: 'linkbtn small', onclick: () => { RX.suSel = null; renderPage(true); } }, 'Close')),
+    h('div', { class: 'su-body' },
+      h('div', { class: 'su-facts' }, facts.map(f => h('span', null, f))),
+      it.checks.length ? h('div', { class: 'su-checks' }, it.checks.map(c => h('div', { class: 'rx-warn' }, '! ' + c.t))) : null,
+      h('h4', { class: 'su-h' }, 'How the experiments use it'), suUsesTable(it, D),
+      h('div', { class: 'su-two' },
+        h('div', null, h('h4', { class: 'su-h' }, 'In the paper', h('span', { class: 'muted small' }, P.n ? ' · ' + plural(P.n, 'line') + (P.appendix_only ? ', appendix only' : '') : '')),
+          P.n ? [P.lines.map(suWhereLine), P.cites.length ? h('div', { class: 'su-cites' }, h('span', { class: 'muted small' }, 'Cited with it: '), P.cites.map(c => h('span', { class: 'su-cite', title: c.key }, c.title ? trunc(c.title, 70) + (c.year ? ' (' + c.year + ')' : '') : h('span', { class: 'mono' }, c.key)))) : null]
+            : h('p', { class: 'muted small' }, D.has_paper === false ? 'No paper linked.' : 'The paper never names it.')),
+        h('div', null, h('h4', { class: 'su-h' }, 'In the code', h('span', { class: 'muted small' }, C.n ? ' · ' + plural(C.files || 0, 'file') : '')),
+          C.n ? C.hits.map(suWhereLine) : h('p', { class: 'muted small' }, 'Not found in the code or settings by name.')))));
+}
+function suGroupChips(ids, D, main) {
+  const byI = new Map(D.items.map(it => [it.id, it]));
+  return ['metric', 'dataset', 'method'].map(k => { const its = ids.map(i => byI.get(i)).filter(it => it && it.kind === k); if (!its.length) return null;
+    return h('div', { class: 'su-grp' }, h('span', { class: 'su-gk' }, SU_KIND[k][0]), its.map(it => suLink('i:' + it.id, it.name + (it.id === main ? ' · main number' : '') + (it.role && it.role !== 'baseline' ? ' · ' + SU_ROLE[it.role] : ''), 'k-' + it.kind + (it.checks.length ? ' chk' : '')))); });
+}
+function suOtherDetail(sel, D) {
+  const id = sel.slice(2);
+  if (sel.startsWith('x:')) { const x = D.experiments.find(e => e.id === id); if (!x) return null;
+    const byC = new Map(D.claims.map(c => [c.id, c]));
+    return h('section', { class: 'rx-x-sec su-detail' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'tag' }, 'Experiment'), h('b', { class: 'su-dn' }, x.name), SU_XTYPE[x.type] ? h('span', { class: 'muted small' }, SU_XTYPE[x.type]) : null, h('span', { class: 'grow' }),
+      h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open experiment'), rxVsLink('x:' + x.id), h('button', { class: 'linkbtn small', onclick: () => { RX.suSel = null; renderPage(true); } }, 'Close')),
+      h('div', { class: 'su-body' }, x.claims.length ? h('div', { class: 'su-grp' }, h('span', { class: 'su-gk' }, 'Tests'), x.claims.map(c => byC.get(c) ? suLink('c:' + c, byC.get(c).label, null, byC.get(c).text) : null)) : h('p', { class: 'muted small' }, 'Tests no claim yet.'),
+        x.items.length ? suGroupChips(x.items, D, x.main_metric) : h('p', { class: 'muted small' }, 'Its result files could not be read as tables, so its setup is unknown.'))); }
+  const c = D.claims.find(q => q.id === id); if (!c) return null;
+  const byX = new Map(D.experiments.map(x => [x.id, x]));
+  return h('section', { class: 'rx-x-sec su-detail' + (c.stage ? rxSt(c.stage) : '') }, h('div', { class: 'rx-x-h' }, h('span', { class: 'tag' }, 'Claim'), h('b', { class: 'su-dn' }, c.label), c.stage ? rxStageChip(c) : null, h('span', { class: 'grow' }),
+    h('button', { class: 'btn sm', onclick: () => suGotoClaim(c.id) }, 'Open in Claims'), h('button', { class: 'linkbtn small', onclick: () => { RX.suSel = null; renderPage(true); } }, 'Close')),
+    h('div', { class: 'su-body' }, h('p', { class: 'serif su-ct' }, rxMath(c.text)),
+      h('div', { class: 'su-grp' }, h('span', { class: 'su-gk' }, 'Tested by'), c.experiments.map(x => byX.get(x) ? suLink('x:' + x, byX.get(x).name) : null)), suGroupChips(c.items, D)));
+}
+function pageSetup() {
+  const nr = rxNotReady('Setup'); if (nr) return nr;
+  S.outline = [];
+  const D = RX.setup;
+  const root = doc();
+  if (!D) {
+    if (RX.setupErr) return root.append(h('h1', { class: 'ptitle' }, 'Setup'), emptyState('!', 'Not available', RX.setupErr, [h('button', { class: 'btn', onclick: () => { RX.setupErr = null; suLoad(); } }, 'Try again')])), root;
+    suLoad(); return root.append(h('h1', { class: 'ptitle' }, 'Setup'), h('p', { class: 'muted' }, 'Reading the experiments…')), root;
+  }
+  const filter = RX.suFilter || 'all', c = D.counts;
+  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Show' }, [['all', 'All'], ['metric', 'Metrics'], ['dataset', 'Datasets'], ['method', 'Methods']].map(([k, l]) =>
+    h('button', { 'aria-pressed': String(filter === k), onclick: () => { RX.suFilter = k; renderPage(true); } }, l + (k !== 'all' ? ' ' + c[k] : ''))));
+  root.classList.add('wide');
+  root.append(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Setup'), seg),
+    h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.metric), ' metrics'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''),
+      h('span', null, h('b', null, c.experiments), ' experiments'), c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
+  if (!D.mapped) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this list is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Experiments'), '.'));
+  if (!D.items.length) return root.append(emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;
+  let sel = RX.suSel || null;
+  if (sel && sel.startsWith('i:') && !D.items.some(it => it.id === sel.slice(2))) sel = RX.suSel = null;
+  root.append(suMap(D, sel, filter),
+    h('div', { class: 'rx-legend su-legend' }, h('span', null, h('span', { class: 'su-key k-metric' }), ' metric'), h('span', null, h('span', { class: 'su-key k-dataset' }), ' dataset'), h('span', null, h('span', { class: 'su-key k-method' }), ' method'), h('span', null, '! to check')));
+  if (sel && sel.startsWith('i:')) root.append(suItemDetail(D.items.find(it => it.id === sel.slice(2)), D));
+  else if (sel) { const d = suOtherDetail(sel, D); if (d) root.append(d); }
+  else root.append(h('p', { class: 'muted rx-m-hint' }, 'Click a metric, dataset or method to see how each experiment uses it. Click an experiment or claim to see what it is built on.'));
+  return root;
+}
+
+const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, tasks: pageTasks, ask: pageAsk };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

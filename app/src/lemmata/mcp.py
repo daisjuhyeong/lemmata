@@ -555,6 +555,39 @@ def t_experiments(ctx, args):
     return head + "\n" + "\n".join(lines), d, "Use node(project, node) for one file."
 
 
+def t_setup(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.setup()
+    names = {x["id"]: x["name"] for x in d["experiments"]}
+    want = (args.get("kind") or "").strip().lower()
+    lines = []
+    for it in d["items"]:
+        if want and it["kind"] != want:
+            continue
+        bits = ["%s %s" % (it["kind"].upper(), it["name"])]
+        if it.get("role"):
+            bits.append(it["role"])
+        if it["kind"] == "metric":
+            bits.append({"lower": "lower is better", "higher": "higher is better", "mixed": "direction DIFFERS between experiments", None: "recorded only"}.get(it.get("direction"), it.get("direction") or ""))
+        if it["kind"] == "dataset" and it.get("compared"):
+            bits.append("ours best in %d of %d" % (it["ours_best"], it["compared"]))
+        if it["kind"] == "method" and it.get("compared"):
+            bits.append("beats ours in %d of %d comparisons" % (it["wins"], it["compared"]))
+        bits.append("used by " + ", ".join(names.get(x, x) for x in it["experiments"][:5]))
+        if it["paper"]["lines"]:
+            l0 = it["paper"]["lines"][0]
+            bits.append("paper %s:%s (%d lines)" % (l0["path"], l0["line"], it["paper"]["n"]))
+        if it["code"]["hits"]:
+            bits.append("code " + ", ".join("%s:%s" % (h["path"], h["line"]) for h in it["code"]["hits"][:2]))
+        if it["checks"]:
+            bits.append("CHECK: " + "; ".join(c["t"] for c in it["checks"]))
+        lines.append(" · ".join(bits))
+    c = d["counts"]
+    head = ("%d metrics, %d datasets, %d methods (%d baselines) across %d experiments; %d items to check.%s"
+            % (c["metric"], c["dataset"], c["method"], c["baselines"], c["experiments"], c["checks"], "" if d["mapped"] else " No confirmed project map: rough."))
+    return head + "\n" + "\n".join(lines), d, "Filter with kind=metric|dataset|method."
+
+
 def _run_line(r):
     nums = ", ".join("%s=%s" % (k, ("%.4g" % v)) for k, v in list(r["metrics"].items())[:6])
     bits = [(r.get("time") or "")[:16].replace("T", " "), r["state"].upper(), (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else ""),
@@ -845,6 +878,12 @@ TOOLS = [
      "description": "One line per result file: what produced it (script, settings, run), when it was last written, which paper items and "
                     "claims rely on it, and whether it is out of date because the code or settings behind it changed afterwards.",
      "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "setup", "fn": t_setup, "title": "Metrics, datasets and baselines",
+     "description": "The experimental setup across all experiments: every metric (direction, where it is the main number), dataset (ours vs the "
+                    "best other) and method (ours, the base, baselines, ablation variants; how often each beats ours), which experiments use "
+                    "each, where the paper and the code name it, and checks (metric read in two directions, baseline missing on a dataset, "
+                    "dataset or baseline the paper never names).",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "kind": {"type": "string", "enum": ["metric", "dataset", "method"], "description": "Only this kind."}}, ["project"]), "annotations": dict(_RO)},
     {"name": "runs", "fn": t_runs, "title": "Runs outside GitHub",
      "description": "Runs logged from the researcher's editor terminal, results folder or a coding agent, newest first: the command, the commit "
                     "it ran on (and whether there were uncommitted changes), the numbers it wrote and which tracked result files it wrote. "

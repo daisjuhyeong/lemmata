@@ -440,6 +440,53 @@ class MapTest(unittest.TestCase):
         self.assertIn("report_confounds", self.e.confound_brief() and __import__("lemmata.engine.review", fromlist=["GUIDE"]).GUIDE)
         os.remove(self.tmp + "/.lemmata/review.json")
 
+    def test_setup(self):
+        """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        d = self.e.setup()
+        by = {it["id"]: it for it in d["items"]}
+        self.assertEqual({k: d["counts"][k] for k in ("metric", "dataset", "method", "baselines", "experiments")},
+                         {"metric": 3, "dataset": 3, "method": 4, "baselines": 2, "experiments": 4})
+        self.assertEqual([it["kind"] for it in d["items"]][:3], ["metric"] * 3)                       # metrics, then datasets, then methods
+        fp = by["metric:fp"]
+        self.assertEqual((fp["direction"], fp["main_in"], sorted(fp["experiments"])), ("lower", 3, ["map:abl", "map:cost", "map:main", "map:tune"]))
+        self.assertEqual({u["x"]: u["role"] for u in fp["uses"]}["map:cost"], "recorded")              # the cost experiment's number is CPU time
+        self.assertEqual([c["k"] for c in by["metric:delay"]["checks"]], ["unused"])
+        el = by["dataset:electricity"]
+        main = next(u for u in el["uses"] if u["x"] == "map:main")
+        self.assertEqual((main["ours"], main["best_other"], main["rank"], main["methods"]), (30.0, {"label": "DDM", "value": 38.0}, 1, 3))
+        tune = next(u for u in el["uses"] if u["x"] == "map:tune")
+        self.assertEqual((tune["ours"], tune["rank"], tune["runs"]), (None, None, 6))                  # a search has no "ours"
+        self.assertEqual((el["ours_best"], el["compared"]), (3, 3))
+        self.assertEqual((by["method:mcd"]["role"], by["method:adwin"]["role"], by["method:mcdfixed"]["role"]), ("ours", "baseline", "variant"))
+        ad = next(u for u in by["method:adwin"]["uses"] if u["x"] == "map:main")
+        self.assertEqual((round(ad["value"], 2), round(ad["gap"], 2), ad["wins"], ad["compared"]), (43.5, 8.33, 0, 3))
+        self.assertEqual([c["dataset"] for c in ad["cells"]], ["Covtype", "Electricity", "Weather"])
+        self.assertEqual(by["method:adwin"]["paper"]["lines"][0]["line"], 19)                          # where the paper names it
+        self.assertIn("cite", [c["k"] for c in by["method:adwin"]["checks"]])
+        cid = next(c for c in d["claims"] if "map:abl" in c["experiments"])
+        self.assertEqual(sorted(cid["items"]), ["dataset:electricity", "method:mcd", "method:mcdfixed", "metric:fp"])
+        x = next(r for r in d["experiments"] if r["id"] == "map:cost")
+        self.assertEqual((x["main_metric"], x["claims"]), ("metric:cputime", [cid2 for cid2 in x["claims"]]))
+        # a baseline with no result on one dataset is flagged where it is missing
+        with open(self.tmp + "/code/results/main/Weather,y_ADWIN_seed1.csv") as f:
+            keep = f.read()
+        try:
+            for seed in (1, 2):
+                os.remove(self.tmp + "/code/results/main/Weather,y_ADWIN_seed%d.csv" % seed)
+            subprocess.run(["git", "-C", self.tmp + "/code", "add", "-A"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", self.tmp + "/code", "-c", "user.name=j", "-c", "user.email=j@x", "commit", "-qm", "drop"], check=True, capture_output=True)
+            e = Engine(self.tmp)
+            e.scan()
+            d2 = {it["id"]: it for it in e.setup()["items"]}
+            self.assertIn("No result on Weather", [c["t"] for c in d2["method:adwin"]["checks"]])
+            self.assertEqual(next(u for u in d2["dataset:weather"]["uses"] if u["x"] == "map:main")["missing"], ["ADWIN"])
+        finally:
+            subprocess.run(["git", "-C", self.tmp + "/code", "revert", "--no-edit", "HEAD"], check=True, capture_output=True,
+                           env=dict(os.environ, GIT_AUTHOR_NAME="j", GIT_AUTHOR_EMAIL="j@x", GIT_COMMITTER_NAME="j", GIT_COMMITTER_EMAIL="j@x"))
+        self.assertTrue(keep)
+
     def test_mcp_tools(self):
         ctx = mcp.LocalCtx(self.tmp)
         pid = ctx.list_projects()[0]["id"]
@@ -457,6 +504,11 @@ class MapTest(unittest.TestCase):
         self.assertIn("DROPPED · question q4", text)
         self.assertIn("Only the researcher can confirm", text)
         self.assertIn("Map state: proposed", call("project_map", {})[1])
+        err, text = call("setup", {"kind": "dataset"})                 # S23: before confirming, the setup is read file by file
+        self.assertFalse(err)
+        self.assertIn("No confirmed project map", text)
+        self.assertIn("DATASET Electricity", text)
+        self.assertNotIn("METRIC ", text)
         self.assertTrue(call("propose_map", {"map": "x"})[0])
         _, out = mcp.handle(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_brief", "arguments": {"project": pid, "part": "files"}}}), ctx)
         self.assertEqual(json.loads(out)["result"]["structuredContent"]["result_files"]["total"], 33)      # clients that read structured content see the data
