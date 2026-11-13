@@ -30,8 +30,19 @@ def _lc(*args):
     return subprocess.run(["launchctl"] + list(args), capture_output=True, text=True)
 
 
+def temp_data(data_dir) -> bool:
+    """True for a data folder inside the system's temporary space. The background service must never run from one:
+    macOS deletes it, and the hub then rejects every device token (2026-11-12: a test pointed the live hub at one)."""
+    import tempfile
+    d = Path(data_dir).expanduser().resolve()
+    roots = {Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve(), Path("/private/var/folders"), Path("/var/folders").resolve()}
+    return any(d == r or r in d.parents for r in roots) and not os.environ.get("LEMMATA_ALLOW_TEMP_SERVICE")
+
+
 def install(data_dir, port):
     from .config import DataDir
+    if temp_data(data_dir):
+        raise SystemExit("lemmata: refusing to run the background hub from a temporary folder (%s). Use your real data folder, e.g. ~/Lemmata." % data_dir)
     DataDir(data_dir).ensure()
     p = plist_path()
     p.parent.mkdir(parents=True, exist_ok=True)

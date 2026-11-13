@@ -49,9 +49,16 @@ class UpdateTest(unittest.TestCase):
     def run_update(self, healthy=True):
         return update.run(self.data, self.cfg, restart=lambda: self.restarts.append(1) or True, check=lambda port, wait=45: healthy, out=self.lines.append)
 
+    def test_never_points_the_real_service_at_a_temporary_folder(self):
+        """2026-11-12: this test file rewrote ~/Library/LaunchAgents on the Mac mini with a temp data folder; the live hub then rejected every token."""
+        from lemmata.hub import launchd
+        self.assertTrue(launchd.temp_data(self.data.root if hasattr(self.data, "root") else self.data))
+        with self.assertRaises(SystemExit):
+            launchd.install(self.data.root if hasattr(self.data, "root") else self.data, 8765)
+
     def test_follow_update_fail_and_roll_back(self):
         self.assertEqual(self.run_update(), "not_set_up")
-        dep = update.setup(self.data, self.cfg, source=self.work, out=self.lines.append)
+        dep = update.setup(self.data, self.cfg, source=self.work, out=self.lines.append, service=False)
         self.assertEqual(self.cfg.load()["update_branch"], "live")
         first = git(dep, "rev-parse", "HEAD")
         self.assertEqual(self.run_update(), "none")                      # nothing new: nothing happens, no restart

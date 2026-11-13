@@ -211,8 +211,8 @@ def hub_plist(data, port):
     return p
 
 
-def setup(data, cfg, branch=None, every=300, source=None, out=print):
-    """Clone the deploy checkout, point both LaunchAgents at it, start them."""
+def setup(data, cfg, branch=None, every=300, source=None, out=print, service=True):
+    """Clone the deploy checkout, point both LaunchAgents at it, start them. service=False (tests) never touches launchd."""
     src = Path(source or Path(__file__).resolve().parents[4])
     url = _git(src, "remote", "get-url", "origin").stdout.strip()
     if not url:
@@ -242,8 +242,13 @@ def setup(data, cfg, branch=None, every=300, source=None, out=print):
         raise SystemExit("lemmata: the code on %s does not start, so nothing was changed:\n%s" % (branch, detail))
     cfg.update(update_branch=branch, update_every=int(every))
     out("lemmata hub: following %s of %s in %s" % (branch, url, dep))
+    if not service:
+        return dep
     if sys.platform != "darwin":
         out("lemmata hub: not macOS, so no LaunchAgents were written. Run `lemmata hub update` from your own scheduler.")
+        return dep
+    if launchd.temp_data(data.root if hasattr(data, "root") else data):
+        out("lemmata hub: %s is a temporary folder, so the background hub was left as it is." % (data.root if hasattr(data, "root") else data))
         return dep
     c = cfg.load()
     from . import guard
