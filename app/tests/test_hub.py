@@ -374,6 +374,8 @@ class HubTest(HubBase):
         self.fake.approve()
         if not self.hub.gh.stored():
             self.api("POST", "/api/hub/github/start"); self.api("GET", "/api/hub/github/poll")
+        before = sorted(p["id"] for p in self.api("GET", "/api/hub/projects")[1]["projects"])
+        dirs = sorted(x.name for x in (self.data / "projects").iterdir()) if (self.data / "projects").exists() else []
         s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/demo-code", "branch": "no-such-branch"})
         self.assertEqual((s, r["error"]["code"]), (404, "branch_not_found"), r)
         self.assertIn("git push -u origin no-such-branch", r["error"]["message"])
@@ -387,8 +389,8 @@ class HubTest(HubBase):
             self.hub.gh.user_public = real
         self.assertEqual((s, r["error"]["code"]), (403, "github_public_only"), r)
         self.assertIn("private repositories", r["error"]["message"])
-        self.assertEqual(self.api("GET", "/api/hub/projects")[1]["projects"], [], "nothing is left behind")
-        self.assertFalse(any((self.data / "projects").iterdir()) if (self.data / "projects").exists() else False)
+        self.assertEqual(sorted(p["id"] for p in self.api("GET", "/api/hub/projects")[1]["projects"]), before, "no project was added")
+        self.assertEqual(sorted(x.name for x in (self.data / "projects").iterdir()) if (self.data / "projects").exists() else [], dirs, "nothing is left behind")
 
     def make_project(self):
         s, r = self.api("POST", "/api/hub/projects", {"code_repo": "alice/demo-code"})
