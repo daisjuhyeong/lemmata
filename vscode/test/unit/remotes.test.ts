@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { matchProjects, parseGitConfigRemotes, parseRemote } from '../../src/core/remotes';
+import { matchProjects, parseGitConfigRemotes, parseRemote, unmatchedRepos } from '../../src/core/remotes';
 import { HubProject } from '../../src/core/types';
 
 test('parseRemote: github forms', () => {
@@ -61,4 +61,12 @@ test('matchProjects: override restricts to one project, even with no matching fo
   assert.equal(b.length, 1);
   assert.deepEqual(b[0].folders, {});
   assert.deepEqual(matchProjects([], P, 'nope'), []);
+});
+
+test('S22: repositories a folder could add as a new project', () => {
+  const projects = [{ id: 'mcd', name: 'mcd', code_repo: 'daisjuhyeong/mcd_extension' }] as any;
+  assert.deepEqual(unmatchedRepos(['git@github.com:daisjuhyeong/temporal_dependency.git', 'https://github.com/daisjuhyeong/temporal_dependency', 'https://x:secret@github.com/Other/Repo.git'], projects),
+    ['daisjuhyeong/temporal_dependency', 'other/repo']);
+  assert.deepEqual(unmatchedRepos(['https://github.com/DaisJuhyeong/mcd_extension.git'], projects), [], 'already a project');
+  assert.deepEqual(unmatchedRepos(['https://gitlab.com/a/b.git', 'https://git.overleaf.com/0123456789abcdef01234567'], projects), [], 'only GitHub repos can be added');
 });

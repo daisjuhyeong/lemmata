@@ -32,6 +32,7 @@ last_reviewed: 2026-11-02
   - S19 open experiments in VS Code, baselines side by side: [handoff note S19-01](sprints/S19/S19-01-handoff.md) · [screenshots](sprints/S19/screenshots/) — on `s18-dais-ui`, awaiting QA
   - S20 next experiments planned by Claude Code: [handoff note S20-01](sprints/S20/S20-01-handoff.md) · [screenshots](sprints/S20/screenshots/) — on `s20-experiment-prompts` (stacked on S19), awaiting QA
   - S21 structured experiment prompts (form, fixed template, protection rules): [handoff note S21-01](sprints/S21/S21-01-handoff.md) · [screenshots](sprints/S21/screenshots/) — on `s21-structured-prompts` (stacked on S20), awaiting QA
+  - S22 add a project from anywhere (branch picker, VS Code command): [handoff note S22-01](sprints/S22/S22-01-handoff.md) — on `s22-add-project-anywhere` (stacked on S21), awaiting QA
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

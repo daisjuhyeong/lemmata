@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { HubClient, HubError } from './core/client';
-import { Binding, FolderRemotes, matchProjects, parseGitConfigRemotes } from './core/remotes';
+import { Binding, FolderRemotes, matchProjects, parseGitConfigRemotes, unmatchedRepos } from './core/remotes';
 import { Diag, LocRef, Model, NodeItem, FindingItem, toDiagnostics } from './core/model';
 import { loadModel } from './core/load';
 import { mapPath, hubPath } from './core/mapping';
@@ -165,7 +165,7 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
     if (this.status === 'unconfigured') { text = 'Lemmata: connect'; tip = 'Click to connect to your Lemmata server'; this.bar.command = 'lemmata.connect'; }
     else if (this.status === 'unauthorized') { text = 'Lemmata: token rejected'; tip = 'The server did not accept the token. Click to connect again.'; warn = true; this.bar.command = 'lemmata.connect'; }
     else if (this.status === 'offline') { text = 'Lemmata: offline'; tip = 'Cannot reach ' + this.serverUrl + '. Showing the last results. Click to open the panel.'; warn = true; this.bar.command = 'lemmata.showPanel'; }
-    else if (!this.bound.length) { text = 'Lemmata: no project'; tip = 'No hub project matches this workspace\'s git remotes. Click for details.'; this.bar.command = 'lemmata.showPanel'; }
+    else if (!this.bound.length) { text = 'Lemmata: no project'; tip = 'No Lemmata project matches this repository yet. Click to add it.'; this.bar.command = 'lemmata.addProject'; }
     else { text = 'Lemmata: ' + n + ' to recheck'; tip = n + ' to recheck since ' + (this.bound[0].model && this.bound[0].model.checkpoint ? 'checkpoint ' + this.bound[0].model.checkpoint.toUpperCase() : 'the checkpoint') + '. Click to open the panel.'; warn = n > 0; this.bar.command = 'lemmata.showPanel'; }
     this.bar.text = text; this.bar.tooltip = tip;
     this.bar.backgroundColor = warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
@@ -187,6 +187,7 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
       const o = String(this.cfg().get('project', ''));
       items.push(new Item(o ? 'Project "' + oneLine(o, 40) + '" was not found on the server' : 'No hub project matches this workspace', 'message', { kind: 'info' }, 'info'));
       items.push(new Item('Hub projects: ' + (this.projects.map(p => oneLine(p.name, 30)).join(', ') || 'none'), 'message', { kind: 'info' }, 'list-unordered'));
+      if (!o) items.push(new Item('Add this repository to Lemmata…', 'command', { kind: 'addProject' }, 'add'));
       items.push(new Item('Open the project\'s GitHub clone, or set lemmata.project', 'command', { kind: 'settings' }, 'gear'));
     }
     for (const b of this.bound) {
@@ -234,7 +235,7 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
 }
 
 type Data =
-  | { kind: 'info' } | { kind: 'settings' }
+  | { kind: 'info' } | { kind: 'settings' } | { kind: 'addProject' }
   | { kind: 'project'; b: Bound }
   | { kind: 'alarms'; b: Bound } | { kind: 'findings'; b: Bound }
   | { kind: 'group'; b: Bound; gi: number }
@@ -253,6 +254,7 @@ class Item extends vscode.TreeItem {
     this.contextValue = ctx;
     if (icon) this.iconPath = new vscode.ThemeIcon(icon);
     if (data.kind === 'settings') this.command = { command: 'workbench.action.openSettings', title: 'Open settings', arguments: ['lemmata.project'] };
+    if (data.kind === 'addProject') this.command = { command: 'lemmata.addProject', title: 'Add this repository to Lemmata' };
   }
   kids(): Item[] {
     const d = this.data;
@@ -305,6 +307,62 @@ function gitRemotes(cwd: string): Promise<string[]> {
       resolve(err ? [] : parseGitConfigRemotes(String(stdout)));
     });
   });
+}
+
+function gitOut(cwd: string, args: string[]): Promise<string> {
+  return new Promise(resolve => {
+    execFile('git', args, { cwd, timeout: 5000, windowsHide: true }, (err, stdout) => resolve(err ? '' : String(stdout).trim()));
+  });
+}
+
+/* "Add this repository to Lemmata": the hub copies it from GitHub, following the branch checked out here. */
+async function addProject() {
+  const client = CTRL.clientOrNull();
+  if (!client) { void vscode.window.showWarningMessage('Lemmata: connect to your server first.', 'Connect').then(a => a && vscode.commands.executeCommand('lemmata.connect')); return; }
+  let projects: HubProject[];
+  try { projects = await client.projects(); } catch (e) { void fail('could not reach the server', e); return; }
+  const cands: { folder: vscode.WorkspaceFolder; repo: string }[] = [];
+  for (const f of vscode.workspace.workspaceFolders || []) {
+    if (f.uri.scheme !== 'file') continue;
+    for (const repo of unmatchedRepos(await gitRemotes(f.uri.fsPath), projects)) cands.push({ folder: f, repo });
+  }
+  if (!cands.length) {
+    const open = (vscode.workspace.workspaceFolders || []).length;
+    void vscode.window.showInformationMessage(open
+      ? 'Lemmata: no folder here has a GitHub remote that is not already a project. Lemmata reads projects from GitHub: push the folder to a GitHub repository first (git remote add origin …, then git push -u origin HEAD).'
+      : 'Lemmata: open the project\'s folder first (File → Open Folder).');
+    return;
+  }
+  let pick = cands[0];
+  if (cands.length > 1) {
+    const q = await vscode.window.showQuickPick(cands.map(c => ({ label: c.repo, description: c.folder.name, c })), { placeHolder: 'Which repository should become a Lemmata project?' });
+    if (!q) return;
+    pick = q.c;
+  }
+  const cwd = pick.folder.uri.fsPath;
+  const branch = await gitOut(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const upstream = branch && branch !== 'HEAD' ? await gitOut(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']) : '';
+  const items: (vscode.QuickPickItem & { b: string | null })[] = [];
+  if (branch && branch !== 'HEAD') items.push({ label: 'Follow ' + branch, description: 'the branch checked out here' + (upstream ? '' : ' (not pushed yet)'), b: branch });
+  items.push({ label: 'Follow the default branch', description: 'as set on GitHub', b: null });
+  const choice = await vscode.window.showQuickPick(items, { placeHolder: 'Add ' + pick.repo + ' to Lemmata: which branch should it follow?' });
+  if (!choice) return;
+  if (choice.b && !upstream) {
+    const go = await vscode.window.showWarningMessage('Lemmata reads ' + choice.b + ' from GitHub, but it is not pushed yet. Push it first (git push -u origin ' + choice.b + '), then add the project.', 'Add anyway');
+    if (go !== 'Add anyway') return;
+  }
+  const name = pick.repo.split('/')[1] || pick.repo;
+  try {
+    const p = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: copying ' + pick.repo + ' from GitHub…' },
+      () => client.createProject(pick.repo, choice.b, name));
+    await CTRL.refresh();
+    const a = await vscode.window.showInformationMessage('Lemmata: added ' + name + '. Next, let Claude Code map its questions and experiments: open the project and copy the map prompt.', 'Open in Lemmata');
+    if (a) await TAB.open(client, CTRL.serverBase(), p.id, oneLine(p.name || name, 40), 'experiments');
+  } catch (e) {
+    const code = e instanceof HubError ? e.code : '';
+    if (code === 'branch_not_found' || /branch/i.test(e instanceof Error ? e.message : '')) void vscode.window.showErrorMessage('Lemmata: GitHub has no branch ' + (choice.b || '') + ' in ' + pick.repo + '. Push it first: git push -u origin ' + (choice.b || 'HEAD'));
+    else void fail('could not add the project', e);
+  }
 }
 
 /* ---------- commands ---------- */
@@ -408,6 +466,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       try { await vscode.languages.setTextDocumentLanguage(doc, 'diff'); } catch { /* plain text is fine */ }
       await vscode.window.showTextDocument(doc, { preview: true });
     }),
+    c('lemmata.addProject', addProject),
     c('lemmata.openInLemmata', async (it?: Item) => {
       const t = await pickProject(it); if (!t) return;
       await vscode.env.openExternal(vscode.Uri.parse(CTRL.serverBase() + '/p/' + encodeURIComponent(t.pid) + '/'));

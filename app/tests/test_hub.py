@@ -396,6 +396,14 @@ class HubTest(HubBase):
         self.assertEqual([x["full_name"] for x in r["repos"]], ["alice/demo-code", "alice/other"])  # newest push first
         self.assertEqual(set(r["repos"][0]), {"full_name", "private", "default_branch", "pushed_at", "description"})
         self.assertEqual([x["full_name"] for x in self.api("GET", "/api/hub/github/repos?q=OTH")[1]["repos"]], ["alice/other"])
+        # S22: the New project form lists branches, newest first, so a project can follow the branch the work is on
+        self.fake.push_branch("alice/demo-code", "short-exp", {"run.py": "print(1)\n"}, "newer work", when="2099-01-01T00:00:00+00:00")
+        s, r = self.api("GET", "/api/hub/github/branches?repo=alice/demo-code")
+        self.assertEqual(s, 200, r)
+        self.assertEqual((r["default"], [b["name"] for b in r["branches"]]), ("main", ["short-exp", "main"]))
+        self.assertEqual([b["default"] for b in r["branches"]], [False, True])
+        self.assertEqual(self.api("GET", "/api/hub/github/branches?repo=../etc")[0], 400)
+        self.assertEqual(self.api("GET", "/api/hub/github/branches?repo=alice/nope")[0], 404)
         # a different account is refused and nothing is saved
         self.assertEqual(self.api("POST", "/api/hub/github/logout")[0], 200)
         self.assertFalse((self.data / "hub" / "github.json").exists())

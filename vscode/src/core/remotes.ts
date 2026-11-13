@@ -15,6 +15,17 @@ export function parseRemote(url: string): RemoteRef | null {
   return null;
 }
 
+/** GitHub repos among a folder's remotes that no hub project uses yet (origin first), for "Add to Lemmata". */
+export function unmatchedRepos(remotes: string[], projects: HubProject[]): string[] {
+  const used = new Set(projects.map(p => (p.code_repo || '').toLowerCase()));
+  const out: string[] = [];
+  for (const url of remotes) {
+    const r = parseRemote(url);
+    if (r && r.kind === 'github' && !used.has(r.repo) && !out.includes(r.repo)) out.push(r.repo);
+  }
+  return out;
+}
+
 /** Output of `git config --get-regexp ^remote\..*\.url` -> list of URLs. */
 export function parseGitConfigRemotes(out: string): string[] {
   const urls: string[] = [];

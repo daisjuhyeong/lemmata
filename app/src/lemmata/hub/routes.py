@@ -413,6 +413,8 @@ class HubHandler(Handler):
                                   {"Set-Cookie": "%s=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" % COOKIE})
             hub.gh.logout()
             return self._json({"ok": True})
+        if (method, r) == ("GET", "/github/branches"):
+            return self._json(hub.gh.branches(q.get("repo", ""), login=user))
         if (method, r) == ("GET", "/github/repos"):
             return self._json(hub.gh.repos(q.get("q", ""), login=user, refresh=q.get("refresh") == "1"))
         if (method, r) == ("DELETE", "/account"):

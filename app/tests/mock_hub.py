@@ -181,10 +181,21 @@ class H(BaseHTTPRequestHandler):
                 return self.err(403, "not_signed_in", "Sign in with GitHub first.")
             s = (q.get("q") or [""])[0].lower()
             return self.send(200, {"repos": [r for r in REPOS if s in r["full_name"].lower()]})
+        if p == "/api/hub/github/branches":      # S22
+            rp = (q.get("repo") or [""])[0]
+            r = next((x for x in REPOS if x["full_name"] == rp), None)
+            if not r:
+                return self.err(404, "repo_not_found", "GitHub has no repository %s that you can read." % rp)
+            d = r["default_branch"]
+            return self.send(200, {"repo": rp, "default": d, "branches": [
+                {"name": "short-exp", "sha": "67c860f", "date": "2026-11-12T09:00:00Z", "default": d == "short-exp"},
+                {"name": "experiment-reference", "sha": "2d1b264", "date": "2026-11-11T09:00:00Z", "default": d == "experiment-reference"},
+                {"name": d, "sha": "0aaffdb", "date": "2026-11-10T09:00:00Z", "default": True}]})
         if p == "/api/hub/projects" and m == "GET":
             return self.send(200, {"projects": ST.projects})
         if p == "/api/hub/projects" and m == "POST":
             b = json.loads(self.body() or b"{}")
+            ST.last_create = b
             time.sleep(1.2)
             if b.get("paper_overleaf") and not ST.overleaf_enabled:
                 return self.send(404, {"error": "feature_disabled"})

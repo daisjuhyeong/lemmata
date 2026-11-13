@@ -275,6 +275,43 @@ class GitHub:
         return True
 
     # --- repos
+    def branches(self, repo, login=None):
+        """Branch names of one repository, most recently pushed first (default branch marked). For the New project form."""
+        token = self.token(login)
+        if not token:
+            raise GitHubError(409, "not_signed_in", "Sign in with GitHub first.")
+        if not re.match(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$", repo or ""):
+            raise GitHubError(400, "bad_request", "repo must be owner/name")
+        api = self.cfg.load()["github_api"].rstrip("/")
+        try:
+            meta = self._http("GET", "%s/repos/%s" % (api, repo), token=token, login=login)
+        except GitHubError as e:
+            if e.message.endswith("HTTP 404"):
+                raise GitHubError(404, "repo_not_found", "GitHub has no repository %s that you can read." % repo)
+            raise
+        default = (meta or {}).get("default_branch") if isinstance(meta, dict) else None
+        out = []
+        for page in range(1, 4):
+            items = self._http("GET", "%s/repos/%s/branches?%s" % (api, repo, urllib.parse.urlencode({"per_page": 100, "page": page})), token=token, login=login)
+            if not isinstance(items, list):
+                break
+            out += [{"name": b.get("name"), "sha": ((b.get("commit") or {}).get("sha") or "")[:7]} for b in items if b.get("name")]
+            if len(items) < 100:
+                break
+        # newest first: one request per branch for its date would be slow, so ask for the last commit dates in one go
+        dates = {}
+        try:
+            for c in out[:30]:
+                d = self._http("GET", "%s/repos/%s/commits/%s" % (api, repo, urllib.parse.quote(c["name"], safe="")), token=token, login=login)
+                dates[c["name"]] = (((d or {}).get("commit") or {}).get("committer") or {}).get("date") or ""
+        except GitHubError:
+            pass
+        for c in out:
+            c["date"] = dates.get(c["name"], "")
+            c["default"] = c["name"] == default
+        out.sort(key=lambda c: c["date"], reverse=True)
+        return {"repo": repo, "default": default, "branches": out}
+
     def repos(self, q="", login=None, refresh=False):
         token = self.token(login)
         if not token:

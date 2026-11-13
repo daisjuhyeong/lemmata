@@ -6,12 +6,13 @@ per-command auth-header code path is exercised for real. Use one server as both 
 import base64
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 CLIENT_ID = "fake-client-id"
 TOKEN = "gho_FAKETOKENfaketokenFAKETOKENfaketoken1234"
@@ -90,6 +91,21 @@ class FakeGitHub:
         _git(work, "add", "-A")
         _git(work, "commit", "-q", "-m", msg)
         _git(work, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+    def push_branch(self, full_name, branch, files, msg, when="2026-11-12T10:00:00+00:00"):
+        """S22: a second branch with a later commit."""
+        owner, name = full_name.split("/")
+        work = self.root / "work" / owner / name
+        _git(work, "checkout", "-q", "-B", branch)
+        for rel, text in files.items():
+            p = work / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+        _git(work, "add", "-A")
+        env = dict(os.environ, **GIT_ENV, GIT_COMMITTER_DATE=when, GIT_AUTHOR_DATE=when)
+        subprocess.run(["git", "commit", "-q", "-m", msg], cwd=work, env=env, check=True, capture_output=True)
+        _git(work, "push", "-q", "origin", "HEAD:refs/heads/" + branch)
+        _git(work, "checkout", "-q", "main")
 
     def approve(self):
         self.state = "approved"
@@ -175,6 +191,24 @@ class FakeGitHub:
                     page, per = int(q.get("page", ["1"])[0]), int(q.get("per_page", ["30"])[0])
                     mine = [r for r in fake.repos if r["full_name"].split("/")[0] == self._who()["login"] or not r["private"]]
                     return self._reply(200, mine[(page - 1) * per: page * per])
+                m = re.match(r"^/repos/([^/]+)/([^/]+)(/branches|/commits/(.+))?$", u.path)
+                if m and ".git" not in u.path:      # S22: repository, its branches, and a branch's last commit
+                    if not self._bearer_ok():
+                        return self._reply(401, {"message": "Bad credentials"})
+                    full = m.group(1) + "/" + m.group(2)
+                    meta = next((r for r in fake.repos if r["full_name"] == full), None)
+                    bare = fake.root / "git" / m.group(1) / (m.group(2) + ".git")
+                    if not meta or not bare.exists():
+                        return self._reply(404, {"message": "Not Found"})
+                    if not m.group(3):
+                        return self._reply(200, meta)
+                    heads = subprocess.run(["git", "for-each-ref", "--format=%(refname:short) %(objectname) %(committerdate:iso-strict)", "refs/heads"],
+                                           cwd=bare, capture_output=True, text=True).stdout.split("\n")
+                    rows = [h.split(" ") for h in heads if h.strip()]
+                    if m.group(3) == "/branches":
+                        return self._reply(200, [{"name": r[0], "commit": {"sha": r[1]}} for r in rows])
+                    hit = next((r for r in rows if r[0] == unquote(m.group(4))), None)
+                    return self._reply(200, {"sha": hit[1], "commit": {"committer": {"date": hit[2]}}}) if hit else self._reply(404, {"message": "No commit found"})
                 if ".git/" in u.path:
                     return self._git()
                 self._reply(404, {"message": "Not Found"})

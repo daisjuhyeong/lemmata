@@ -14,14 +14,14 @@ export class HubClient {
     this.base = u.origin;
   }
 
-  private async req<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  private async req<T>(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = this.timeoutMs): Promise<T> {
     if (!path.startsWith('/')) throw new Error('bad path');
     const headers: Record<string, string> = { Authorization: 'Bearer ' + this.token, Accept: 'application/json' };
     let data: string | undefined;
     if (body !== undefined) { headers['Content-Type'] = 'application/json'; data = JSON.stringify(body); }
     let r: Response;
     try {
-      r = await fetch(this.base + path, { method, headers, body: data, redirect: 'error', signal: AbortSignal.timeout(this.timeoutMs) });
+      r = await fetch(this.base + path, { method, headers, body: data, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
       throw new HubError(0, 'offline', 'Cannot reach the Lemmata server at ' + this.base + '.');
     }
@@ -56,6 +56,11 @@ export class HubClient {
     return { status: r.status, contentType: r.headers.get('content-type') || '', data };
   }
 
+  /** Add a project from a GitHub repository (the hub clones it, which can take a few minutes). */
+  createProject = async (repo: string, branch: string | null, name: string): Promise<HubProject> => {
+    const r = await this.req<any>('POST', '/api/hub/projects', { code_repo: repo, branch: branch || undefined, name }, 600000);
+    return (r && r.project) || r;
+  };
   projects = async (): Promise<HubProject[]> => (await this.req<{ projects: HubProject[] }>('GET', '/api/hub/projects')).projects || [];
   private p(pid: string, rest: string) { return '/p/' + encodeURIComponent(pid) + '/api/' + rest; }
   alarms = (pid: string) => this.req<Alarms>('GET', this.p(pid, 'alarms'));

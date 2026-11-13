@@ -354,7 +354,30 @@
     let zip = null, mode = 'repo', busy = false;
     const errs = h('div');
     const createBtn = h('button', { class: 'btn primary', id: 'create', disabled: true }, 'Create project');
-    const code = repoPicker('repos', 'Your GitHub repositories', () => { createBtn.disabled = busy; });
+    const branchSel = h('select', { id: 'code-branch', 'aria-label': 'Branch to follow' });
+    const branchNote = h('div', { class: 'muted small' });
+    const branchBox = h('div', { id: 'branch-box', class: 'hidden' }, h('label', { class: 'field' }, h('span', null, 'Branch to follow'), branchSel), branchNote);
+    let branchSeq = 0;
+    async function loadBranches(rp) {
+      const my = ++branchSeq;
+      branchBox.classList.remove('hidden');
+      clear(branchSel).append(h('option', { value: rp.default_branch || '' }, (rp.default_branch || 'default') + ' (loading branches…)'));
+      clear(branchNote);
+      try {
+        const r = await api('GET', '/api/hub/github/branches?repo=' + encodeURIComponent(rp.full_name));
+        if (my !== branchSeq) return;
+        clear(branchSel).append(...r.branches.map(b => h('option', { value: b.name, selected: b.default ? '' : null },
+          b.name + (b.default ? ' (default)' : '') + (b.date ? ' · updated ' + ago(b.date) : ''))));
+        const newest = r.branches[0];
+        if (newest && !newest.default) branchNote.append('Your newest work is on ', h('b', { class: 'mono' }, newest.name), '. Lemmata only sees the branch you pick here. ',
+          h('button', { class: 'linkbtn small', onclick: () => { branchSel.value = newest.name; } }, 'Follow ' + newest.name));
+      } catch (e) {
+        if (my !== branchSeq) return;
+        clear(branchSel).append(h('option', { value: rp.default_branch || '' }, rp.default_branch || 'default'));
+        branchNote.append('Could not list the branches (' + e.message + '). The default branch will be used.');
+      }
+    }
+    const code = repoPicker('repos', 'Your GitHub repositories', rp => { createBtn.disabled = busy; loadBranches(rp); });
     const paper = repoPicker('paper-repos', 'GitHub repositories for the paper', () => { clear(errs); });
     const sub = h('input', { type: 'text', id: 'paper-subdir', value: 'paper', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Folder of the paper inside the code repository' });
     const dropMsg = h('div'); const fileIn = h('input', { type: 'file', accept: '.zip,application/zip', class: 'hidden', id: 'zipfile' });
@@ -414,7 +437,7 @@
     async function create() {
       const cp = code.picked;
       if (!cp || busy) return;
-      const body = { code_repo: cp.full_name, branch: cp.default_branch };
+      const body = { code_repo: cp.full_name, branch: branchSel.value || cp.default_branch };
       paperKind = 'none';
       if (mode === 'repo' && paper.picked) {
         paperKind = 'github'; body.paper_repo = paper.picked.full_name; body.paper_branch = paper.picked.default_branch;
@@ -455,7 +478,7 @@
       h('h1', null, 'New project'),
       h('h3', null, 'Step 1 · Your code'),
       h('p', { class: 'muted' }, 'Pick the GitHub repository with your experiments: scripts, settings and results.'),
-      code.box,
+      code.box, branchBox,
       h('h3', null, 'Step 2 · Your paper (you can add it later)'),
       h('p', { class: 'muted' }, 'Where is the LaTeX source of your paper?'),
       tabs, repoBox, folderBox, zipBox, errs,
