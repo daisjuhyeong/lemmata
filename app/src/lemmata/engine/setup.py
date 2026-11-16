@@ -163,7 +163,11 @@ def build(E, G=None, trees=None):
         cid = s.get("claim_id") or (None if s.get("kind") == "other" else s.get("id"))
         if cid and cid not in claims:
             claims[cid] = {"id": cid, "label": s.get("short") or s["label"], "ref": s["label"], "text": s["text"], "stage": s.get("stage"),
-                           "status": s.get("status"), "scope": s.get("scope"), "experiments": []}
+                           "stage_why": s.get("stage_why"), "stage_rule": s.get("stage_rule"), "stage_by": s.get("stage_by"),
+                           "status": s.get("status"), "scope": s.get("scope"), "experiments": [], "links": {}}
+        if cid:
+            for xid, l in (s.get("links") or {}).items():
+                claims[cid]["links"][xid] = {"status": l["status"], "why": l["why"], "rule": l["rule"]}
         for x in s["experiments"]:
             xs.setdefault(x["id"], x)
             if cid:
@@ -268,6 +272,10 @@ def build(E, G=None, trees=None):
 
         # methods (not for a search: its rows are settings)
         if tuning:
+            tb_ = (x.get("tuning") or {})
+            rec["protocol"] = {"metric": main, "lower": lower, "target": target, "datasets": [d for d, _ in ds_cols], "ours": None, "methods": [], "search": True,
+                               "settings_n": len(rows), "best": tb_.get("best"), "seeds": None, "measures": g.get("measures") or [], "paper": [], "last": x.get("last"), "note": x.get("note") or x.get("caption")}
+            rec["checklist"] = [{"k": "search", "q": "The hyperparameter search is recorded", "a": "yes", "why": "%d settings tried%s." % (len(rows), (", best " + str(tb_["best"]["label"])) if tb_.get("best") else "")}]
             continue
         cols = [c for _, c in ds_cols] or [head_col]
         ablation = (x.get("type") or "") == "ablation"
@@ -303,6 +311,31 @@ def build(E, G=None, trees=None):
                 runs=max([n for n in r["n"].values() if n] or [0]) or None)
             rec["items"].append(mi["id"])
         rec["items"] = list(dict.fromkeys(rec["items"]))
+        # the protocol sheet (S25): what was run, on what, measured how, and whether every cell is there
+        roles = {r["label"]: next((u for u in [items[_key("method", r["label"])].get("role")] if u), "baseline") for r in rows if _key("method", r["label"]) in items}
+        ns = [r["n"].get(c) or 0 for r in rows for c in cols if val(r, c) is not None]
+        holes = [(r["label"], _split(c, g)[0]) for r in rows for c in cols if val(r, c) is None]
+        tl = x.get("tally")
+        rec["protocol"] = {"metric": main, "lower": lower, "target": target, "datasets": [d for d, _ in ds_cols], "ours": ours,
+                           "methods": [{"name": r["label"], "role": roles.get(r["label"], "baseline")} for r in rows],
+                           "seeds": [min(ns), max(ns)] if ns else None, "measures": g.get("measures") or [], "paper": [p_["name"] for p_ in x.get("paper") or []],
+                           "last": x.get("last"), "note": x.get("note") or x.get("caption")}
+        rec["grid"] = {"cols": cols, "datasets": [_split(c, g)[0] if _split(c, g)[0] not in (None, AVG) else c for c in cols],
+                       "rows": [{"label": r["label"], "role": roles.get(r["label"], "baseline"), "values": {c: val(r, c) for c in cols}, "n": {c: r["n"].get(c) for c in cols},
+                                 "best": [c for c in cols if val(r, c) is not None and _rank([val(o, c) for o in rows if val(o, c) is not None], val(r, c), lower, target) == 1]} for r in rows]}
+        yes, no, ask = "yes", "no", "you"
+        rec["checklist"] = [
+            {"k": "coverage", "q": "Every method has a result on every dataset", "a": no if holes else yes,
+             "why": ("Missing: " + ", ".join("%s on %s" % h for h in holes[:4]) + (" and %d more" % (len(holes) - 4) if len(holes) > 4 else "")) if holes else "%d of %d cells filled." % (len(rows) * len(cols), len(rows) * len(cols))},
+            {"k": "seeds", "q": "More than one run per result, so a spread can be reported", "a": yes if ns and min(ns) >= 2 else no,
+             "why": ("%d run%s per cell." % (min(ns), "" if min(ns) == 1 else "s") if ns and min(ns) == max(ns) else "%d to %d runs per cell." % (min(ns), max(ns))) if ns else "No results."},
+            {"k": "paper", "q": "The numbers in the paper match the result files", "a": ask if not tl else no if (tl.get("differs") or tl.get("untraced")) else yes,
+             "why": "No paper table is linked to it." if not tl else "%d match, %d differ, %d not found in the files." % (tl.get("match", 0) + tl.get("rounding", 0), tl.get("differs", 0), tl.get("untraced", 0))},
+            {"k": "current", "q": "The results are newer than the code and settings behind them", "a": no if x.get("stale") else yes,
+             "why": "The code or settings changed after the result was written." if x.get("stale") else "Nothing behind them changed since."},
+            {"k": "details", "q": "Data splits, hyperparameters and how they were chosen are stated", "a": ask, "why": "Lemmata cannot read this from the files. The settings it found are in the trace."},
+            {"k": "compute", "q": "The compute used is stated", "a": ask, "why": "Lemmata cannot read this from the files."},
+        ]
 
     # where the paper and the code name each item
     for it in items.values():

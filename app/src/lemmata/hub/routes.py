@@ -1,6 +1,7 @@
 """Hub HTTP server: guard, auth, hub API, MCP and per-project prefix routing on top of server.Handler."""
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from .projects import MAX_ZIP, HubContext, Manager, ProjectError, mask
 from .sync import SyncLoop
 
 HUB_WEB = WEB / "hub"
+CAL_RE = re.compile(r"^/cal/([A-Za-z0-9_-]{1,80})/([A-Za-z0-9_-]{20,80})\.ics$")
 PUBLIC_API = {("GET", "/api/hub/status"), ("POST", "/api/hub/pair"), ("POST", "/api/hub/login/start"), ("GET", "/api/hub/login/poll")}
 EVENTS = {"tutorial_shown", "tutorial_done", "tutorial_skipped", "view_open", "view_switch", "project_created", "project_opened", "claim_confirmed",
           "claim_rejected", "claim_linked", "feedback_added", "task_done", "ask", "digest_sent", "signup", "useful_yes", "useful_no"}
@@ -235,6 +237,20 @@ class HubHandler(Handler):
             # --- public: status, pairing, static files of the pairing / sign-in page
             if (method, path) in PUBLIC_API:
                 return self._hub_api(method, path, q, None, public=True)
+            mcal = CAL_RE.match(path) if method == "GET" else None
+            if mcal:      # a calendar app subscribing to one project's deadlines: the secret token in the link is the only key
+                if not hub.allow("cal:" + (self.client_address[0] if self.client_address else "?"), 60):
+                    raise ApiError(429, "too_many", "slow down")
+                try:
+                    app_ = hub.mgr.app(mcal.group(1))
+                    with app_.lock:
+                        tok = app_.engine.calendar().get("token")
+                        text = app_.engine.calendar_ics() if tok and hmac.compare_digest(tok, mcal.group(2)) else None
+                except Exception:
+                    text = None
+                if text is None:
+                    raise ApiError(404, "not_found", "not found")
+                return self._send(200, text.encode("utf-8"), "text/calendar; charset=utf-8", {"Cache-Control": "no-store"})
             if method == "GET" and not path.startswith(("/api/", "/p/", "/mcp")):
                 return self._hub_static(path)
             # --- everything else needs a session

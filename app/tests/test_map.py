@@ -581,6 +581,61 @@ class MapTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.e.set_deadline("soon", "x")
 
+    def test_venues_calendar_and_sheet(self):
+        """S25: conference deadlines from the open data (a plain lookup), journal dates by hand, the calendar file,
+        the day detail on the trail, and the Setup protocol sheet."""
+        from lemmata.engine import venues
+        SAMPLE = "- title: ZCONF\n  description: The Z Conference\n  sub: AI\n  confs:\n    - year: 2026\n      id: z26\n      link: https://z.example/2026\n      timeline:\n        - deadline: 'TBD'\n      timezone: UTC-8\n" \
+                 "    - year: 2027\n      id: z27\n      link: https://z.example/2027\n      timeline:\n        - abstract_deadline: '2027-01-14 23:59:59'\n          deadline: '2027-01-22 23:59:59'\n      timezone: AoE\n      date: August 2-4, 2027\n      place: Rio\n"
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            if url.endswith("/conference/AI/zconf.yml"):
+                return SAMPLE
+            e = OSError("404")
+            e.code = 404
+            raise e
+        r = venues.lookup("ZConf", 2027, fetch)
+        self.assertEqual([(d["kind"], d["date"], d["time"], d["tz"], d["utc"]) for d in r["deadlines"]],
+                         [("abstract", "2027-01-14", "23:59", "AoE", "2027-01-15T11:59:00Z"), ("paper", "2027-01-22", "23:59", "AoE", "2027-01-23T11:59:00Z")])
+        self.assertEqual((r["venue"], r["link"], r["source"].endswith("conference/AI/zconf.yml")), ("ZCONF", "https://z.example/2027", True))
+        self.assertEqual(venues.lookup("zconf", 2026, fetch)["deadlines"][0]["date"], None)             # still to be announced
+        for bad in (("nope", 2027), ("zconf", 2031)):
+            with self.assertRaises(Exception):
+                venues.lookup(*bad, fetch)
+        self.assertTrue(all(u.startswith("https://raw.githubusercontent.com/ccfddl/ccf-deadlines/") for u in calls))
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        with self.assertRaises(Exception):
+            self.e.add_venue("zconf", 2026, fetch=fetch)                                                 # nothing dated: nothing stored
+        tr = self.e.add_venue("zconf", 2027, fetch=fetch)
+        tr = self.e.add_venue("zconf", 2027, fetch=fetch)                                                # adding again replaces, never doubles
+        self.assertEqual([(d["title"], d["kind"]) for d in tr["deadlines"]], [("ZCONF 2027: abstract", "abstract"), ("ZCONF 2027: paper", "paper")])
+        tr = self.e.set_deadline("2026-12-20", "Submit to TKDE", kind="journal", venue="IEEE TKDE")
+        self.assertEqual(tr["deadlines"][0]["kind"], "journal")
+        with self.assertRaises(Exception):
+            self.e.set_deadline("2026-12-20", "x", kind="paper")
+        ics = self.e.calendar_ics()
+        self.assertEqual((ics.count("BEGIN:VEVENT"), "DTSTART:20270123T115900Z" in ics, "DTSTART;VALUE=DATE:20261220" in ics, ics.endswith("END:VCALENDAR\r\n")), (3, True, True, True))
+        self.assertEqual(self.e.calendar()["token"], None)
+        tok = self.e.calendar("create")["token"]
+        self.assertEqual((len(tok) >= 24, self.e.calendar()["token"] == tok, self.e.calendar("revoke")["token"]), (True, True, None))
+        self.assertEqual(len(self.e.set_deadline(remove="ZCONF 2027")["deadlines"]), 1)                  # a venue is removed as a whole
+        # the day detail: what a commit did to each experiment's result
+        c = next(x for x in self.e.trail()["entries"] if x["kind"] == "code" and x["title"] == "adaptive threshold")
+        m = next(r_ for r_ in c["detail"]["results"] if r_["x"] == "map:main")
+        self.assertEqual((m["claims"], m["before"], round(m["after"], 2), c["detail"]["files_n"]), (["C1"], 43.0, 35.17, {"results": 6, "code": 1}))
+        # the protocol sheet
+        x = next(r_ for r_ in self.e.setup()["experiments"] if r_["id"] == "map:main")
+        self.assertEqual((x["protocol"]["metric"], x["protocol"]["datasets"], x["protocol"]["seeds"], [m_["role"] for m_ in x["protocol"]["methods"]]),
+                         ("fp", ["Covtype", "Electricity", "Weather"], [2, 2], ["baseline", "baseline", "ours"]))
+        self.assertEqual({c_["k"]: c_["a"] for c_ in x["checklist"]}, {"coverage": "yes", "seeds": "yes", "paper": "no", "current": "yes", "details": "you", "compute": "you"})
+        ours = next(r_ for r_ in x["grid"]["rows"] if r_["role"] == "ours")
+        self.assertEqual((ours["values"]["Covtype"], ours["n"]["Covtype"], ours["best"]), (46.0, 2, ["Covtype", "Electricity", "Weather"]))
+        ab = next(r_ for r_ in self.e.setup()["experiments"] if r_["id"] == "map:abl")
+        self.assertEqual({c_["k"]: c_["a"] for c_ in ab["checklist"]}["seeds"], "no")
+
     def test_setup(self):
         """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""
         self.e.propose_map(agent)

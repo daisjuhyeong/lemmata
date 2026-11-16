@@ -3,6 +3,7 @@ merged from records Lemmata already keeps (commits, stage changes, logged runs, 
 plus deadlines ahead. Rules only."""
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from .errors import BadRequest, NotFound
 
@@ -18,10 +19,31 @@ def load_deadlines(hub):
     return d
 
 
-def set_deadline(store, date=None, title=None, target=None, remove=None):
+DL_KINDS = ("milestone", "abstract", "paper", "decision", "journal")
+
+
+def add_venue(store, found, kinds=None):
+    """Store a conference's deadlines as looked up (venues.lookup). Replaces what was stored for the same venue and year."""
+    key = "%s %s" % (found["venue"], found["year"])
+    store["deadlines"] = [d for d in store["deadlines"] if d.get("venue") != key]
+    n = 0
+    for d in found["deadlines"]:
+        if not d.get("date") or (kinds and d["kind"] not in kinds):
+            continue
+        store["deadlines"].append({"id": "d" + uuid.uuid4().hex[:8], "date": d["date"], "title": "%s: %s" % (key, d["label"].lower()), "target": None, "kind": d["kind"],
+                                   "venue": key, "time": d.get("time"), "tz": d.get("tz"), "utc": d.get("utc"), "link": found.get("link"), "source": found.get("source"),
+                                   "checked": datetime.now().astimezone().replace(microsecond=0).isoformat()})
+        n += 1
+    if not n:
+        raise BadRequest("%s has no dated deadline yet (still to be announced). Add your own date for now." % key)
+    store["deadlines"].sort(key=lambda d: d["date"])
+    return store
+
+
+def set_deadline(store, date=None, title=None, target=None, remove=None, kind=None, venue=None):
     if remove is not None:
         n = len(store["deadlines"])
-        store["deadlines"] = [d for d in store["deadlines"] if d["id"] != remove]
+        store["deadlines"] = [d for d in store["deadlines"] if d["id"] != remove and d.get("venue") != remove]
         if len(store["deadlines"]) == n:
             raise NotFound("unknown deadline %r" % remove)
         return store
@@ -33,12 +55,42 @@ def set_deadline(store, date=None, title=None, target=None, remove=None):
         raise BadRequest("target must be text")
     if len(store["deadlines"]) >= 200:
         raise BadRequest("too many deadlines")
-    store["deadlines"].append({"id": "d" + uuid.uuid4().hex[:8], "date": date, "title": title.strip(), "target": target or None})
+    if kind is not None and kind not in ("milestone", "journal"):
+        raise BadRequest("kind must be milestone or journal; conference deadlines come from the venue lookup")
+    if venue is not None and (not isinstance(venue, str) or len(venue) > 120):
+        raise BadRequest("venue must be text")
+    store["deadlines"].append({"id": "d" + uuid.uuid4().hex[:8], "date": date, "title": title.strip(), "target": target or None,
+                               "kind": kind or "milestone", "venue": (venue or "").strip() or None})
     store["deadlines"].sort(key=lambda d: d["date"])
     return store
 
 
-def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, plans, deadlines, github, start=None, end=None, today=None):
+def _esc(t):
+    t = str(t or "")
+    for ch in (chr(92), ";", ","):
+        t = t.replace(ch, chr(92) + ch)
+    return t.replace(chr(10), chr(92) + "n")
+
+
+def ics(deadlines, name, now=None):
+    """The deadlines and milestones as an iCalendar file (RFC 5545): what Google, Apple and Outlook calendars subscribe to."""
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    out = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Lemmata//Deadlines//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:" + _esc("Lemmata: %s" % name)]
+    for d in deadlines:
+        out += ["BEGIN:VEVENT", "UID:%s@lemmata" % d["id"], "DTSTAMP:" + stamp]
+        if d.get("utc"):
+            t = datetime.strptime(d["utc"], "%Y-%m-%dT%H:%M:%SZ")
+            out += ["DTSTART:" + t.strftime("%Y%m%dT%H%M%SZ"), "DTEND:" + t.strftime("%Y%m%dT%H%M%SZ")]
+        else:
+            day = datetime.strptime(d["date"], "%Y-%m-%d")
+            out += ["DTSTART;VALUE=DATE:" + day.strftime("%Y%m%d"), "DTEND;VALUE=DATE:" + (day + timedelta(days=1)).strftime("%Y%m%d")]
+        desc = " · ".join(x for x in [("%s %s at the venue" % (d.get("time"), d.get("tz"))) if d.get("tz") else None, d.get("link"), "Research: %s" % name] if x)
+        out += ["SUMMARY:" + _esc(d["title"]), "DESCRIPTION:" + _esc(desc), "END:VEVENT"]
+    out.append("END:VCALENDAR")
+    return "\r\n".join(out) + "\r\n"
+
+
+def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, plans, deadlines, github, start=None, end=None, today=None, exps=None):
     """-> the Trail document: entries newest first, days, months (for the month grid), deadlines ahead."""
     out = []
 
@@ -46,6 +98,7 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
         if isinstance(t, str) and len(t) >= 10:
             out.append({"t": t, "day": t[:10], "kind": kind, "title": title, "why": why, "target": target, "at": at, "ref": ref})
 
+    res_paths = {p_ for x in exps or [] for p_ in x.get("_paths") or []}
     theme = {}
     for st in steps or []:
         for c in st.get("commits") or []:
@@ -64,6 +117,21 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
             ref=ev.get("short"))
         if st.get("decision"):
             out[-1]["decision"] = True
+        # the detail shown when the day is opened: the files by kind, and what the commit did to each experiment's result
+        grp = {"paper": [], "results": [], "code": []}
+        for f in files:
+            pth = f.get("path", "")
+            grp["paper" if role == "paper" else "results" if pth in res_paths else "code"].append(pth)
+        moved = []
+        for x in exps or []:
+            sp = x.get("spark") or []
+            for i, pt in enumerate(sp):
+                if pt.get("t") == ev["time"] and pt.get("o") is not None:
+                    prev = next((q["o"] for q in reversed(sp[:i]) if q.get("o") is not None), None)
+                    moved.append({"x": x["id"], "name": x["name"], "claims": x.get("_claims") or [], "before": prev, "after": pt["o"], "best_other": pt.get("b"),
+                                  "metric": (x.get("summary") or {}).get("metric"), "lower": (x.get("summary") or {}).get("lower")})
+        out[-1]["detail"] = {"files": {k: v[:8] for k, v in grp.items() if v}, "files_n": {k: len(v) for k, v in grp.items() if v}, "results": moved,
+                             "affects": [a_.get("label") or a_.get("id") for a_ in (st.get("affects") or []) if isinstance(a_, dict)][:6]}
     names = {c["id"]: (c.get("short") or c.get("label") or c["id"]) for c in (claims_doc.get("claims") or [])}
     if claims_doc.get("core"):
         names["core"] = "Thesis"

@@ -398,6 +398,14 @@ class Handler(BaseHTTPRequestHandler):
                 with self.app.lock:
                     data = need("digest")(days)
                 return self._json(data)
+            if r == "/calendar":
+                with self.app.lock:
+                    data = need("calendar")()
+                return self._json(data)
+            if r == "/calendar.ics":
+                with self.app.lock:
+                    text = need("calendar_ics")()
+                return self._send(200, text.encode("utf-8"), "text/calendar; charset=utf-8", {"Content-Disposition": 'attachment; filename="lemmata-deadlines.ics"'})
             if r == "/claims.md":
                 with self.app.lock:
                     md = need("claims_markdown")()
@@ -440,7 +448,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
+        RESEARCH = ("/todo", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -490,7 +498,16 @@ class Handler(BaseHTTPRequestHandler):
                 if r == "/todo":
                     return self._json(need("snooze_todo")(txt("key", True), txt("snooze_until")))
                 if r == "/deadlines":
-                    return self._json(need("set_deadline")(txt("date"), txt("title"), txt("target"), txt("remove")))
+                    return self._json(need("set_deadline")(txt("date"), txt("title"), txt("target"), txt("remove"), txt("kind"), txt("venue")))
+                if r == "/venue":
+                    yr = body.get("year")
+                    if not isinstance(yr, int) or isinstance(yr, bool):
+                        raise ApiError(400, "bad_request", "year must be a number")
+                    if body.get("add") is True:
+                        return self._json(need("add_venue")(txt("name", True), yr))
+                    return self._json(need("venue_lookup")(txt("name", True), yr))
+                if r == "/calendar":
+                    return self._json(need("calendar")(txt("action", True)))
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):

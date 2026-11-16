@@ -19,7 +19,7 @@ function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = n
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
 function rxGoto(view, sel) {
   if (view === 'experiments' && /^[qx]:/.test(sel || '')) { RX.exView = 'map'; RX.mapSel = sel; RX.exOpen = null; }
-  if (view === 'setup' && /^[ixc]:/.test(sel || '')) RX.suSel = sel;
+  if (view === 'setup' && /^[ixc]:/.test(sel || '')) RX.suSel = sel.startsWith('i:') ? sel : null;
   openTab(view);
 }
 /* Website only: a link that opens this page in VS Code's Lemmata tab (vscode/src/core/link.ts reads it). */
@@ -1057,6 +1057,7 @@ function pageDigest() {      // Home (S24 step 8): one research as a whole. The 
   const root = doc(h('h1', { class: 'ptitle' }, S.project ? S.project.name : 'Home'));
   const E = RX.experiments, T = RX.trail;
   if (E && E.thesis) { const th = rxThesisHead(E); th.classList.add('home'); th.querySelector('.rx-th-k .linkbtn').replaceWith(h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the thesis')); root.append(th); }
+  if (T) { const ym = RX.trMonth || (RX.trDay || T.today).slice(0, 7); root.append(h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day to see what was done: which experiment moved, for which claim, and the files.'))); }
   const cards = h('div', { class: 'hm-cards' });
   const todoN = RX.todo ? RX.todo.counts.total : 0, lim = RX.hmAll ? 0 : 6;
   cards.append(h('section', { class: 'hm-card hm-todo' }, h('div', { class: 'hm-h' }, h('h3', null, 'Next to do'), h('span', { class: 'hm-n' }, todoN), h('span', { class: 'grow' }),
@@ -1226,57 +1227,6 @@ function suWhereLine(hit) {
   const open = EMBED && hit.repo ? h('button', { class: 'linkbtn mono small', title: 'Open in the editor', onclick: () => EMBED.openFile(hit.repo, hit.path, hit.line || 1) }, hit.path + ':' + hit.line) : rxWhere(loc, hit.repo);
   return h('div', { class: 'su-hit' }, open, hit.appendix ? h('span', { class: 'tag' }, 'appendix') : null, h('span', { class: 'su-hit-t' + (hit.kind ? ' mono' : ' serif') }, rxMath(hit.text || '')));
 }
-/* The map. Positions are computed; nothing is dragged. */
-function suMap(D, sel, filter) {
-  const kinds = filter === 'all' ? ['metric', 'dataset', 'method'] : [filter];
-  const items = D.items.filter(it => kinds.includes(it.kind));
-  const exps = D.experiments.filter(x => x.items.length || x.claims.length), claims = D.claims;
-  // fit the page (website: up to the wide column; VS Code: its panel), never narrower than the boxes need
-  const pg = document.getElementById('page'), avail = Math.max(700, Math.min(1052, ((pg && pg.clientWidth) || 800) - 48));
-  const CW = [Math.round(avail * .25), Math.round(avail * .22), Math.round(avail * .26)], gap = Math.round((avail - CW[0] - CW[1] - CW[2]) / 2);
-  const IH = 46, HEAD = 26, GAPK = 14, CX = [0, CW[0] + gap, CW[0] + CW[1] + 2 * gap], W = CX[2] + CW[2];
-  const iy = new Map(); let y = 0;
-  kinds.forEach(k => { const its = items.filter(it => it.kind === k); if (!its.length) return; iy.set('h:' + k, y); y += HEAD; its.forEach(it => { iy.set(it.id, y); y += IH; }); y += GAPK; });
-  const XH = 40, CH = 84;
-  const H = Math.max(y - GAPK, exps.length * (XH + 10), claims.length * (CH + 12), 160);
-  const xStep = exps.length ? Math.min(XH + 26, H / exps.length) : 0, cStep = claims.length ? Math.min(CH + 34, H / claims.length) : 0;
-  const x0 = (H - xStep * exps.length) / 2, c0 = (H - cStep * claims.length) / 2;
-  const xy = new Map(exps.map((x, i) => [x.id, x0 + i * xStep + (xStep - XH) / 2])), cy = new Map(claims.map((c, i) => [c.id, c0 + i * cStep + (cStep - CH) / 2]));
-  const byI = new Map(D.items.map(it => [it.id, it])), byX = new Map(D.experiments.map(x => [x.id, x])), byC = new Map(claims.map(c => [c.id, c]));
-  // what stays lit
-  const litI = new Set(), litX = new Set(), litC = new Set();
-  const k = sel ? sel.slice(0, 1) : null, id = sel ? sel.slice(2) : null;
-  if (k === 'i' && byI.has(id)) { litI.add(id); byI.get(id).experiments.forEach(x => litX.add(x)); byI.get(id).claims.forEach(c => litC.add(c)); }
-  if (k === 'x' && byX.has(id)) { litX.add(id); byX.get(id).items.forEach(i => litI.add(i)); byX.get(id).claims.forEach(c => litC.add(c)); }
-  if (k === 'c' && byC.has(id)) { litC.add(id); byC.get(id).experiments.forEach(x => litX.add(x)); byC.get(id).items.forEach(i => litI.add(i)); }
-  const on = sel && (litI.size || litX.size || litC.size);
-  const dim = (set, v) => on && !set.has(v) ? ' dim' : '';
-  const pick = s => { RX.suSel = RX.suSel === s ? null : s; renderPage(true); };
-  const svg = sv('svg', { class: 'rx-m-edges', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'aria-hidden': 'true' });
-  const curve = (x1, y1, x2, y2) => 'M' + x1 + ',' + y1 + ' C' + (x1 + x2) / 2 + ',' + y1 + ' ' + (x1 + x2) / 2 + ',' + y2 + ' ' + x2 + ',' + y2;
-  const box = h('div', { class: 'rx-m su-m', style: 'width:' + W + 'px;height:' + H + 'px' }, svg);
-  // edges: item -> experiment, experiment -> claim
-  exps.forEach(x => {
-    x.items.forEach(i => { if (!iy.has(i)) return; const lit = on && litI.has(i) && litX.has(x.id) && (k !== 'i' || i === id);
-      svg.append(sv('path', { d: curve(CW[0], iy.get(i) + (IH - 6) / 2, CX[1], xy.get(x.id) + XH / 2), class: 'me su-e ' + (byI.get(i) || {}).kind + (lit ? ' lit' : on ? ' dim' : '') })); });
-    x.claims.forEach(c => { if (!cy.has(c)) return; const lit = on && litX.has(x.id) && litC.has(c) && (k !== 'c' || c === id);
-      svg.append(sv('path', { d: curve(CX[1] + CW[1], xy.get(x.id) + XH / 2, CX[2], cy.get(c) + CH / 2), class: 'me su-e' + (lit ? ' lit' : on ? ' dim' : '') })); });
-  });
-  kinds.forEach(kk => { if (iy.has('h:' + kk)) box.append(h('span', { class: 'rx-m-scope su-kh', style: 'left:0;top:' + (iy.get('h:' + kk) + 4) + 'px' }, SU_KIND[kk][0] + ' · ' + items.filter(it => it.kind === kk).length)); });
-  box.append(h('span', { class: 'rx-m-scope su-kh', style: 'left:' + CX[1] + 'px;top:-20px' }, 'Experiments · ' + exps.length), h('span', { class: 'rx-m-scope su-kh', style: 'left:' + CX[2] + 'px;top:-20px' }, 'Claims they test · ' + claims.length));
-  items.forEach(it => {
-    box.append(h('button', { class: 'su-i k-' + it.kind + (it.role ? ' r-' + it.role : '') + (sel === 'i:' + it.id ? ' sel' : '') + dim(litI, it.id), style: 'left:0;top:' + iy.get(it.id) + 'px;width:' + CW[0] + 'px;height:' + (IH - 6) + 'px',
-      'aria-pressed': String(sel === 'i:' + it.id), title: it.name + (it.aliases.length ? ' (also ' + it.aliases.join(', ') + ')' : '') + (it.checks.length ? ' · ' + it.checks.map(c => c.t).join('; ') : ''), onclick: () => pick('i:' + it.id) },
-      h('span', { class: 'su-in' }, h('b', null, it.name), it.checks.length ? h('span', { class: 'rx-m-chk' }, '!') : null), h('span', { class: 'su-is' }, suSub(it, D))));
-  });
-  exps.forEach(x => box.append(h('button', { class: 'rx-m-x su-x' + (sel === 'x:' + x.id ? ' sel' : '') + dim(litX, x.id), style: 'left:' + CX[1] + 'px;top:' + xy.get(x.id) + 'px;width:' + CW[1] + 'px;height:' + XH + 'px',
-    'aria-pressed': String(sel === 'x:' + x.id), title: x.name, onclick: () => pick('x:' + x.id) }, h('span', { class: 'rx-m-xn' }, x.name), SU_XTYPE[x.type] ? h('span', { class: 'rx-m-xv' }, SU_XTYPE[x.type]) : null, x.attention ? h('span', { class: 'rx-m-chk' }, '!') : null)));
-  claims.forEach(c => { const st = c.stage ? RX_STAGE[c.stage] : RX_STATUS[c.status] || RX_STATUS.partial;
-    box.append(h('button', { class: 'rx-m-q su-c' + (c.stage ? rxSt(c.stage) : '') + (sel === 'c:' + c.id ? ' sel' : '') + dim(litC, c.id), style: 'left:' + CX[2] + 'px;top:' + cy.get(c.id) + 'px;width:' + CW[2] + 'px;height:' + CH + 'px',
-      'aria-pressed': String(sel === 'c:' + c.id), onclick: () => pick('c:' + c.id) },
-      h('span', { class: 'rx-m-qh' }, h('b', null, c.label), st ? h('span', { class: 'rx-m-stage ' + st[2] }, st[0] + ' ' + st[1]) : null), h('span', { class: 'rx-m-qt serif' }, rxMath(trunc(c.text, 80))))); });
-  return h('div', { class: 'rx-m-wrap su-wrap' }, box);
-}
 function suUsesTable(it, D) {
   const byX = new Map(D.experiments.map(x => [x.id, x])), byC = new Map(D.claims.map(c => [c.id, c]));
   const xcell = u => { const x = byX.get(u.x) || { name: u.x, claims: [] };
@@ -1350,6 +1300,79 @@ function suOtherDetail(sel, D) {
     h('div', { class: 'su-body' }, h('p', { class: 'serif su-ct' }, rxMath(c.text)),
       h('div', { class: 'su-grp' }, h('span', { class: 'su-gk' }, 'Tested by'), c.experiments.map(x => byX.get(x) ? suLink('x:' + x, byX.get(x).name) : null)), suGroupChips(c.items, D)));
 }
+/* S25: Setup as a protocol sheet, read top-down: claim -> experiment -> protocol -> coverage grid -> trace of one cell.
+   (Founder, chat 2026-11-16 12:31-12:32 KST: the curve map is replaced; a researcher must be able to double-check the traces.) */
+const SU_ANS = { yes: ['✓', 'fine', 'Yes'], no: ['✕', 'fix', 'No'], you: ['?', 'look', 'You check'] };
+RX.suTrace = RX.suTrace || {};
+function suCellKey(xid, m, c) { return xid + '|' + m + '|' + c; }
+function suLoadTrace(xid) {
+  if (RX.suTrace[xid]) return;
+  RX.suTrace[xid] = { loading: true };
+  apiGet('/api/experiment?id=' + encodeURIComponent(xid)).then(d => { RX.suTrace[xid] = { d }; }).catch(e => { RX.suTrace[xid] = { err: e.message }; }).then(() => { const t = S.tabs[S.active]; if (t && t.k === 'setup') renderPage(true); });
+}
+function suTracePanel(x, method, col) {
+  const T = RX.suTrace[x.id];
+  const box = h('div', { class: 'su-tr' });
+  const head = h('div', { class: 'su-tr-h' }, h('b', null, method), ' on ', h('b', null, col), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => { RX.suCell = null; renderPage(true); } }, 'Close'));
+  box.append(head);
+  if (!T || T.loading) return box.append(h('div', { class: 'muted small' }, 'Reading the trace…')), box;
+  if (T.err) return box.append(h('div', { class: 'muted small' }, 'Could not read it: ' + T.err)), box;
+  const d = T.d, ds = (x.grid.datasets || [])[x.grid.cols.indexOf(col)] || col, nm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const step = (n, title, ok, kids) => h('div', { class: 'su-st' + (ok ? '' : ' miss') }, h('span', { class: 'su-st-n' }, n), h('div', { class: 'su-st-b' }, h('div', { class: 'su-st-t' }, title, ok ? null : h('span', { class: 'tag warn' }, 'not found')), kids));
+  // 1 paper
+  let pc = null; (d.cells || []).forEach(r => r.forEach(c => { if (c.row && nm(c.row) === nm(method) && nm(c.col) === nm(ds)) pc = c; }));
+  const file = (x.grid.rows.find(r => r.label === method) || { values: {} }).values[col];
+  box.append(step(1, 'In the paper', !!pc, pc ? [h('span', { class: 'mono' }, pc.text), h('span', { class: 'muted small' }, ' in ' + ((d.paper || [])[0] || {}).name + ' · '), d.loc ? rxWhere(d.loc, 'paper') : null,
+      h('span', { class: 'tag' + (pc.status === 'match' || pc.status === 'rounding' ? '' : ' warn') }, pc.status === 'match' ? 'matches the file' : pc.status === 'rounding' ? 'matches after rounding' : pc.status === 'differs' ? 'differs: the file gives ' + rxFmt(pc.file) : pc.status || '')]
+    : h('span', { class: 'muted small' }, (d.paper || []).length ? 'This cell is not in ' + d.paper[0].name + '.' : 'No paper table is linked to this experiment.')));
+  // 2 result files
+  const fs = ((d.design || {}).files || []), mine = fs.filter(f => f.fields && nm(f.fields.method) === nm(method) && nm(f.fields.dataset) === nm(ds)), shown = mine.length ? mine : fs.filter(f => !f.fields || (!f.fields.method && !f.fields.dataset)).slice(0, 6);
+  box.append(step(2, 'Result files' + (file != null ? ' → ' + rxFmt(file) : ''), shown.length > 0, shown.length ? shown.slice(0, 8).map(f => h('div', { class: 'su-f' }, h('button', { class: 'linkbtn mono small', title: 'Open this file', onclick: () => (EMBED && d.repo ? EMBED.openFile(d.repo, f.path, 1) : openTab('node', f.node_id)) }, f.path),
+      f.fields && f.fields.seed ? h('span', { class: 'muted small' }, ' seed ' + f.fields.seed) : null)).concat(mine.length ? [h('div', { class: 'muted small' }, plural(mine.length, 'file') + ' averaged into this number.')] : [h('div', { class: 'muted small' }, 'The method and dataset are columns inside these files.')])
+    : h('span', { class: 'muted small' }, 'No result file for this cell.')));
+  // 3 scripts and settings
+  const sc = ((d.design || {}).scripts || []).concat((d.design || {}).settings || []), vals = ((d.design || {}).values || []);
+  box.append(step(3, 'Script and settings', sc.length > 0, sc.length ? [h('div', null, sc.slice(0, 6).map(n => h('button', { class: 'linkbtn mono small su-fl', onclick: () => openTab('node', n.node_id) }, n.name))),
+      vals.length ? h('div', { class: 'su-vals' }, vals.slice(0, 10).map(v => h('span', { class: 'mono small' }, v.key + ' = ' + v.value))) : null] : h('span', { class: 'muted small' }, 'Lemmata found no script or settings file that writes these results.')));
+  // 4 when
+  const hs = d.history || [], last = hs[hs.length - 1];
+  box.append(step(4, 'Last written', !!last, last ? [h('span', null, dmon(last.time)), h('span', { class: 'mono muted small' }, ' ' + (last.short || '')), h('span', { class: 'muted small' }, ' “' + trunc(last.subject || '', 60) + '”'),
+      (last.changes || []).length ? h('div', { class: 'muted small' }, 'Changed with it: ' + last.changes.flatMap(c => c.files || []).slice(0, 4).join(', ')) : null,
+      d.stale ? h('div', { class: 'rx-warn' }, '! The code or settings changed after this.') : null] : h('span', { class: 'muted small' }, 'No commit history for these files.')));
+  box.append(h('div', { class: 'su-tr-f' }, h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open the experiment'), rxVsLink('x:' + x.id)));
+  return box;
+}
+function suSheet(x, claim, D, hl) {
+  const P = x.protocol, link = claim && claim.links[x.id];
+  const card = h('section', { class: 'su-sh' + (x.attention ? ' att' : '') });
+  card.append(h('div', { class: 'su-sh-h' }, link ? rxLinkChip(Object.assign({ criterion_by: '' }, link)) : null, SU_XTYPE[x.type] ? h('span', { class: 'tag' }, SU_XTYPE[x.type]) : null, h('b', null, x.name), h('span', { class: 'grow' }),
+    P && P.last ? h('span', { class: 'muted small' }, 'last result ' + dmon(P.last)) : null, h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, 'Open')));
+  if (!P) return card.append(h('p', { class: 'muted small' }, 'Its result files could not be read as a table, so there is no protocol to show.')), card;
+  const itemBtn = (kind, name, extra) => { const id = kind + ':' + name.toLowerCase().replace(/[^a-z0-9]/g, ''); const it = D.items.find(i => i.id === id);
+    return h('button', { class: 'su-pi k-' + kind + (hl === id ? ' on' : '') + (it && it.checks.length ? ' chk' : ''), title: it ? 'Where the paper and the code name it' : null, onclick: () => { RX.suSel = RX.suSel === 'i:' + id ? null : 'i:' + id; renderPage(true); } }, name, extra ? h('span', { class: 'muted' }, ' ' + extra) : null); };
+  const row = (k, ...v) => h('div', { class: 'su-pr' }, h('span', { class: 'su-pk' }, k), h('div', { class: 'su-pv' }, v));
+  card.append(h('div', { class: 'su-p' },
+    row('Metric', itemBtn('metric', P.metric, P.target != null ? '→ ' + rxFmt(P.target) : P.lower ? '↓ lower is better' : '↑ higher is better'), P.measures.filter(m => m !== P.metric).length ? h('span', { class: 'muted small' }, 'also recorded: ' + P.measures.filter(m => m !== P.metric).join(', ')) : null),
+    row('Datasets', P.datasets.length ? P.datasets.map(d => itemBtn('dataset', d)) : h('span', { class: 'muted small' }, 'not split by dataset')),
+    P.search ? row('Search', h('span', null, plural(P.settings_n, 'setting') + ' tried'), P.best ? h('span', { class: 'muted small' }, 'best: ' + P.best.label + ' (' + rxFmt(P.best.value) + ')') : null)
+      : row('Methods', P.methods.map(m => itemBtn('method', m.name, m.role !== 'baseline' ? SU_ROLE[m.role].toLowerCase() : null))),
+    P.search ? null : row('Runs', h('span', null, P.seeds ? (P.seeds[0] === P.seeds[1] ? P.seeds[0] : P.seeds[0] + ' to ' + P.seeds[1]) + ' per result' : '—')),
+    P.paper.length ? row('In the paper', h('span', null, P.paper.join(', '))) : null));
+  if (x.grid) {
+    const G = x.grid, sel = RX.suCell && RX.suCell.x === x.id ? RX.suCell : null;
+    const hlM = hl && hl.startsWith('method:') ? hl.slice(7) : null, hlD = hl && hl.startsWith('dataset:') ? hl.slice(8) : null, nm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+    card.append(h('div', { class: 'su-gw' }, h('table', { class: 'su-g' }, h('thead', null, h('tr', null, h('th', null, P.metric + (P.lower ? ' ↓' : P.target != null ? '' : ' ↑')), G.cols.map((c, i) => h('th', { class: hlD === nm(G.datasets[i]) ? 'hl' : null }, G.datasets[i])))),
+      h('tbody', null, G.rows.map(r => h('tr', { class: (r.role === 'ours' ? 'ours' : '') + (hlM === nm(r.label) ? ' hl' : '') }, h('th', null, r.label, r.role !== 'baseline' ? h('span', { class: 'tag' }, SU_ROLE[r.role].toLowerCase()) : null),
+        G.cols.map((c, i) => { const v = r.values[c], on = sel && sel.m === r.label && sel.c === c;
+          return h('td', { class: (v == null ? 'miss' : '') + (r.best.includes(c) ? ' best' : '') + (on ? ' on' : '') + (hlD === nm(G.datasets[i]) ? ' hl' : '') },
+            h('button', { class: 'su-cb', title: v == null ? 'No result: ' + r.label + ' on ' + G.datasets[i] : 'Trace this number', 'aria-pressed': String(!!on), onclick: () => { RX.suCell = on ? null : { x: x.id, m: r.label, c }; if (!on) suLoadTrace(x.id); renderPage(true); } },
+              v == null ? '—' : h('span', { class: 'mono' }, rxFmt(v)), v != null && r.n[c] ? h('span', { class: 'su-cn' }, '×' + r.n[c]) : null)); })))))));
+    if (sel) card.append(suTracePanel(x, sel.m, sel.c));
+    else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it: paper → result files → script and settings → commit. ×n is the number of runs; bold is the best in its column.'));
+  }
+  card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check. ' + c.why : c.why)); })));
+  return card;
+}
 function pageSetup() {
   const nr = rxNotReady('Setup'); if (nr) return nr;
   S.outline = [];
@@ -1359,25 +1382,28 @@ function pageSetup() {
     if (RX.setupErr) return root.append(h('h1', { class: 'ptitle' }, 'Setup'), emptyState('!', 'Not available', RX.setupErr, [h('button', { class: 'btn', onclick: () => { RX.setupErr = null; suLoad(); } }, 'Try again')])), root;
     suLoad(); return root.append(h('h1', { class: 'ptitle' }, 'Setup'), h('p', { class: 'muted' }, 'Reading the experiments…')), root;
   }
-  const filter = RX.suFilter || 'all', c = D.counts;
-  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Show' }, [['all', 'All'], ['metric', 'Metrics'], ['dataset', 'Datasets'], ['method', 'Methods']].map(([k, l]) =>
-    h('button', { 'aria-pressed': String(filter === k), onclick: () => { RX.suFilter = k; renderPage(true); } }, l + (k !== 'all' ? ' ' + c[k] : ''))));
+  const c = D.counts;
   root.classList.add('wide');
-  root.append(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Setup'), seg),
-    h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.metric), ' metrics'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''),
-      h('span', null, h('b', null, c.experiments), ' experiments'), c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
-  if (!D.mapped) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this list is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Experiments'), '.'));
-  if (!D.items.length) return root.append(emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;
+  root.append(h('h1', { class: 'ptitle' }, 'Setup'),
+    h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
+      c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
+  if (!D.mapped) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
+  if (!D.experiments.some(x => x.protocol)) return root.append(emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;
   let sel = RX.suSel || null;
-  if (sel && sel.startsWith('i:') && !D.items.some(it => it.id === sel.slice(2))) sel = RX.suSel = null;
-  root.append(suMap(D, sel, filter),
-    h('div', { class: 'rx-legend su-legend' }, h('span', null, h('span', { class: 'su-key k-metric' }), ' metric'), h('span', null, h('span', { class: 'su-key k-dataset' }), ' dataset'), h('span', null, h('span', { class: 'su-key k-method' }), ' method'), h('span', null, '! to check')));
-  if (sel && sel.startsWith('i:')) root.append(suItemDetail(D.items.find(it => it.id === sel.slice(2)), D));
-  else if (sel) { const d = suOtherDetail(sel, D); if (d) root.append(d); }
-  else root.append(h('p', { class: 'muted rx-m-hint' }, 'Click a metric, dataset or method to see how each experiment uses it. Click an experiment or claim to see what it is built on.'));
+  const hl = sel && sel.startsWith('i:') && D.items.some(it => it.id === sel.slice(2)) ? sel.slice(2) : null;
+  if (hl) root.append(suItemDetail(D.items.find(it => it.id === hl), D));
+  const byX = new Map(D.experiments.map(x => [x.id, x])), seen = new Set();
+  const uses = x => !hl || x.items.includes(hl);
+  D.claims.forEach(cl => {
+    const xs = cl.experiments.map(id => byX.get(id)).filter(x => x && uses(x)); if (!xs.length) return;
+    root.append(h('div', { class: 'su-cl-h' + (cl.stage ? rxSt(cl.stage) : '') }, h('button', { class: 'rx-x-q', title: 'Open in Thesis', onclick: () => suGotoClaim(cl.id) }, cl.label), cl.stage ? rxStageChip(cl) : null, h('span', { class: 'rx-x-qt serif' }, rxMath(trunc(cl.text, 160)))));
+    xs.forEach(x => { seen.add(x.id); root.append(suSheet(x, cl, D, hl)); });
+  });
+  const loose = D.experiments.filter(x => !seen.has(x.id) && !x.claims.length && x.protocol && uses(x));
+  if (loose.length) { root.append(h('div', { class: 'su-cl-h' }, h('span', { class: 'rx-x-q static' }, 'No claim'), h('span', { class: 'rx-x-qt muted' }, 'Experiments that test no claim'))); loose.forEach(x => root.append(suSheet(x, null, D, hl))); }
+  if (hl && !root.querySelector('.su-sh')) root.append(h('p', { class: 'muted' }, 'No experiment uses it.'));
   return root;
 }
-
 /* ---------- To-do and Trail (S24 steps 4-5, ADR-008 section 5) ----------
    To-do: made by rules; every item opens the thing it is about. Trail: what was done, day by day, deadlines ahead,
    and a whole-month view at the bottom (founder, chat 2026-11-16 11:21 KST). */
@@ -1421,7 +1447,7 @@ function trEntry(e) {
     can ? h('button', { class: 'ilink', onclick: () => rxOpenTarget(Object.assign({}, e.target, { at: e.at })) }, trunc(e.title, 130)) : h('span', null, trunc(e.title, 130)),
     e.ref ? h('span', { class: 'mono muted small' }, e.ref) : null, e.decision ? h('span', { class: 'tag warn' }, 'decision') : null, e.why ? h('span', { class: 'muted small' }, e.why) : null);
 }
-function trMonth(D, ym, filter) {
+function trMonth(D, ym, filter, onDay) {
   const [y, m] = ym.split('-').map(Number), first = new Date(y, m - 1, 1), n = new Date(y, m, 0).getDate(), lead = (first.getDay() + 6) % 7;
   const p = v => String(v).padStart(2, '0'), key = d => y + '-' + p(m) + '-' + p(d);
   const dl = {}; D.deadlines.forEach(d => { (dl[d.date] = dl[d.date] || []).push(d); });
@@ -1430,15 +1456,86 @@ function trMonth(D, ym, filter) {
   for (let i = 0; i < lead; i++) cells.push(h('div', { class: 'tm-c off' }));
   for (let d = 1; d <= n; d++) {
     const k = key(d), c = D.days[k] || null, tot = c ? D.kinds.reduce((a, kk) => a + (filter === 'all' || filter === kk ? c[kk] : 0), 0) : 0;
-    cells.push(h('button', { class: 'tm-c' + (k === D.today ? ' today' : '') + (tot ? ' has' : '') + (dl[k] ? ' due' : ''), disabled: tot || dl[k] ? null : '',
+    cells.push(h('button', { class: 'tm-c' + (k === D.today ? ' today' : '') + (tot ? ' has' : '') + (dl[k] ? ' due' : '') + (RX.trDay === k ? ' sel' : ''), disabled: tot || dl[k] ? null : '',
       title: (tot ? D.kinds.filter(kk => c[kk]).map(kk => c[kk] + ' ' + TR_KIND[kk].toLowerCase()).join(', ') : 'Nothing recorded') + (dl[k] ? ' · due: ' + dl[k].map(x => x.title).join(', ') : ''),
-      onclick: () => { RX.trDay = k; renderPage(true); const el = document.getElementById('tr-' + k); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } },
+      onclick: () => { RX.trDay = RX.trDay === k && onDay ? null : k; renderPage(true); if (!onDay) { const el = document.getElementById('tr-' + k); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } } },
       h('span', { class: 'tm-d' }, d), tot ? h('span', { class: 'tm-dots' }, D.kinds.filter(kk => c[kk] && (filter === 'all' || filter === kk)).map(kk => h('span', { class: 'tm-dot k-' + kk, title: c[kk] + ' ' + TR_KIND[kk].toLowerCase() }))) : null,
       tot ? h('span', { class: 'tm-n' }, tot) : null, dl[k] ? h('span', { class: 'tm-due' }, trunc(dl[k][0].title, 14)) : null));
   }
   return h('section', { class: 'tm' }, h('div', { class: 'tm-h' }, h('h3', null, MON[m - 1] + ' ' + y), h('span', { class: 'grow' }),
       h('button', { class: 'btn sm', 'aria-label': 'Previous month', onclick: () => step(-1) }, '←'), h('button', { class: 'btn sm', onclick: () => { RX.trMonth = null; renderPage(true); } }, 'This month'), h('button', { class: 'btn sm', 'aria-label': 'Next month', onclick: () => step(1) }, '→')),
     h('div', { class: 'tm-g head' }, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(w => h('div', { class: 'tm-w' }, w))), h('div', { class: 'tm-g' }, cells));
+}
+/* S25: deadlines from a venue, your own dates, the calendar link, and the day panel */
+const DL_KIND = { abstract: 'abstract', paper: 'paper', decision: 'decision', journal: 'journal', milestone: 'milestone' };
+function tdReload() { apiGet('/api/todo').then(r => { RX.todo = r; renderAll(); }).catch(() => { /* keep the old list */ }); }
+function trDeadlineRow(d, D) {
+  const days = Math.round((Date.parse(d.date) - Date.parse(D.today)) / 864e5);
+  return h('div', { class: 'tr-e ahead' }, h('span', { class: 'tr-c mono' }, days >= 0 ? 'D-' + days : 'past'), h('span', { class: 'tag tr-k' }, dmon(d.date) + (d.date.slice(0, 4) !== D.today.slice(0, 4) ? ' ' + d.date.slice(0, 4) : '')),
+    h('span', null, d.title), d.tz ? h('span', { class: 'muted small' }, d.time + ' ' + d.tz) : null, d.kind && d.kind !== 'milestone' ? h('span', { class: 'tag' }, DL_KIND[d.kind]) : null,
+    d.link ? h('a', { class: 'small', href: d.link, target: '_blank', rel: 'noopener noreferrer' }, 'venue page') : null, d.source ? h('a', { class: 'small muted', href: d.source, target: '_blank', rel: 'noopener noreferrer', title: 'Community-kept data: check the venue page' }, 'source') : null,
+    READONLY ? null : h('button', { class: 'linkbtn small', onclick: async () => { const r = await rxPost('/api/deadlines', { remove: d.id }); if (r) { RX.trail = r; tdReload(); renderPage(true); } } }, 'Remove'));
+}
+function trAhead(D) {
+  const box = h('section', { class: 'tr-ahead' }, h('div', { class: 'dayhead' }, 'Ahead'), D.ahead.length ? D.ahead.map(d => trDeadlineRow(d, D)) : h('div', { class: 'muted small' }, 'No deadlines yet.'));
+  if (READONLY) return box;
+  const mode = RX.dlMode || 'conf', seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Add' }, [['conf', 'Conference'], ['own', 'Journal or own date']].map(([k, l]) => h('button', { 'aria-pressed': String(mode === k), onclick: () => { RX.dlMode = k; RX.dlFound = null; renderPage(true); } }, l)));
+  const set = r => { if (r) { RX.trail = r; tdReload(); RX.dlFound = null; renderPage(true); } };
+  let form;
+  if (mode === 'conf') {
+    const ni = h('input', { type: 'text', placeholder: 'Venue, e.g. ICML', 'aria-label': 'Venue', maxlength: '60', value: (RX.dlFound || {}).q || '' }), yi = h('input', { type: 'number', 'aria-label': 'Year', min: '2020', max: '2100', value: String((RX.dlFound || {}).y || (+D.today.slice(0, 4) + 1)) });
+    form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!ni.value.trim()) return; RX.dlFound = { q: ni.value.trim(), y: +yi.value, busy: true }; renderPage(true);
+        try { RX.dlFound.r = await apiPost('/api/venue', { name: ni.value.trim(), year: +yi.value }); } catch (e) { RX.dlFound.err = e.message; } RX.dlFound.busy = false; renderPage(true); } }, ni, yi, h('button', { class: 'btn sm', type: 'submit' }, 'Find deadlines'));
+    const F = RX.dlFound;
+    if (F && F.busy) form.append(h('div', { class: 'muted small tr-fn' }, 'Looking it up…'));
+    if (F && F.err) form.append(h('div', { class: 'rx-warn tr-fn' }, F.err));
+    if (F && F.r) { const r = F.r, dated = r.deadlines.filter(d => d.date);
+      form.append(h('div', { class: 'tr-found' }, h('div', null, h('b', null, r.venue + ' ' + r.year), r.full_name ? h('span', { class: 'muted small' }, ' ' + r.full_name) : null, r.when ? h('span', { class: 'muted small' }, ' · ' + r.when + (r.place ? ', ' + r.place : '')) : null),
+        r.deadlines.map(d => h('div', { class: 'tr-e' }, h('span', { class: 'tag tr-k' }, d.label), d.date ? h('span', { class: 'mono' }, d.date + ' ' + d.time) : h('span', { class: 'muted' }, 'not announced (' + d.raw + ')'), d.tz ? h('span', { class: 'muted small' }, d.tz) : null)),
+        h('div', { class: 'muted small' }, 'From ', h('a', { href: r.source, target: '_blank', rel: 'noopener noreferrer' }, r.source_name), '. It can be wrong or late: check ', r.link ? h('a', { href: r.link, target: '_blank', rel: 'noopener noreferrer' }, 'the venue page') : 'the venue page', ' before you rely on it.'),
+        dated.length ? h('button', { class: 'btn sm primary', type: 'button', onclick: async () => set(await rxPost('/api/venue', { name: F.q, year: F.y, add: true })) }, 'Add these ' + dated.length + ' dates') : null)); }
+  } else {
+    const di = h('input', { type: 'date', 'aria-label': 'Date' }), ti = h('input', { type: 'text', placeholder: 'What is due, e.g. Submit to TKDE, Draft to advisor', 'aria-label': 'Title', maxlength: '160' }), vi = h('input', { type: 'text', placeholder: 'Journal (optional)', 'aria-label': 'Journal', maxlength: '120' });
+    form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!di.value || !ti.value.trim()) return; set(await rxPost('/api/deadlines', { date: di.value, title: ti.value.trim(), kind: vi.value.trim() ? 'journal' : 'milestone', venue: vi.value.trim() || undefined })); } }, di, ti, vi, h('button', { class: 'btn sm', type: 'submit' }, 'Add date'),
+      h('div', { class: 'muted small tr-fn' }, 'A journal has no shared deadline, so you set your own target dates.'));
+  }
+  box.append(h('div', { class: 'tr-add' }, seg, form), trCalLink());
+  return box;
+}
+function trCalLink() {
+  const C = RX.cal;
+  if (C === undefined) { RX.cal = null; apiGet('/api/calendar').then(r => { RX.cal = r; renderPage(true); }).catch(() => { RX.cal = { err: true }; }); }
+  if (!C || C.err) return null;
+  const base = (typeof HUB_ON !== 'undefined' && HUB_ON && PID) ? location.origin + '/cal/' + PID + '/' : null, url = C.token && base ? base + C.token + '.ics' : null;
+  const act = async a => { const r = await rxPost('/api/calendar', { action: a }); if (r) { RX.cal = r; renderPage(true); } };
+  const isPrivate = /^(localhost|127\.|100\.|10\.|192\.168\.)/.test(location.hostname);
+  return h('details', { class: 'details tr-cal' }, h('summary', null, 'Google Calendar and other calendar apps'),
+    h('p', { class: 'small' }, 'Only deadlines and your own dates are shared (' + C.events + ' now), not your daily activity.'),
+    h('div', { class: 'tr-f' }, h('a', { class: 'btn sm', href: apiUrl('/api/calendar.ics') }, 'Download .ics (one time)'),
+      url ? [h('input', { type: 'text', readonly: '', value: url, 'aria-label': 'Subscription link', onclick: ev => ev.target.select() }), h('button', { class: 'btn sm', onclick: () => copyText(url) }, 'Copy'), h('button', { class: 'linkbtn small', onclick: () => act('revoke') }, 'Turn the link off')]
+        : base ? h('button', { class: 'btn sm', onclick: () => act('create') }, 'Make a subscription link') : h('span', { class: 'muted small' }, 'A subscription link needs the hub.')),
+    url ? h('p', { class: 'muted small' }, 'In Google Calendar: Other calendars → + → From URL, and paste the link. It then updates by itself (Google re-reads it every few hours). Anyone with the link can read these dates.' + (isPrivate ? ' This address is private to your devices, so Google cannot reach it: open Lemmata at its public address and copy the link from there.' : '')) : null);
+}
+function trDayPanel(D, day) {
+  const es = D.entries.filter(e => e.day === day), dls = D.deadlines.filter(d => d.date === day);
+  const box = h('section', { class: 'tr-day' }, h('div', { class: 'tr-day-h' }, h('b', null, dmon(day) + ' ' + day.slice(0, 4) + ' · ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(day + 'T00:00:00').getDay()]), h('span', { class: 'grow' }),
+    h('button', { class: 'linkbtn small', onclick: () => { RX.trDay = null; renderPage(true); } }, 'Close')));
+  dls.forEach(d => { const open = RX.todo ? RX.todo.items.filter(i => i.group !== 'gap').length : 0;
+    box.append(trDeadlineRow(d, D), h('div', { class: 'tr-dd muted small' }, d.venue ? d.venue + ' · ' : '', open ? open + ' to-do items are still open (not counting gaps).' : 'No to-do items open.')); });
+  if (!es.length && !dls.length) box.append(h('div', { class: 'muted small' }, 'Nothing recorded on this day.'));
+  es.forEach(e => {
+    box.append(trEntry(e));
+    const d = e.detail; if (!d) return;
+    const sub = h('div', { class: 'tr-dd' });
+    (d.results || []).forEach(r => { const moved = r.before != null && r.before !== r.after, better = moved && (r.lower ? r.after < r.before : r.after > r.before), ahead = r.best_other != null && (r.lower ? r.after <= r.best_other : r.after >= r.best_other);
+      sub.append(h('div', { class: 'tr-res' }, h('button', { class: 'ilink', onclick: () => rxOpenExp(r.x) }, r.name), r.claims.length ? h('span', { class: 'tag' }, 'tests ' + r.claims.join(', ')) : h('span', { class: 'tag warn' }, 'no claim'),
+        h('span', { class: 'mono' }, (r.before != null ? rxFmt(r.before) + ' → ' : 'first result ') + rxFmt(r.after)), moved ? h('span', { class: better ? 'good' : 'bad' }, better ? 'better' : 'worse') : r.before != null ? h('span', { class: 'muted' }, 'unchanged') : null,
+        r.best_other != null ? h('span', { class: 'muted small' }, 'best other ' + rxFmt(r.best_other) + (ahead ? ' · ours ahead' : ' · ours behind')) : null, r.metric ? h('span', { class: 'muted small' }, 'on ' + r.metric + (r.lower ? ' ↓' : ' ↑')) : null)); });
+    Object.keys(d.files || {}).forEach(k => sub.append(h('div', { class: 'tr-files' }, h('span', { class: 'tag' }, k + ' · ' + d.files_n[k]), h('span', { class: 'mono small muted' }, d.files[k].join('  ') + (d.files_n[k] > d.files[k].length ? '  …' : '')))));
+    if ((d.affects || []).length) sub.append(h('div', { class: 'small muted' }, 'Touches: ' + d.affects.join(', ')));
+    if (sub.childNodes.length) box.append(sub);
+  });
+  return box;
 }
 async function trLoad() {
   if (RX.trailBusy) return; RX.trailBusy = true;
@@ -1452,14 +1549,7 @@ function pageTrail() {
   const D = RX.trail;
   if (!D) { if (RX.trailErr) return root.append(h('p', { class: 'muted' }, RX.trailErr)), root; trLoad(); return root.append(h('p', { class: 'muted' }, 'Reading the history…')), root; }
   const F = RX.trFilter || 'all';
-  // ahead: deadlines
-  const ahead = D.ahead.map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(D.today)) / 864e5);
-    return h('div', { class: 'tr-e ahead' }, h('span', { class: 'tr-c mono' }, 'D-' + days), h('span', { class: 'tag tr-k' }, dmon(d.date)), h('span', null, d.title),
-      READONLY ? null : h('button', { class: 'linkbtn small', onclick: async () => { const r = await rxPost('/api/deadlines', { remove: d.id }); if (r) { RX.trail = r; RX.todo = null; renderPage(true); } } }, 'Remove')); });
-  let form = null;
-  if (!READONLY) { const di = h('input', { type: 'date', 'aria-label': 'Deadline date', min: D.today }), ti = h('input', { type: 'text', placeholder: 'Deadline, e.g. ICML abstract', 'aria-label': 'Deadline title', maxlength: '160' });
-    form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!di.value || !ti.value.trim()) return; const r = await rxPost('/api/deadlines', { date: di.value, title: ti.value.trim() }); if (r) { RX.trail = r; renderPage(true); } } }, di, ti, h('button', { class: 'btn sm', type: 'submit' }, 'Add deadline')); }
-  root.append(h('section', { class: 'tr-ahead' }, h('div', { class: 'dayhead' }, 'Ahead'), ahead.length ? ahead : h('div', { class: 'muted small' }, 'No deadlines yet.'), form));
+  root.append(trAhead(D));
   root.append(h('div', { class: 'fchips' }, [['all', 'All']].concat(D.kinds.map(k => [k, TR_KIND[k] + ' ' + D.counts[k]])).map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.trFilter = k; renderPage(true); } }, l))));
   const es = D.entries.filter(e => F === 'all' || e.kind === F), cap = RX.trAll ? es.length : 120;
   if (!es.length) root.append(h('div', { class: 'muted' }, 'Nothing recorded yet.'));

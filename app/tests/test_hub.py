@@ -460,6 +460,21 @@ class HubTest(HubBase):
         self.assertEqual(self.api("GET", "/p/%s/api/alarms" % pid)[1]["groups"], [])
         s, cp = self.api("POST", "/p/%s/api/checkpoints" % pid, {"note": "v1 reviewed"})
         self.assertEqual(s, 201, cp)
+        # S25: the calendar feed. Private until a link is made; the token is the only key; revoking closes it
+        self.assertEqual(self.raw("GET", "/cal/%s/%s.ics" % (pid, "x" * 32))[0], 404)
+        s, r = self.api("POST", "/p/%s/api/deadlines" % pid, {"date": "2099-01-02", "title": "Submit, to TKDE", "kind": "journal", "venue": "TKDE"})
+        self.assertEqual(s, 200, r)
+        s, cal = self.api("POST", "/p/%s/api/calendar" % pid, {"action": "create"})
+        self.assertEqual((s, len(cal["token"]) >= 24), (200, True), cal)
+        s, hd, out = self.raw("GET", "/cal/%s/%s.ics" % (pid, cal["token"]))      # no session, no cookie
+        self.assertEqual((s, hd["content-type"]), (200, "text/calendar; charset=utf-8"))
+        self.assertIn(b"SUMMARY:Submit\\, to TKDE", out)
+        self.assertIn(b"DTSTART;VALUE=DATE:20990102", out)
+        self.assertEqual(self.raw("GET", "/cal/%s/%s.ics" % (pid, cal["token"][:-1] + ("A" if cal["token"][-1] != "A" else "B")))[0], 404)
+        self.assertEqual(self.raw("GET", "/cal/%s/%s.ics" % ("nope", cal["token"]))[0], 404)
+        self.assertEqual(self.raw("GET", "/p/%s/api/calendar" % pid)[0], 401)       # the token itself still needs a session
+        self.api("POST", "/p/%s/api/calendar" % pid, {"action": "revoke"})
+        self.assertEqual(self.raw("GET", "/cal/%s/%s.ics" % (pid, cal["token"]))[0], 404)
         # upload 2 changes a number
         z2 = make_zip({"main.tex": TEX1.replace("91.2", "93.4"), "refs.bib": ""}, top="myproject")
         s, r = self.api("POST", "/api/hub/projects/%s/paper" % pid, raw=z2, ctype="application/zip")

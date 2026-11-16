@@ -1,6 +1,7 @@
 """Engine facade: the only module server.py and cli.py import (data-model 13)."""
 import copy
 import time
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from . import runs as runsmod
 from . import setup as setupmod
 from . import todo as todomod
 from . import trail as trailmod
+from . import venues as venuesmod
 from . import triage as triagemod
 from . import understand as undmod
 from .errors import BadRequest, NotFound
@@ -916,15 +918,56 @@ class Engine:
         s = self._ensure()
         C = self.claims()
         d = undmod.load(self.hub)
+        exps, short = {}, {c["id"]: c.get("short") or c["label"] for c in C["claims"]}
+        res = {nid for nid, n in s["G"].nodes.items() if n["kind"] in ("result", "data")}
+        for sec in self.experiments()["sections"]:
+            for x in sec["experiments"]:
+                rec = exps.setdefault(x["id"], dict(x, _claims=[], _paths=[]))
+                cid = sec.get("claim_id") or sec["id"]
+                if sec.get("kind") != "other" and short.get(cid) and short[cid] not in rec["_claims"]:
+                    rec["_claims"].append(short[cid])
+        paths = {s["G"].nodes[n]["loc"]["path"] for n in res if s["G"].nodes[n].get("loc")}
+        for rec in exps.values():
+            rec["_paths"] = paths
         return trailmod.build(s["events"], self.timeline()["steps"], self.hub.read_json("stages.json", None) or {}, C, runsmod.load(self.hub),
                               processmod.load_tasks(self.hub), d, self.checkpoints(), self.plans(), trailmod.load_deadlines(self.hub)["deadlines"],
-                              self._github(), start, end, today or now_iso()[:10])
+                              self._github(), start, end, today or now_iso()[:10], list(exps.values()))
 
-    def set_deadline(self, date=None, title=None, target=None, remove=None):
+    def set_deadline(self, date=None, title=None, target=None, remove=None, kind=None, venue=None):
         self._ensure()
-        st = trailmod.set_deadline(trailmod.load_deadlines(self.hub), date, title, target, remove)
+        st = trailmod.set_deadline(trailmod.load_deadlines(self.hub), date, title, target, remove, kind, venue)
         self.hub.write_json("deadlines.json", st)
         return self.trail()
+
+    def venue_lookup(self, name, year, fetch=None):
+        """A conference's deadlines from the open deadline data (not stored until add_venue)."""
+        return venuesmod.lookup(name, year, fetch) if fetch else venuesmod.lookup(name, year)
+
+    def add_venue(self, name, year, kinds=None, fetch=None):
+        self._ensure()
+        found = self.venue_lookup(name, year, fetch)
+        st = trailmod.add_venue(trailmod.load_deadlines(self.hub), found, kinds)
+        self.hub.write_json("deadlines.json", st)
+        return self.trail()
+
+    def calendar(self, action=None):
+        """The subscription link's secret token for this project's deadlines: create, revoke, or read."""
+        self._ensure()
+        st = self.hub.read_json("calendar.json", None)
+        st = st if isinstance(st, dict) else {}
+        if action == "create":
+            st = {"token": secrets.token_urlsafe(24), "created": now_iso()}
+            self.hub.write_json("calendar.json", st)
+        elif action == "revoke":
+            st = {}
+            self.hub.write_json("calendar.json", st)
+        elif action is not None:
+            raise BadRequest("action must be create or revoke")
+        return {"token": st.get("token"), "created": st.get("created"), "events": len(trailmod.load_deadlines(self.hub)["deadlines"])}
+
+    def calendar_ics(self):
+        self._ensure()
+        return trailmod.ics(trailmod.load_deadlines(self.hub)["deadlines"], self.project().get("name") or "research")
 
     def ledger(self):
         s = self._ensure()
