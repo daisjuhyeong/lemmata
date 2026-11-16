@@ -69,3 +69,18 @@ said what the work was for. Source: founder chat and screenshot, 2026-11-16.
 ## Needs Juhyeong
 - Look at a real day on the hub after it updates, and say whether the rule-made titles are good enough to
   read without summaries.
+
+## Addendum: FAQ page (founder chat 2026-11-16 14:34 KST)
+Request: "where can I check the experiments done so far? Add these type of FAQs in the sidebar listing on how we
+can utilize Lemmata at its best."
+- New page **FAQ** (`pageFaq` and the `FAQ` list in `app/src/lemmata/web/research.js`): 22 questions in four groups
+  (Finding things, Keeping it right, Planning and sharing, A routine that works). Each answer is two to four
+  sentences and has buttons that open the page it is about. A filter box narrows the list.
+- Reached from a new **Help** group in the website sidebar, the footer links (so also inside the VS Code tab) and
+  the command list (`app/src/lemmata/web/app.js`).
+- Every answer describes a page or control that exists in this branch; the Review answer was corrected against
+  `app/src/lemmata/engine/review.py` (it asks about new results, the comparison with baselines and whether the
+  evidence is enough, not reference checks).
+- Checked: browser at 1440 px (22 questions, filter, a button opens Setup, no console errors); 181 app tests pass.
+  Screenshot: [faq.png](screenshots/faq.png).
+- Limit: the answers are fixed text. When a page changes, its answer has to be edited by hand.

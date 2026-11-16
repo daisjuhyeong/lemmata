@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -1660,7 +1660,61 @@ function pageTrail() {
   return root;
 }
 
-const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk };
+/* S27: FAQ. Questions a researcher asks, each answered in two or three sentences with a button to the page that holds the
+   answer (founder, chat 2026-11-16 14:34 KST: "where can I check the experiments done so far? Add these type of FAQs"). */
+const FAQ = [
+  ['Finding things', [
+    ['Where can I check the experiments done so far?', 'Thesis lists every experiment under the claim it tests, with one word for what it shows: supports, contradicts, inconclusive or not run. Setup shows how each one was run: metric, datasets, methods and the numbers. Trail shows when each was run, day by day.', [['Thesis', 'experiments'], ['Setup', 'setup'], ['Trail', 'history']]],
+    ['Which experiment backs which claim?', 'On Thesis, each claim has its experiments under it. The bar at the top counts how many support, contradict or are inconclusive. Experiments that test no claim, and claims with no experiment, are listed as gaps.', [['Thesis', 'experiments']]],
+    ['Where does a number in my paper come from?', 'On Setup, click the number in the experiment’s table. The trace shows what the paper says, the result files behind it, the script and settings, who ran it and when it was last written.', [['Setup', 'setup']]],
+    ['Which datasets, metrics and baselines do I use, and where?', 'Each Setup sheet names them. Click a name to see every experiment that uses it and where the paper and the code mention it. A “!” marks something to check, such as a baseline missing on one dataset.', [['Setup', 'setup']]],
+    ['What did I, or my coding agent, do on a given day?', 'Click the day in the calendar on Home. The day is shown as work sessions: what was done, for which claim, by whom, on which server and folder, with which script, and what came out. The raw commands are behind “Show the records”.', [['Home', 'digest'], ['Trail', 'history']]],
+    ['What should I do next?', '“Next to do” on Home is made by rules: feedback someone is waiting on, things waiting for you to confirm, places where the paper disagrees with the results, results that are out of date, and gaps. Each item opens the thing it is about.', [['Home', 'digest']]],
+    ['Does the paper still agree with the results?', 'Items tagged [paper] in “Next to do” are cells where the paper and the result files differ. Checks lists every mismatch with the file and line. Each Setup sheet also says how many cells match.', [['Checks', 'checks'], ['Home', 'digest']]],
+    ['Which results are out of date?', 'A result is out of date when the code or settings behind it changed after it was written. These show as [old] items in “Next to do” and as a warning on the experiment’s Setup sheet.', [['Home', 'digest'], ['Setup', 'setup']]],
+    ['What changed since I last looked?', 'Changes lists what moved since your last checkpoint and what to re-check because of it. “Mark everything as looked at” starts a new checkpoint.', [['Changes', 'changes']]],
+  ]],
+  ['Keeping it right', [
+    ['Lemmata has an experiment or a claim wrong. How do I fix it?', 'Lemmata drafts and you confirm. On Thesis you can edit and confirm the project map (which files form which experiment, which claim each tests), set a claim’s stage yourself, and change when an experiment counts as support under “Supports when”.', [['Thesis', 'experiments']]],
+    ['Why does an experiment say “supports” when the result is a tie?', 'By default a tie with the best other method counts as support. Set a stricter rule for that experiment under “Supports when” on Thesis. Every status shows the rule that produced it.', [['Thesis', 'experiments']]],
+    ['How do runs get recorded?', 'From three places: commands run in the VS Code terminal with the Lemmata extension, the results watcher that sees result files change, and your coding agent through the Lemmata tools. Runs made elsewhere appear only once their result files are committed.', [['Trail', 'history']]],
+    ['A day shows “Lemmata cannot tell” under Why. What now?', 'Nothing in that session wrote a result file of a mapped experiment. Write a one-sentence summary on the card, or ask your coding agent to draft one and then confirm it. If the files belong to an experiment, add them to the project map on Thesis.', [['Home', 'digest'], ['Thesis', 'experiments']]],
+    ['How do I get session summaries written for me?', 'In your coding agent with the Lemmata tools connected, ask it to draft summaries for the sessions that have none. Each draft is marked “draft by your agent” until you confirm, edit or discard it. It runs on your own plan.', [['Trail', 'history']]],
+    ['Does Lemmata send my work to an AI model?', 'No. Tracking is done by rules on your own machine or hub. A model is used only when your own coding agent drafts the project map or a session summary, and nothing it drafts counts until you confirm it.', []],
+  ]],
+  ['Planning and sharing', [
+    ['How do I add a deadline?', 'On Trail, under Ahead. For a conference, type the venue and year and Lemmata looks up the abstract and paper deadlines. For a journal or your own milestone, set the date yourself. Deadlines show in the calendar on Home.', [['Trail', 'history']]],
+    ['Can I see the deadlines in Google Calendar?', 'Yes. On the website, open “Google Calendar and other calendar apps” on Trail and make a subscription link. Google can only read it when the hub has a public address.', [['Trail', 'history']]],
+    ['My advisor gave feedback. Where does it go?', 'Use “Add feedback” on Home and paste the notes. Lemmata splits them into tasks, links each to the part of the paper or the files it is about, and shows what else to re-check when it is done.', [['Home', 'digest'], ['Tasks', 'tasks']]],
+    ['What do I bring to a meeting?', '“This week” at the bottom of Home is a short digest of the last seven days: claims that changed stage, runs, open tasks. Copy it into your notes.', [['Home', 'digest']]],
+    ['What should I check before I submit?', 'Review answers three questions for a period: are there new results, how does your method compare with the baselines, and is the evidence enough to write the paper. Checks lists the problems found in the paper and code, each with its file and line. Then clear the [paper] and [old] items in “Next to do”, and read the checklist at the bottom of each Setup sheet.', [['Review', 'review'], ['Checks', 'checks'], ['Setup', 'setup']]],
+  ]],
+  ['A routine that works', [
+    ['How do I get the most out of Lemmata each week?', 'Start the week on Home: clear “Next to do” and look at the deadlines. After a batch of runs, open the day and confirm the session summaries while you still remember why you ran them. Before a meeting, copy “This week”. Before a deadline, go through Review, Checks and the Setup checklists.', [['Home', 'digest']]],
+    ['Website or VS Code?', 'They show the same pages. Use VS Code while you work: it jumps to the file and line, and it records the runs. Use the website for the wide views: the calendar, the sidebar and the calendar link.', []],
+  ]],
+];
+function pageFaq() {
+  S.outline = [];
+  const root = doc(h('h1', { class: 'ptitle' }, 'FAQ'), h('p', { class: 'muted' }, 'Where to look for what. Each answer has a button to the page it is about.'));
+  const q = (RX.faqQ || '').toLowerCase().trim();
+  const inp = h('input', { type: 'search', value: RX.faqQ || '', placeholder: 'Filter the questions', 'aria-label': 'Filter the questions' });
+  inp.addEventListener('input', () => { RX.faqQ = inp.value; renderPage(true); const el = document.querySelector('.fq-f input'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+  root.append(h('div', { class: 'fq-f' }, inp));
+  let shown = 0;
+  FAQ.forEach(([head, items]) => {
+    const its = items.filter(([qq, a]) => !q || (qq + ' ' + a).toLowerCase().includes(q)); if (!its.length) return;
+    root.append(h('h2', { class: 'fq-h' }, head));
+    its.forEach(([qq, a, links]) => { shown++;
+      const d = h('details', { class: 'fq' }, h('summary', null, qq), h('p', null, a), links.length ? h('div', { class: 'fq-l' }, links.map(([label, k]) => h('button', { class: 'btn sm', onclick: () => openTab(k) }, 'Open ' + label))) : null);
+      if (q || RX.faqOpen === qq) d.open = true;
+      d.addEventListener('toggle', () => { if (d.open) RX.faqOpen = qq; else if (RX.faqOpen === qq) RX.faqOpen = null; });
+      root.append(d); });
+  });
+  if (!shown) root.append(h('p', { class: 'muted' }, 'No question matches. Try Ask for a question about this project’s content.'), h('button', { class: 'btn sm', onclick: () => openTab('ask') }, 'Open Ask'));
+  return root;
+}
+const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

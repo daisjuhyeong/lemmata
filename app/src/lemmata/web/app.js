@@ -1950,7 +1950,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (!S.tabs.length) { S.tabs = [{ k: 'digest' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
@@ -1964,7 +1964,7 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
-    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'notation': return RX_TABS[t.k][1];
+    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
@@ -2049,6 +2049,7 @@ function usedByText(nid) {
 const SIDE = [
   ['Explore', [['graph', 'Graph'], ['notation', 'Notation'], ['timeline', 'Growth'], ['checks', 'Checks'], ['changes', 'Changes']]],
   ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
+  ['Help', [['faq', 'FAQ']]],
 ];
 function renderLeft() {
   const side = $('#side'); if (!side) return;
@@ -2165,7 +2166,7 @@ function renderStatus() {
   const embed = !!window.LEMMATA_EMBED;
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
   const more = [link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
-    link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher())];
+    link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('FAQ', () => openTab('faq')), link('Search', () => quickSwitcher())];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
       h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
@@ -2230,6 +2231,7 @@ function palette() {
     { label: 'Sync now', run: () => syncNow(), disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'Show files behind items', run: () => { S.gf.files = true; persistUI(); GR.sig = ''; openTab('graph'); } },
     { label: 'Export report (HTML)', run: () => { goTo(apiUrl('/api/export')); }, disabled: READONLY, reason: 'Read-only snapshot' },
+    { label: 'Go to FAQ: where to look for what', run: () => openTab('faq') },
     { label: 'How Lemmata works', run: () => intro(true) },
   ];
   listModal('Type a command or an item', q => cmds.map(c => ({ ...c, s: fuzzy(q, c.label) })).filter(c => c.s >= 0).sort((a, b) => b.s - a.s), '↑↓ to move · Enter to run · Esc to close');

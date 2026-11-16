@@ -995,3 +995,6 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .su-cx-c { background:var(--bg); padding:6px 10px; min-width:0; font-size:var(--fs-13); } .su-cx-c.miss .su-cx-v { color:var(--text-secondary); } .su-cx-k { display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-secondary); } .su-cx-v { overflow-wrap:anywhere; } .su-cx-cmd { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 @container app (max-width: 700px) { .su-cx { grid-template-columns:minmax(0,1fr); } .ss-r { grid-template-columns:52px minmax(0,1fr); } }
 .tr-day-h > .small { margin-left:var(--s-3); font-weight:400; }
+/* S27: FAQ */
+.fq-f { margin:var(--s-3) 0; } .fq-f input { width:100%; max-width:420px; } .fq-h { font:600 var(--fs-14) var(--font-serif); margin:var(--s-5) 0 var(--s-2); }
+.fq { border-bottom:1px solid var(--border); padding:8px 0; } .fq summary { cursor:pointer; font-weight:600; } .fq p { margin:6px 0 8px; max-width:70ch; color:var(--text-secondary); } .fq-l { display:flex; gap:var(--s-2); flex-wrap:wrap; margin-bottom:4px; }
