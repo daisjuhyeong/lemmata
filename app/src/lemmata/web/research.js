@@ -491,6 +491,28 @@ function rxLinkChip(l) { const w = RX_LINK[l.status] || RX_LINK.inconclusive; co
 function rxLinkBar(bar, big) { const n = RX_LINKS.reduce((a, k) => a + (bar[k] || 0), 0);
   return h('span', { class: 'rx-lbar' + (big ? ' big' : ''), role: 'img', 'aria-label': RX_LINKS.filter(k => bar[k]).map(k => bar[k] + ' ' + RX_LINK[k][0]).join(', ') || 'no experiment', title: RX_LINKS.filter(k => bar[k]).map(k => bar[k] + ' ' + RX_LINK[k][0]).join(' · ') || 'No experiment yet' },
     n ? RX_LINKS.map(k => bar[k] ? h('span', { class: 'lb-' + k, style: 'flex:' + bar[k] }) : null) : null); }
+/* S24 step 3: what "supports" means for this claim and this experiment. The default applies until the map or you set another. */
+const RX_OVER = { main: 'the main column', all: 'every dataset', majority: 'most datasets', average: 'the average over datasets' };
+function rxCriterion(x, sec, link) {
+  const c = link.criterion, cid = sec.claim_id || sec.id, ours = (x.summary || {}).ours_label;
+  const who = { default: 'default', confirmed: 'from the confirmed map', you: 'set by you' }[link.criterion_by] || link.criterion_by;
+  const cmpLabel = v => v === 'best_other' ? 'the best other method' : v === 'base' ? 'the base method' : v;
+  const text = 'Ours ' + (c.strict ? 'better than ' : 'at least as good as ') + cmpLabel(c.compare) + ' on ' + RX_OVER[c.over] + (c.metric && c.over === 'main' ? ' (' + c.metric + ')' : '');
+  const box = h('div', { class: 'rx-crit' }, h('span', { class: 'rx-why-h' }, 'Supports when'), h('span', { class: 'rx-crit-t' }, text), h('span', { class: 'tag' }, who),
+    h('span', { class: 'rx-crit-w muted small' }, link.why + ' Rule ' + link.rule + '.'));
+  if (READONLY) return box;
+  const save = async cr => { const r = await rxPost('/api/experiment', { id: x.id, claim: cid, criterion: cr }); if (r) { RX.experiments = r; RX.setup = null; try { RX.claims = await apiGet('/api/claims'); } catch (e) { /* keep */ } renderAll(); } };
+  const methods = ((x.grid || {}).rows || []).map(r => r.label).filter(l => l && l !== ours).slice(0, 30);
+  const sel = (label, val, opts, on) => { const el = h('select', { 'aria-label': label }, opts.map(o => h('option', { value: o[0], selected: o[0] === val ? '' : null }, o[1]))); el.addEventListener('change', () => on(el.value)); return el; };
+  const cur = { compare: c.compare, over: c.over, strict: !!c.strict };
+  const strict = h('input', { type: 'checkbox', checked: c.strict ? '' : null }); strict.addEventListener('change', () => save(Object.assign({}, cur, { strict: strict.checked })));
+  box.append(h('div', { class: 'rx-crit-e' },
+    h('label', null, 'Against ', sel('Compare against', c.compare, [['best_other', 'the best other method']].concat(RX.experiments.extends ? [['base', 'the base method']] : [], methods.map(m => [m, m])), v => save(Object.assign({}, cur, { compare: v })))),
+    h('label', null, 'over ', sel('Over', c.over, Object.keys(RX_OVER).map(k => [k, RX_OVER[k]]), v => save(Object.assign({}, cur, { over: v })))),
+    h('label', { class: 'rx-crit-s' }, strict, ' a tie does not count'),
+    link.criterion_by === 'you' ? h('button', { class: 'linkbtn small', onclick: () => save(null) }, 'Reset') : null));
+  return box;
+}
 function rxThesisHead(E) {
   const T = E.thesis; if (!T) return null;
   const stages = RX_STAGES.filter(k => T.stages[k]).map(k => h('span', { class: 'rx-th-c' }, h('b', null, T.stages[k]), ' ' + RX_STAGE[k][1].toLowerCase()));
@@ -517,6 +539,7 @@ function rxExpRow(x, sec) {
     h('span', { class: 'rx-x-metric small muted', title: x.summary ? (x.summary.measure || x.summary.metric) + (x.summary.measure && x.summary.measure !== x.summary.metric ? ' · ' + x.summary.metric : '') : null }, x.summary ? trunc(x.summary.measure || x.summary.metric, 16) + (x.summary.target != null ? '' : x.summary.lower ? ' ↓' : ' ↑') : ''),
     tu ? h('span', { class: 'small', title: tu.best ? 'Best setting: ' + tu.best.label : null }, tu.best ? [h('b', { class: 'mono' }, rxFmt(tu.best.value)), h('span', { class: 'muted' }, ' best of ' + tu.runs)] : '') : rxBaseOrBest(x.summary), rxSpark(x.spark), rxTally(x),
     h('span', { class: 'muted small' }, x.stale ? h('span', { class: 'rx-tl warn', title: 'The code or settings changed after this result was written' }, '↻ old') : x.last ? dmon(x.last) : ''));
+  if (open && link && sec) row.append(rxCriterion(x, sec, link));
   if (open) row.append(rxExpDetail(x.id));
   return row;
 }

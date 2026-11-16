@@ -487,6 +487,11 @@ class Handler(BaseHTTPRequestHandler):
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):
                         raise ApiError(400, "bad_request", "lower must be true or false")
+                    if "claim" in body:
+                        cr = body.get("criterion")
+                        if cr is not None and not isinstance(cr, dict):
+                            raise ApiError(400, "bad_request", "criterion must be an object")
+                        return self._json(need("set_experiment")(txt("id", True), claim=txt("claim", True), criterion=cr))
                     return self._json(need("set_experiment")(txt("id", True), txt("ours"), txt("metric"), lo, txt("measure")))
                 if r == "/notation":
                     ig = body.get("ignore")

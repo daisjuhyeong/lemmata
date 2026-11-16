@@ -246,7 +246,8 @@ Read the brief (and, if you have the repository open, the paper and the code the
      "files": ["results/{dataset}/{method}_seed{seed}.csv"],
      "metric": "<column name of the main number>", "lower": false, "target": null,
      "method_column": "<optional: column that names the method>", "dataset_column": "<optional>",
-     "paper": ["tab:main"], "note": "<one line: what is varied, what is held fixed>"}
+     "paper": ["tab:main"], "note": "<one line: what is varied, what is held fixed>",
+     "criteria": {"q1": {"compare": "best_other|base|<a method name in the files>", "over": "main|all|majority|average", "strict": false}}}
   ],
   "ignore": ["logs/**", "**/debug_*.csv"]
 }
@@ -266,6 +267,7 @@ Rules Lemmata enforces (anything that fails is dropped and reported back to you)
 - Put hyperparameter searches in type "tuning" and point them at the question they served. Put scratch output in "ignore".
 - An experiment is a group of runs that answers one thing, not one file. Prefer few experiments.
 - Do not invent questions the paper does not make. If a result serves no question, leave "tests" empty.
+- "criteria" is optional: per tested question, what counts as support. Leave it out to use the default (ours at least as good as the best other method, or the base when the work extends one, on the main column). The researcher confirms it.
 """
 
 
@@ -278,6 +280,26 @@ def _text(v, n, what):
 
 def _squash(s):
     return re.sub(r"[^a-z0-9]+", " ", detex(s or "").lower()).strip()
+
+
+CRIT_OVER = ("main", "all", "majority", "average")
+
+
+def criterion(cr):
+    """One claim-experiment criterion, checked (ADR-008): what "this experiment supports the claim" means.
+    compare: best_other | base | a method name; over: the main column, all datasets, most datasets, or their average;
+    strict: ours must be better (a tie does not count)."""
+    if not isinstance(cr, dict):
+        raise BadRequest("a criterion must be an object")
+    compare = cr.get("compare", "best_other")
+    if not isinstance(compare, str) or not compare.strip() or len(compare) > 60:
+        raise BadRequest("compare must be best_other, base or a method name")
+    over = cr.get("over", "main")
+    if over not in CRIT_OVER:
+        raise BadRequest("over must be one of %s" % ", ".join(CRIT_OVER))
+    if not isinstance(cr.get("strict", False), bool):
+        raise BadRequest("strict must be true or false")
+    return {"compare": compare.strip(), "over": over, "strict": bool(cr.get("strict", False))}
 
 
 def verify(doc, G, trees, infos, claims_doc):
@@ -455,13 +477,21 @@ def verify(doc, G, trees, infos, claims_doc):
                     note("warning", where, "it names question %r, which is not in the map" % str(t)[:30])
             for repo, path, nid, _ in hit:
                 claimed.setdefault(nid, []).append(xid)
+            crits = {}
+            for q, cr in (x.get("criteria") if isinstance(x.get("criteria"), dict) else {}).items():
+                try:
+                    if q not in tests:
+                        raise BadRequest("it is for question %r, which this experiment does not test" % str(q)[:30])
+                    crits[q] = criterion(cr)
+                except BadRequest as e:
+                    note("warning", where, "criterion dropped: %s" % e)
             out["experiments"].append({"id": xid, "name": _text(x.get("name") or xid, 60, "name"), "type": x.get("type") if x.get("type") in TYPES else "other",
                                        "tests": list(dict.fromkeys(tests)), "files": pats, "metric": col("metric"),
                                        "lower": x.get("lower") if isinstance(x.get("lower"), bool) else None, "method_column": col("method_column"),
                                        "target": x.get("target") if isinstance(x.get("target"), (int, float)) and not isinstance(x.get("target"), bool) else None,
                                        "dataset_column": col("dataset_column"),
                                        "ours": _text(x["ours"], 60, "ours") if isinstance(x.get("ours"), str) and x["ours"].strip() else None,
-                                       "paper": paper, "note": " ".join(str(x.get("note") or "").split())[:300], "matched": len(hit)})
+                                       "paper": paper, "note": " ".join(str(x.get("note") or "").split())[:300], "matched": len(hit), "criteria": crits})
             xids.add(xid)
         except (BadRequest, AttributeError) as e:
             note("dropped", where, str(e) if isinstance(e, BadRequest) else "not an object")

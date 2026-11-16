@@ -492,7 +492,7 @@ class MapTest(unittest.TestCase):
         own = Engine._link(dict(x, summary={"gap": 3.0, "base": {"gap": -1.0}}), True, "MCD-DD")   # an extension is judged against its base
         self.assertEqual((own["status"], own["criterion"]["compare"]), ("contradicts", "base"))
 
-    def test_stage_rules(self):
+    def test_stage_rule_ids(self):
         """S24 step 2: every claim stage names the rule (C1-C9) that produced it."""
         from lemmata.engine import claims as cm
         S = lambda c, t=None: cm.stage_of(c, t)
@@ -517,6 +517,35 @@ class MapTest(unittest.TestCase):
         c = next(c for c in self.e.claims()["claims"] if c["id"] == "mine:2")
         self.assertEqual((c["stage"], c["stage_rule"], c["stage_rule_auto"]), ("exploration", "C1", "C9"))
         self.assertIn("rule C1", self.e.claims_markdown() if hasattr(self.e, "claims_markdown") else "rule C1")
+
+    def test_criterion(self):
+        """S24 step 3: a criterion on one claim-experiment link, from the map or set by the researcher."""
+        doc = dict(agent, experiments=[dict(x, tests=["q1", "q3"], criteria={"q3": {"compare": "ADWIN", "over": "all", "strict": True}, "q9": {"over": "all"}, "q1": {"over": "sometimes"}})
+                                       if x["id"] == "cost" else x for x in agent["experiments"]])
+        d = self.e.propose_map(doc)
+        notes = " ".join(n["why"] for n in d["report"])
+        self.assertIn("criterion dropped", notes)                                        # an unknown question and a bad value are dropped, with a note
+        self.assertEqual([x.get("criteria") for x in d["proposed"]["experiments"] if x["id"] == "cost"], [{"q3": {"compare": "ADWIN", "over": "all", "strict": True}}])
+        self.e.confirm_map()
+        by = {s_["id"]: s_ for s_ in self.e.experiments()["sections"]}
+        l3, l1 = by["q3"]["links"]["map:cost"], by["q1"]["links"]["map:cost"]
+        self.assertEqual((l3["criterion_by"], l3["status"], l3["rule"]), ("confirmed", "contradicts", "L4"))     # CPU time is level: strict turns a tie into contradicts
+        self.assertEqual((l1["criterion_by"], l1["status"]), ("default", "supports"))                            # the same experiment's other link keeps its own
+        stage = {c["id"]: (c["stage"], c["stage_rule"]) for c in self.e.claims()["claims"]}
+        self.assertEqual(stage["mine:3"], ("refuted", "C6"))
+        # the researcher's own criterion wins over the map's; clearing it goes back
+        E = self.e.set_experiment("map:cost", claim="mine:3", criterion={"compare": "ADWIN", "over": "majority", "strict": False})
+        l = next(s_ for s_ in E["sections"] if s_["id"] == "q3")["links"]["map:cost"]
+        self.assertEqual((l["criterion_by"], l["status"]), ("you", "supports"))
+        self.assertIn("of 3 datasets", l["why"])
+        E = self.e.set_experiment("map:cost", claim="mine:3", criterion={"compare": "Nobody"})
+        self.assertEqual(next(s_ for s_ in E["sections"] if s_["id"] == "q3")["links"]["map:cost"]["status"], "inconclusive")
+        E = self.e.set_experiment("map:cost", claim="mine:3", criterion=None)
+        self.assertEqual(next(s_ for s_ in E["sections"] if s_["id"] == "q3")["links"]["map:cost"]["criterion_by"], "confirmed")
+        with self.assertRaises(Exception):
+            self.e.set_experiment("map:cost", claim="mine:3", criterion={"over": "sometimes"})
+        with self.assertRaises(Exception):
+            self.e.set_experiment("map:cost", claim="nope", criterion={})
 
     def test_setup(self):
         """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""

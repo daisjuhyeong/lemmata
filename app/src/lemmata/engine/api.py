@@ -239,6 +239,7 @@ class Engine:
         because of it, and how its stage changed over time."""
         doc = self._claims_base()
         tests, meta, ext = {}, {}, False
+        crit = self._criteria()
         if undmod.load(self.hub)["confirmed"]:
             E = self._exp_doc()
             ext = bool(E.get("extends"))
@@ -247,7 +248,8 @@ class Engine:
                 if sec.get("claim_id"):
                     meta[sec["claim_id"]] = {"scope": {"extension": "new", "base": "original"}.get(sec.get("scope")), "ref": sec["label"]}
                     own = ext and sec.get("scope") != "base"      # re-checking the original paper's claim: its method against the others, as the paper did
-                    tests[sec["claim_id"]] = [self._outcome(x, own, vs if own else "the best other method") for x in sec["experiments"]]
+                    tests[sec["claim_id"]] = [self._judged(self._outcome(x, own, vs if own else "the best other method"), x, sec, own, vs if own else "the best other method", crit)
+                                              for x in sec["experiments"]]
         claimsmod.restage(doc, claimsmod.load(self.hub), tests, meta)
         # stages over time: what the stored results show for the past, then what Lemmata has recorded since it started watching
         log = self.hub.read_json("stages.json", None)
@@ -282,6 +284,16 @@ class Engine:
                 "check": bool(tl.get("differs") or tl.get("untraced") or any(p["kind"] == "bold" for p in x["problems"])),
                 "stale": bool(x["stale"]), "last": x.get("last"), "first": next((p["t"] for p in sp if p.get("t")), None),
                 "lower": (x.get("summary") or {}).get("lower"), "vs_base": bool(ext), "spark": sp}
+
+    def _judged(self, out, x, sec, own, vs, crit):
+        """A claim's view of an experiment under a criterion that is not the default: the criterion decides ahead / behind."""
+        c, by = crit(sec, x)
+        if c:
+            l = self._link(x, own, vs, c, by)
+            if l["criterion_by"] != "default" and out["connected"]:
+                out["state"] = {"supports": "ahead", "contradicts": "behind"}.get(l["status"], "none")
+                out["criterion"] = l["criterion"]
+        return out
 
     def _exp_doc(self):
         """The Experiments document. With a confirmed map it is kept until the scan or a file behind it changes (the claims read it too)."""
@@ -515,15 +527,93 @@ class Engine:
     LINK_WORDS = ("supports", "contradicts", "inconclusive", "not_run")
 
     @staticmethod
-    def _link(x, own, vs):
-        """One claim-experiment link (ADR-008 section 1): does this experiment support the claim? Rules L1-L4, default criterion
-        (ours at least as good as the comparator on the main column; a tie counts as support)."""
+    def _compare(x, crit, own, vs):
+        """Evaluate a non-default criterion on the experiment's grid. -> (state, why) with state supports | contradicts | none."""
+        g, sm = x.get("grid"), x.get("summary") or {}
+        if not g or x.get("tuning"):
+            return "none", "A search over settings: it has a best setting, not a comparison." if x.get("tuning") else "Its result files could not be read as a table."
+        lower, target = bool(sm.get("lower")), sm.get("target")
+        rows = g["rows"]
+        orow = next((r for r in rows if r["label"] == sm.get("ours_label")), None)
+        if orow is None:
+            return "none", "Ours was not found in the results."
+        comp = crit["compare"]
+        if comp == "base":
+            name = ((sm.get("base") or {}).get("label")) or (vs if own else None)
+            crow = next((r for r in rows if name and expmod.norm(r["label"]) == expmod.norm(name)), None)
+            label = name or "the base method"
+        elif comp == "best_other":
+            crow, label = "best", "the best other method"
+        else:
+            crow = next((r for r in rows if expmod.norm(r["label"]) == expmod.norm(comp)), None)
+            label = comp
+        if crow is None:
+            return "none", "%s is not in these results." % label
+        main = g["metric"]
+        dcols = [c for c in g["cols"] if c != setupmod.AVG and setupmod._split(c, g)[0] not in (None, setupmod.AVG) and (setupmod._split(c, g)[1] == main or len(g["measures"]) <= 1)]
+        head = sm.get("metric") if sm.get("metric") in g["cols"] else (dcols[0] if dcols else g["cols"][0])
+        over = crit["over"]
+
+        def pair(c):
+            ov = orow["values"].get(c)
+            if crow == "best":
+                vals = [r["values"].get(c) for r in rows if r is not orow and r["values"].get(c) is not None]
+                if not vals or ov is None:
+                    return None
+                key = (lambda v: abs(v - target)) if target is not None else (lambda v: v)
+                cv = (min if (lower or target is not None) else max)(vals, key=key)
+            else:
+                cv = crow["values"].get(c)
+            if ov is None or cv is None:
+                return None
+            if setupmod._better(ov, cv, lower, target):
+                return 1
+            return -1 if (crit["strict"] or setupmod._better(cv, ov, lower, target)) else 0
+
+        if over == "average" and dcols:
+            def mean(r):
+                vs_ = [r["values"].get(c) for c in dcols if r["values"].get(c) is not None]
+                return sum(vs_) / len(vs_) if vs_ else None
+            ov = mean(orow)
+            if crow == "best":
+                cand = [m for m in (mean(r) for r in rows if r is not orow) if m is not None]
+                key = (lambda v: abs(v - target)) if target is not None else (lambda v: v)
+                cv = (min if (lower or target is not None) else max)(cand, key=key) if cand else None
+            else:
+                cv = mean(crow)
+            if ov is None or cv is None:
+                return "none", "Nothing to compare with %s." % label
+            ok = setupmod._better(ov, cv, lower, target) or (not crit["strict"] and not setupmod._better(cv, ov, lower, target))
+            return ("supports" if ok else "contradicts"), "Averaged over %d datasets, ours is %.4g and %s is %.4g." % (len(dcols), ov, label, cv)
+        cols = [head] if over in ("main", "average") or not dcols else dcols
+        res = [(c, pair(c)) for c in cols]
+        res = [(c, r) for c, r in res if r is not None]
+        if not res:
+            return "none", "Nothing to compare with %s." % label
+        wins = sum(1 for _, r in res if r >= 0)
+        need = len(res) if over in ("all", "main", "average") else len(res) // 2 + 1
+        how = "better than" if crit["strict"] else "at least as good as"
+        if len(res) == 1:
+            return ("supports" if wins else "contradicts"), "Ours is %s%s %s on %s." % ("" if wins else "not ", how, label, res[0][0])
+        return ("supports" if wins >= need else "contradicts"), "Ours is %s %s on %d of %d datasets (%s needed)." % (how, label, wins, len(res), "all" if over == "all" else "most")
+
+    @classmethod
+    def _link(cls, x, own, vs, crit=None, by="default"):
+        """One claim-experiment link (ADR-008 section 1): does this experiment support the claim? Rules L1-L4. Without a
+        criterion the default applies: ours at least as good as the comparator on the main column (a tie counts as support)."""
         sm = x.get("summary") or {}
-        crit = {"compare": "base" if own else "best_other", "vs": vs, "metric": sm.get("metric"), "over": "main", "strict": False}
-        out = {"criterion": crit, "criterion_by": "default"}
+        dflt = {"compare": "base" if own else "best_other", "over": "main", "strict": False}
+        crit = dict(dflt, **(crit or {}))
+        custom = crit != dflt
+        out = {"criterion": dict(crit, vs=vs, metric=sm.get("metric")), "criterion_by": by if custom or by != "default" else "default"}
         has_files = (x.get("files_n") or 0) > 0 if x.get("map") else bool(x.get("connected"))
         if not has_files:
             return dict(out, status="not_run", rule="L1", why="No result file yet.")
+        if custom:
+            state, why = cls._compare(x, crit, own, vs)
+            if state == "none":
+                return dict(out, status="inconclusive", rule="L2", why=why)
+            return dict(out, status=state, rule="L3" if state == "supports" else "L4", why=why)
         state, gap = reviewmod._state(x, own)
         if state == "none":
             why = ("A search over settings: it has a best setting, not a comparison." if x.get("tuning")
@@ -536,6 +626,21 @@ class Engine:
         why = ("Ours is level with %s%s (a tie counts as support)." % (vs, on)) if state == "tie" else "Ours is ahead of %s by %s%s." % (vs, g, on)
         return dict(out, status="supports", rule="L3", why=why, gap=gap)
 
+    def _criteria(self):
+        """-> crit(section, experiment) -> (criterion or None, who set it): yours (experiments.json) wins over the confirmed map's."""
+        m = undmod.load(self.hub)["confirmed"] or {}
+        mapped = {"map:" + x["id"]: x.get("criteria") or {} for x in m.get("experiments", [])}
+        mine = {k: e.get("criteria") or {} for k, e in expmod.load(self.hub)["entries"].items()}
+
+        def crit(sec, x):
+            cid = sec.get("claim_id") or sec["id"]
+            c = (mine.get(x["id"]) or {}).get(cid)
+            if c:
+                return c, "you"
+            c = (mapped.get(x["id"]) or {}).get(sec["id"])
+            return (c, "confirmed") if c else (None, "default")
+        return crit
+
     def experiments(self):
         E = self._exp_doc()
         C = self.claims()
@@ -544,6 +649,7 @@ class Engine:
         base = E["extends"]["base"]["name"] if ext else None
         links = dict.fromkeys(self.LINK_WORDS, 0)
         tested = set()
+        crit = self._criteria()
         for sec in E["sections"]:      # each section is a claim: show where that claim stands
             cid = sec.get("claim_id") or sec["id"]
             c = by.get(cid)
@@ -551,7 +657,7 @@ class Engine:
                 sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"], loc=c.get("loc"))
             # the link of each experiment to this claim; kept on the section, because one experiment can test two claims
             own = ext and sec.get("scope") != "base"
-            sec["links"] = {x["id"]: self._link(x, own, base if own else "the best other method") for x in sec["experiments"]}
+            sec["links"] = {x["id"]: self._link(x, own, base if own else "the best other method", *crit(sec, x)) for x in sec["experiments"]}
             sec["bar"] = dict.fromkeys(self.LINK_WORDS, 0)
             for l in sec["links"].values():
                 sec["bar"][l["status"]] += 1
@@ -578,9 +684,22 @@ class Engine:
         s = self._ensure()
         return setupmod.build(self.experiments(), s["G"], s["trees"])
 
-    def set_experiment(self, exp_id, ours=None, metric=None, lower=None, measure=None):
+    def set_experiment(self, exp_id, ours=None, metric=None, lower=None, measure=None, claim=None, criterion=None):
         s = self._ensure()
         st = expmod.load(self.hub)
+        if claim is not None:      # the criterion for one claim-experiment link; {} or None-like clears it (back to the map's or the default)
+            if not isinstance(claim, str) or claim not in {c["id"] for c in self.claims()["claims"]}:
+                raise BadRequest("unknown claim %r" % claim)
+            e = st["entries"].setdefault(exp_id, {})
+            cs = e.setdefault("criteria", {})
+            if criterion:
+                cs[claim] = undmod.criterion(criterion)
+            else:
+                cs.pop(claim, None)
+            if not cs:
+                e.pop("criteria")
+            self.hub.write_json("experiments.json", st)
+            return self.experiments()
         m = undmod.load(self.hub)["confirmed"]
         known = {nid for nid, n in s["G"].nodes.items() if n["kind"] in ("table", "figure", "result", "data")} | {"map:" + x["id"] for x in (m or {}).get("experiments", [])}
         if str(exp_id).startswith("map:") and exp_id in known:      # in a mapped experiment the columns are datasets; the measure is the number read from each file
