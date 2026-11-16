@@ -313,4 +313,6 @@ Juhyeong, 2026-11-16 (chat, about 11:20 KST), answered as four packages:
 | C. Reshape | D6, D7, D10, D11, D12, D14 | Approved now: nav Home · Thesis · Setup · Review · Trail; top band kept (S1), no left sidebar; native VS Code Thesis tree; To-do groups and Trail form as proposed; Digest becomes Home |
 | D. Watching | D13 | Exported snapshot now (W1). The invite-only viewer (W2) only after the GitHub App from ADR-006 and a check of Korea University's rules |
 
+Amended 2026-11-16 11:21 KST (chat: "Go. add a whole month view at the bottom."): building starts; the Trail keeps its day rows and gains a whole-month grid at the bottom (D11).
+
 Not decided: whether step 1 is shown in the 2nd presentation demo (its date is still unknown). The Trail was approved as a day-row list; Juhyeong had said he liked the portal's calendar, so show him the Trail early in step 5.

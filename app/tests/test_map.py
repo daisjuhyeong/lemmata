@@ -440,6 +440,58 @@ class MapTest(unittest.TestCase):
         self.assertIn("report_confounds", self.e.confound_brief() and __import__("lemmata.engine.review", fromlist=["GUIDE"]).GUIDE)
         os.remove(self.tmp + "/.lemmata/review.json")
 
+    def test_links_and_thesis(self):
+        """S24 step 1 (ADR-008): a status on every claim-experiment link, the thesis as counts, and the two gap buckets."""
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        before = {c["id"]: c["stage"] for c in self.e.claims()["claims"]}
+        E = self.e.experiments()
+        words = {"supports", "contradicts", "inconclusive", "not_run"}
+        for sec in E["sections"]:
+            self.assertEqual(set(sec["links"]), {x["id"] for x in sec["experiments"]})
+            for l in sec["links"].values():
+                self.assertIn(l["status"], words)
+                self.assertIn(l["rule"], ("L1", "L2", "L3", "L4"))
+                self.assertTrue(l["why"])
+                self.assertEqual(l["criterion_by"], "default")
+            self.assertEqual(sum(sec["bar"].values()), len(sec["experiments"]))
+        by = {sec["id"]: sec for sec in E["sections"]}
+        self.assertEqual({k: (v["status"], v["rule"]) for k, v in by["q1"]["links"].items()},
+                         {"map:main": ("supports", "L3"), "map:tune": ("inconclusive", "L2")})
+        self.assertEqual(by["q3"]["links"]["map:cost"]["status"], "supports")            # a tie counts as support (default criterion)
+        self.assertIn("tie counts", by["q3"]["links"]["map:cost"]["why"])
+        T = E["thesis"]
+        self.assertEqual((T["rule"], T["claims"], sum(T["stages"].values()), T["links_n"], T["links"]),
+                         ("T1", 3, 3, 4, {"supports": 3, "contradicts": 0, "inconclusive": 1, "not_run": 0}))
+        self.assertEqual(T["buckets"], {"untested": 0, "no_claim": 0})
+        self.assertNotIn("stage", T)                                                     # counts only, never a verdict
+        self.assertEqual({c["id"]: c["stage"] for c in self.e.claims()["claims"]}, before)   # the links change no claim's stage
+        self.assertEqual(before, {"mine:1": "testing", "mine:2": "finding", "mine:3": "finding"})
+        # one experiment testing two claims has a link on each; a claim nothing tests and an experiment testing nothing are counted
+        doc = dict(agent, experiments=[dict(x, tests=["q1", "q2"]) if x["id"] == "main" else dict(x, tests=[]) if x["id"] == "cost" else x for x in agent["experiments"]])
+        self.e.propose_map(doc)
+        self.e.confirm_map()
+        E = self.e.experiments()
+        by = {sec["id"]: sec for sec in E["sections"]}
+        self.assertEqual((by["q1"]["links"]["map:main"]["status"], by["q2"]["links"]["map:main"]["status"]), ("supports", "supports"))
+        T = E["thesis"]
+        self.assertEqual(T["buckets"], {"untested": 1, "no_claim": 1})
+        self.assertEqual([c["id"] for c in T["untested"]], ["mine:3"])
+        self.assertEqual(T["links_n"], sum(len(sec["experiments"]) for sec in E["sections"] if sec.get("kind") != "other"))
+
+    def test_link_rules(self):
+        """Rules L1-L4, each from a minimal experiment."""
+        L = lambda x: Engine._link(x, False, "the best other method")
+        x = {"map": True, "files_n": 3, "summary": {"gap": -2.0, "metric": "F1"}}
+        self.assertEqual((L(dict(x, files_n=0))["status"], L(dict(x, files_n=0))["rule"]), ("not_run", "L1"))
+        self.assertEqual((L(dict(x, summary=None))["status"], L(dict(x, summary=None))["rule"]), ("inconclusive", "L2"))
+        self.assertEqual((L(dict(x, tuning={"runs": 4}))["rule"], L(x)["status"], L(x)["rule"]), ("L2", "contradicts", "L4"))
+        self.assertIn("behind the best other method by 2 on F1", L(x)["why"])
+        self.assertEqual([L(dict(x, summary={"gap": g}))["status"] for g in (1.5, 0.0)], ["supports", "supports"])
+        self.assertEqual(L({"connected": False, "summary": {"gap": 1}})["rule"], "L1")       # rule mode: not linked to a result
+        own = Engine._link(dict(x, summary={"gap": 3.0, "base": {"gap": -1.0}}), True, "MCD-DD")   # an extension is judged against its base
+        self.assertEqual((own["status"], own["criterion"]["compare"]), ("contradicts", "base"))
+
     def test_setup(self):
         """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""
         self.e.propose_map(agent)

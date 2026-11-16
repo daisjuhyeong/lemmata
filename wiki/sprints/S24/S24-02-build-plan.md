@@ -102,6 +102,7 @@ last_reviewed: 2026-11-16
 - `mcp.py`: read-only `trail`.
 - `web/app.js` `pageHistory`: becomes the Trail. It shows day rows by week, a week strip, filter chips (paper, code, runs, claims, feedback, decisions) and "Ahead" deadlines at the top.
 - `web/research.js`: the Digest "History" section reads it, and `pageTimeline` drops its Steps list and links to Trail.
+- **Month view at the bottom of the Trail** (Juhyeong, chat 2026-11-16 11:21 KST: "add a whole month view at the bottom"): a whole-month grid under the day rows, one cell per day with counts per kind and deadlines; previous / next month; clicking a day scrolls the day rows to it.
 - Entry clicks:
   - stage change → Claims tree with `RX.t` set;
   - result → experiment row with that version marked;

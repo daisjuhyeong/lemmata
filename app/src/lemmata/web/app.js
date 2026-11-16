@@ -2064,7 +2064,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));

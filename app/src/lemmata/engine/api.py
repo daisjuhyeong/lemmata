@@ -512,13 +512,62 @@ class Engine:
             doc["map"] = {"state": "proposed" if d["proposed"] else "none"}
         return doc
 
+    LINK_WORDS = ("supports", "contradicts", "inconclusive", "not_run")
+
+    @staticmethod
+    def _link(x, own, vs):
+        """One claim-experiment link (ADR-008 section 1): does this experiment support the claim? Rules L1-L4, default criterion
+        (ours at least as good as the comparator on the main column; a tie counts as support)."""
+        sm = x.get("summary") or {}
+        crit = {"compare": "base" if own else "best_other", "vs": vs, "metric": sm.get("metric"), "over": "main", "strict": False}
+        out = {"criterion": crit, "criterion_by": "default"}
+        has_files = (x.get("files_n") or 0) > 0 if x.get("map") else bool(x.get("connected"))
+        if not has_files:
+            return dict(out, status="not_run", rule="L1", why="No result file yet.")
+        state, gap = reviewmod._state(x, own)
+        if state == "none":
+            why = ("A search over settings: it has a best setting, not a comparison." if x.get("tuning")
+                   else "Results exist, but ours could not be compared with %s." % vs)
+            return dict(out, status="inconclusive", rule="L2", why=why)
+        on = (" on %s" % sm["metric"]) if sm.get("metric") else ""
+        g = ("%.4g" % abs(gap)) if isinstance(gap, (int, float)) else "?"
+        if state == "behind":
+            return dict(out, status="contradicts", rule="L4", why="Ours is behind %s by %s%s." % (vs, g, on), gap=gap)
+        why = ("Ours is level with %s%s (a tie counts as support)." % (vs, on)) if state == "tie" else "Ours is ahead of %s by %s%s." % (vs, g, on)
+        return dict(out, status="supports", rule="L3", why=why, gap=gap)
+
     def experiments(self):
         E = self._exp_doc()
-        by = {c["id"]: c for c in self.claims()["claims"]}
+        C = self.claims()
+        by = {c["id"]: c for c in C["claims"]}
+        ext = bool(E.get("extends"))
+        base = E["extends"]["base"]["name"] if ext else None
+        links = dict.fromkeys(self.LINK_WORDS, 0)
+        tested = set()
         for sec in E["sections"]:      # each section is a claim: show where that claim stands
-            c = by.get(sec.get("claim_id") or sec["id"])
+            cid = sec.get("claim_id") or sec["id"]
+            c = by.get(cid)
             if c:
-                sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"])
+                sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"], loc=c.get("loc"))
+            # the link of each experiment to this claim; kept on the section, because one experiment can test two claims
+            own = ext and sec.get("scope") != "base"
+            sec["links"] = {x["id"]: self._link(x, own, base if own else "the best other method") for x in sec["experiments"]}
+            sec["bar"] = dict.fromkeys(self.LINK_WORDS, 0)
+            for l in sec["links"].values():
+                sec["bar"][l["status"]] += 1
+                if sec.get("kind") != "other":
+                    links[l["status"]] += 1
+            if sec["experiments"] and sec.get("kind") != "other":
+                tested.add(cid)
+        # the thesis: counts only, never a verdict (rule T1)
+        core = C.get("core") or {}
+        live = [c for c in C["claims"] if c["state"] != "rejected"]
+        no_claim = sum(len(sec["experiments"]) for sec in E["sections"] if sec.get("kind") == "other") + len(E.get("unassigned") or [])
+        E["thesis"] = {"text": core.get("text"), "abstract": core.get("abstract"), "loc": core.get("loc"), "state": core.get("state"), "rule": "T1",
+                       "claims": len(live), "stages": {k: sum(1 for c in live if c["stage"] == k) for k in claimsmod.STAGES},
+                       "links": links, "links_n": sum(links.values()),
+                       "buckets": {"untested": sum(1 for c in live if c["id"] not in tested), "no_claim": no_claim},
+                       "untested": [{"id": c["id"], "short": c.get("short"), "text": c["text"], "stage": c["stage"]} for c in live if c["id"] not in tested][:30]}
         return E
 
     def experiment(self, exp_id):
