@@ -2047,7 +2047,7 @@ function usedByText(nid) {
 /* S24 (founder, chat 2026-11-16 11:34 KST): the secondary pages (History, Graph, ...) sit in a left sidebar on the website,
    not at the bottom of the page. The five main tabs stay in the band. The VS Code tab and narrow windows keep them in the footer. */
 const SIDE = [
-  ['Look back', [['history', 'History'], ['timeline', 'Growth'], ['changes', 'Changes']]],
+  ['Look back', [['history', 'Trail'], ['timeline', 'Growth'], ['changes', 'Changes']]],
   ['Explore', [['graph', 'Graph'], ['notation', 'Notation'], ['checks', 'Checks']]],
   ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
 ];
@@ -2092,7 +2092,7 @@ function renderPage(keepScroll) {
   else if (t.k === 'item') { const it = M.byId.get(t.id); el = it ? pageItem(it) : doc(h('div', { class: 'muted' }, 'This item is not in the project any more.')); }
   else if (t.k === 'node') el = pageEvidence(t.id);
   else if (t.k === 'checks') el = pageChecks();
-  else if (t.k === 'history') el = pageHistory();
+  else if (t.k === 'history' || t.k === 'trail') el = pageTrail();
   else if (RX_PAGES[t.k]) el = RX_PAGES[t.k]();
   pg.append(el);
   if (t.k === 'item' || t.k === 'graph') pg.append(h('aside', { id: 'right', 'aria-label': 'Links for the open item' }));
@@ -2162,7 +2162,7 @@ function renderStatus() {
   const nChecks = ((S.findings && S.findings.findings) || []).length;
   const embed = !!window.LEMMATA_EMBED;
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
-  const more = [link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('History', () => openTab('history')), link('Graph', () => openTab('graph')),
+  const more = [link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher())];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },

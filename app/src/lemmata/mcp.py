@@ -597,6 +597,29 @@ def t_setup(ctx, args):
     return head + "\n" + "\n".join(lines), d, "Filter with kind=metric|dataset|method."
 
 
+def t_todo(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.todo()
+    lines = []
+    for g in d["groups"]:
+        its = [it for it in d["items"] if it["group"] == g["id"]]
+        if its:
+            lines.append("%s (%d):" % (g["label"].upper(), len(its)))
+            lines += ["  - %s — %s [%s]%s" % (it["text"], it["why"], it["rule"], " due %s" % it["due"] if it.get("due") else "") for it in its[:25]]
+    head = "%d things to do, by rule, in the order of who or what is waiting (%d snoozed)." % (d["counts"]["total"], d["counts"]["snoozed"])
+    return head + "\n" + "\n".join(lines), d, "You cannot mark these done: each disappears when its rule stops firing."
+
+
+def t_trail(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.trail(args.get("since") or None, args.get("until") or None)
+    lines = ["AHEAD: %s %s" % (x["date"], x["title"]) for x in d["ahead"][:10]]
+    lines += ["%s [%s] %s%s" % (e["t"][:16], e["kind"], e["title"], " — " + e["why"] if e.get("why") else "") for e in d["entries"][:80]]
+    c = d["counts"]
+    head = "The research trail, newest first: %s." % ", ".join("%d %s" % (c[k], k) for k in d["kinds"])
+    return head + "\n" + "\n".join(lines), d, "Filter with since / until (YYYY-MM-DD)."
+
+
 def _run_line(r):
     nums = ", ".join("%s=%s" % (k, ("%.4g" % v)) for k, v in list(r["metrics"].items())[:6])
     bits = [(r.get("time") or "")[:16].replace("T", " "), r["state"].upper(), (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else ""),
@@ -893,6 +916,13 @@ TOOLS = [
                     "each, where the paper and the code name it, and checks (metric read in two directions, baseline missing on a dataset, "
                     "dataset or baseline the paper never names).",
      "inputSchema": _schema({"project": _PROJECT_PROP, "kind": {"type": "string", "enum": ["metric", "dataset", "method"], "description": "Only this kind."}}, ["project"]), "annotations": dict(_RO)},
+    {"name": "todo", "fn": t_todo, "title": "What to do next",
+     "description": "The researcher's to-do list, made by rules: feedback someone is waiting on, things awaiting confirmation, places where the paper "
+                    "disagrees with the results, out-of-date results, and gaps (claims with no experiment, contradicting experiments, missing baselines).",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "trail", "fn": t_trail, "title": "Research trail",
+     "description": "What was done and when: commits to the paper and code, claim stage changes, logged runs, feedback, map and plan decisions, plus deadlines ahead.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "since": {"type": "string", "description": "YYYY-MM-DD"}, "until": {"type": "string", "description": "YYYY-MM-DD"}}, ["project"]), "annotations": dict(_RO)},
     {"name": "runs", "fn": t_runs, "title": "Runs outside GitHub",
      "description": "Runs logged from the researcher's editor terminal, results folder or a coding agent, newest first: the command, the commit "
                     "it ran on (and whether there were uncommitted changes), the numbers it wrote and which tracked result files it wrote. "

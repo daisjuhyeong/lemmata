@@ -22,6 +22,8 @@ from . import review as reviewmod
 from . import plans as plansmod
 from . import runs as runsmod
 from . import setup as setupmod
+from . import todo as todomod
+from . import trail as trailmod
 from . import triage as triagemod
 from . import understand as undmod
 from .errors import BadRequest, NotFound
@@ -893,6 +895,36 @@ class Engine:
     def timeline(self):
         s = self._ensure()
         return processmod.timeline(s["events"], s["G"].nodes, self._roles(), self.claims())
+
+    # ------------------------------------------------------------------ to-do and trail (S24 steps 4-5)
+    def todo(self, today=None):
+        """What to do next, by rule, each item with the page it opens (ADR-008 section 5.1)."""
+        s = self._ensure()
+        today = today or now_iso()[:10]
+        d = undmod.load(self.hub)
+        return todomod.build(self.experiments(), self.claims(), self.setup(), self.tasks(), s["findings"], s["alarms"], self.plans(),
+                             {"proposed": d.get("proposed")}, trailmod.load_deadlines(self.hub)["deadlines"], todomod.load(self.hub), today)
+
+    def snooze_todo(self, key, until=None):
+        self._ensure()
+        st = todomod.snooze(todomod.load(self.hub), key, until)
+        self.hub.write_json("todo.json", st)
+        return self.todo()
+
+    def trail(self, start=None, end=None, today=None):
+        """The time axis: what was done, day by day, and the deadlines ahead (ADR-008 section 5.2)."""
+        s = self._ensure()
+        C = self.claims()
+        d = undmod.load(self.hub)
+        return trailmod.build(s["events"], self.timeline()["steps"], self.hub.read_json("stages.json", None) or {}, C, runsmod.load(self.hub),
+                              processmod.load_tasks(self.hub), d, self.checkpoints(), self.plans(), trailmod.load_deadlines(self.hub)["deadlines"],
+                              self._github(), start, end, today or now_iso()[:10])
+
+    def set_deadline(self, date=None, title=None, target=None, remove=None):
+        self._ensure()
+        st = trailmod.set_deadline(trailmod.load_deadlines(self.hub), date, title, target, remove)
+        self.hub.write_json("deadlines.json", st)
+        return self.trail()
 
     def ledger(self):
         s = self._ensure()

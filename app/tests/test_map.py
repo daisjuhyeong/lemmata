@@ -547,6 +547,40 @@ class MapTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.e.set_experiment("map:cost", claim="nope", criterion={})
 
+    def test_todo_and_trail(self):
+        """S24 steps 4-5: a to-do made by rules where each item names what it opens, and the trail with deadlines."""
+        self.e.propose_map(agent)
+        kinds = lambda: [(i["group"], i["kind"]) for i in self.e.todo("2026-11-16")["items"]]
+        self.assertIn(("confirm", "map"), kinds())
+        self.e.confirm_map()
+        self.assertNotIn(("confirm", "map"), kinds())                                   # the rule stopped firing: the item is gone
+        self.e.add_feedback("Check Table 1 against the new results.", "Advisor meeting")
+        T = self.e.todo("2026-11-16")
+        self.assertEqual([(i["group"], i["kind"]) for i in T["items"]], [("person", "feedback"), ("paper", "differs"), ("gap", "seeds")])   # in the order of who is waiting
+        for i in T["items"]:
+            self.assertTrue(i["target"].get("view") and i["why"] and i["rule"])
+        d = next(i for i in T["items"] if i["kind"] == "differs")
+        self.assertEqual((d["target"], d["why"]), ({"view": "experiments", "sel": "x:map:main"}, "MCD, Covtype: the paper says 44.0, the file says 46.0."))
+        T = self.e.snooze_todo(d["key"], "2099-01-01")
+        self.assertEqual((T["counts"]["snoozed"], [i["kind"] for i in T["items"] if i["kind"] == "differs"]), (1, []))
+        self.assertEqual(self.e.snooze_todo(d["key"], None)["counts"]["snoozed"], 0)
+        with self.assertRaises(Exception):
+            self.e.snooze_todo(d["key"], "next week")
+        # a strict criterion that fails becomes a gap item pointing at the experiment
+        self.e.set_experiment("map:cost", claim="mine:3", criterion={"strict": True})
+        self.assertIn(("gap", "contradicts"), kinds())
+        # trail: every kind of record, newest first, deadlines ahead, a deadline on a target orders the to-do
+        tr = self.e.set_deadline("2099-12-01", "Camera ready", "x:map:main")
+        self.assertEqual([x["title"] for x in tr["ahead"]], ["Camera ready"])
+        self.assertEqual(next(i for i in self.e.todo("2026-11-16")["items"] if i["kind"] == "differs")["due"], "2099-12-01")
+        self.assertTrue(all(tr["counts"][k] for k in ("paper", "code", "claims", "feedback", "decisions")))
+        self.assertEqual([e["t"] for e in tr["entries"]], sorted((e["t"] for e in tr["entries"]), reverse=True))
+        self.assertEqual(tr["days"]["2026-10-01"]["paper"], 1)
+        self.assertEqual(len(self.e.trail("2026-10-05", "2026-10-09")["entries"]), len([e for e in tr["entries"] if "2026-10-05" <= e["day"] <= "2026-10-09"]))
+        self.assertEqual(self.e.set_deadline(remove=tr["deadlines"][0]["id"])["deadlines"], [])
+        with self.assertRaises(Exception):
+            self.e.set_deadline("soon", "x")
+
     def test_setup(self):
         """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""
         self.e.propose_map(agent)

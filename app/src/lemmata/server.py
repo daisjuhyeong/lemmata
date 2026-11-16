@@ -154,7 +154,7 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
-        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "setup", "project_map", "review"):   # research views (absent on fixture data)
+        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "setup", "project_map", "review", "todo", "trail"):   # research views (absent on fixture data)
             fn = getattr(e, name, None)
             if fn is not None:
                 try:
@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -377,6 +377,10 @@ class Handler(BaseHTTPRequestHandler):
             if r == "/events":
                 with self.app.lock:
                     data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
+                return self._json(data)
+            if r == "/trail":
+                with self.app.lock:
+                    data = need("trail")(q.get("from") or None, q.get("to") or None)
                 return self._json(data)
             if r == "/review":
                 try:
@@ -483,6 +487,10 @@ class Handler(BaseHTTPRequestHandler):
                     if sp is not None and not isinstance(sp, dict):
                         raise ApiError(400, "bad_request", "spec must be an object")
                     return self._json(need("set_plan")(txt("id", True), txt("state"), sp, txt("title")))
+                if r == "/todo":
+                    return self._json(need("snooze_todo")(txt("key", True), txt("snooze_until")))
+                if r == "/deadlines":
+                    return self._json(need("set_deadline")(txt("date"), txt("title"), txt("target"), txt("remove")))
                 if r == "/experiment":
                     lo = body.get("lower")
                     if lo is not None and not isinstance(lo, bool):

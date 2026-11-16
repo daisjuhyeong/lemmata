@@ -68,10 +68,12 @@ async function rxLoad() {
     const [claims, timeline, ledger, tasks, tree, notation] = await Promise.all(['claims', 'timeline', 'ledger', 'tasks', 'tree', 'notation'].map(p => apiGet('/api/' + p)));
     let experiments = null; try { experiments = await apiGet('/api/experiments'); } catch (e) { /* the page says so */ }
     let map = null; try { map = await apiGet('/api/map'); } catch (e) { /* older data has no map */ }
+    let todo = null; try { todo = await apiGet('/api/todo'); } catch (e) { /* older hubs and snapshots */ }
+    let trail = null; try { trail = await apiGet('/api/trail'); } catch (e) { /* older hubs and snapshots */ }
     let setup = null; try { setup = await apiGet('/api/setup'); } catch (e) { /* older hubs and snapshots: the page says so */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -99,7 +101,7 @@ function rxNodeBtn(nid, label) {
 async function rxPost(path, body, okMsg) {
   try {
     const r = await apiPost(path, body); if (okMsg) toast(okMsg);
-    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; RX.experiments = await apiGet('/api/experiments'); RX.setup = null; } catch (e) { /* the old tree stays */ } }
+    if (path.startsWith('/api/claims')) { RX.digest = null; try { const [t, l, tr] = await Promise.all(['timeline', 'ledger', 'tree'].map(p => apiGet('/api/' + p))); RX.timeline = t; RX.ledger = l; RX.tree = tr; RX.experiments = await apiGet('/api/experiments'); RX.setup = null; RX.todo = await apiGet('/api/todo').catch(() => RX.todo); } catch (e) { /* the old tree stays */ } }
     else RX.digest = null;
     return r;
   }
@@ -578,7 +580,7 @@ function rxPaperGrid(x) {
 function rxExpDetail(id) {
   const box = h('div', { class: 'rx-x-d' }, h('div', { class: 'muted' }, '…'));
   const load = () => apiGet('/api/experiment?id=' + encodeURIComponent(id)).then(paint).catch(e => { clear(box).append(h('div', { class: 'muted' }, e.message)); });
-  const post = async body => { const r = await rxPost('/api/experiment', Object.assign({ id }, body)); if (r) { try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; } catch (e) { /* keep */ } renderPage(true); } };
+  const post = async body => { const r = await rxPost('/api/experiment', Object.assign({ id }, body)); if (r) { try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; RX.todo = await apiGet('/api/todo').catch(() => RX.todo); } catch (e) { /* keep */ } renderPage(true); } };
   function paint(x) {
     const sm = x.summary, gh = u => u ? h('a', { class: 'ghl', href: u, target: '_blank', rel: 'noopener noreferrer' }, '↗') : null;
     const blk = (title, ...kids) => h('section', { class: 'rx-x-b' }, h('h4', null, title), kids);
@@ -645,7 +647,7 @@ function rxExpDetail(id) {
 const RX_MAP_PROMPT = name => 'Use Lemmata to understand the project "' + name + '": call project_brief (every part), read the paper and code if you have them, then propose_map. If this work extends the linked paper, set base (the original method) and goal (the new target). Fix whatever the checker drops and propose again.';
 function rxMapCard() {
   const M = RX.map, E = RX.experiments; if (!M) return null;
-  const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
+  const act = async (path, body, msg) => { const r = await rxPost(path, body, msg); if (r) { RX.map = r; if (path.endsWith('confirm')) RX.mapOpen = false; try { RX.experiments = await apiGet('/api/experiments'); RX.setup = null; RX.todo = await apiGet('/api/todo').catch(() => RX.todo); RX.claims = await apiGet('/api/claims'); RX.tree = await apiGet('/api/tree'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } };
   const name = S.project ? S.project.name : 'this project';
   if (M.state === 'none') return h('section', { class: 'rx-map none' },
     h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Not mapped yet'), h('span', { class: 'grow' }),
@@ -1054,11 +1056,13 @@ function pageDigest() {
   S.outline = [];
   const root = doc(h('h1', { class: 'ptitle' }, 'Digest'));
   if (!READONLY) root.append(sec('This week', 'digest', rxDigestBox()));
-  const open = RX.tasks ? RX.tasks.tasks.filter(t => t.state === 'open') : [];
-  root.append(sec('Open tasks (' + open.length + ')', 'tasks', open.length ? open.slice(0, 8).map(t => h('div', { class: 'row-line' }, h('span', { class: 'rtag' }, '[task]'), h('button', { class: 'ilink', onclick: () => openTab('tasks') }, trunc(t.text || t.title || '', 140)))) : h('div', { class: 'muted' }, 'Nothing open.'),
-    h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('button', { class: 'linkbtn', onclick: () => openTab('tasks') }, 'All tasks and feedback'))));
-  const hist = pageHistory({ weekly: true });
-  root.append(sec('History', 'history', Array.from(hist.childNodes).filter(n => !(n.tagName === 'H1'))));
+  root.append(sec('Next to do' + (RX.todo ? ' (' + RX.todo.counts.total + ')' : ''), 'todo', rxTodoList(),
+    h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('button', { class: 'linkbtn', onclick: () => openTab('tasks') }, 'Add feedback, or see all tasks'))));
+  const T = RX.trail;
+  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.entries.filter(e => e.day >= since).slice(0, 12);
+    root.append(sec('Last 7 days', 'history', T.ahead.length ? h('div', { class: 'row-line' }, h('span', { class: 'rtag' }, '[ahead]'), h('span', null, T.ahead.slice(0, 3).map(d => dmon(d.date) + ' ' + d.title).join(' · '))) : null,
+      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]), h('span', null, trunc(e.title, 110)))) : h('div', { class: 'muted' }, 'Nothing in the last 7 days.'),
+      h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('button', { class: 'linkbtn', onclick: () => openTab('history') }, 'Open the Trail')))); }
   return root;
 }
 
@@ -1365,7 +1369,105 @@ function pageSetup() {
   return root;
 }
 
-const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, tasks: pageTasks, ask: pageAsk };
+/* ---------- To-do and Trail (S24 steps 4-5, ADR-008 section 5) ----------
+   To-do: made by rules; every item opens the thing it is about. Trail: what was done, day by day, deadlines ahead,
+   and a whole-month view at the bottom (founder, chat 2026-11-16 11:21 KST). */
+const TD_TAG = { person: 'waiting', confirm: 'confirm', paper: 'paper', stale: 'old', gap: 'gap' };
+function rxOpenTarget(t) {
+  if (!t) return;
+  if (t.view === 'claims') { if (t.sel) RX.sel = t.sel; RX.view = 'tree'; if (t.at) RX.t = t.at; return openTab('claims'); }
+  if (t.view === 'experiments' && t.sel && t.sel.startsWith('x:')) return rxOpenExp(t.sel.slice(2));
+  if (t.view === 'setup') return rxGoto('setup', t.sel);
+  if (t.view === 'node' && t.id) return openTab('node', t.id);
+  if (t.view === 'commit') { if (t.url) window.open(t.url, '_blank', 'noopener'); return; }
+  if (t.view === 'runs') return openTab('experiments');
+  return openTab(t.view || 'digest');
+}
+function rxTodoList(limit) {
+  const D = RX.todo;
+  if (!D) return h('div', { class: 'muted' }, 'Not available on this hub yet.');
+  if (!D.items.length) return h('div', { class: 'muted' }, 'Nothing to do right now.' + (D.counts.snoozed ? ' ' + D.counts.snoozed + ' snoozed.' : ''));
+  const out = []; let shown = 0;
+  for (const g of D.groups) {
+    const its = D.items.filter(it => it.group === g.id); if (!its.length) continue;
+    if (limit && shown >= limit) break;
+    out.push(h('div', { class: 'td-g' }, g.label + ' · ' + g.n));
+    for (const it of its) {
+      if (limit && shown >= limit) break; shown++;
+      out.push(h('div', { class: 'row-line td-r' }, h('span', { class: 'rtag' }, '[' + TD_TAG[it.group] + ']'),
+        h('button', { class: 'ilink td-t', title: it.why + ' (' + it.rule + ')', onclick: () => rxOpenTarget(it.target) }, trunc(it.text, 150)),
+        it.due ? h('span', { class: 'tag warn' }, 'due ' + dmon(it.due)) : null,
+        h('span', { class: 'td-w muted small' }, trunc(it.why, 110)),
+        READONLY || it.group === 'person' ? null : h('button', { class: 'linkbtn small td-s', title: 'Hide for a week. It comes back if it is still true.', onclick: async () => {
+          const d = new Date(); d.setDate(d.getDate() + 7); const r = await rxPost('/api/todo', { key: it.key, snooze_until: d.toISOString().slice(0, 10) }); if (r) { RX.todo = r; renderPage(true); } } }, 'Snooze')));
+    }
+  }
+  if (limit && D.items.length > shown) out.push(h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('span', { class: 'muted small' }, (D.items.length - shown) + ' more below the first ' + shown)));
+  return out;
+}
+const TR_KIND = { paper: 'Paper', code: 'Code', runs: 'Runs', claims: 'Claims', feedback: 'Feedback', decisions: 'Decisions' };
+function trEntry(e) {
+  const can = e.target && (e.target.view !== 'commit' || e.target.url);
+  return h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, e.t.slice(11, 16)), h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]),
+    can ? h('button', { class: 'ilink', onclick: () => rxOpenTarget(Object.assign({}, e.target, { at: e.at })) }, trunc(e.title, 130)) : h('span', null, trunc(e.title, 130)),
+    e.ref ? h('span', { class: 'mono muted small' }, e.ref) : null, e.decision ? h('span', { class: 'tag warn' }, 'decision') : null, e.why ? h('span', { class: 'muted small' }, e.why) : null);
+}
+function trMonth(D, ym, filter) {
+  const [y, m] = ym.split('-').map(Number), first = new Date(y, m - 1, 1), n = new Date(y, m, 0).getDate(), lead = (first.getDay() + 6) % 7;
+  const p = v => String(v).padStart(2, '0'), key = d => y + '-' + p(m) + '-' + p(d);
+  const dl = {}; D.deadlines.forEach(d => { (dl[d.date] = dl[d.date] || []).push(d); });
+  const step = k => { const d = new Date(y, m - 1 + k, 1); RX.trMonth = d.getFullYear() + '-' + p(d.getMonth() + 1); renderPage(true); };
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(h('div', { class: 'tm-c off' }));
+  for (let d = 1; d <= n; d++) {
+    const k = key(d), c = D.days[k] || null, tot = c ? D.kinds.reduce((a, kk) => a + (filter === 'all' || filter === kk ? c[kk] : 0), 0) : 0;
+    cells.push(h('button', { class: 'tm-c' + (k === D.today ? ' today' : '') + (tot ? ' has' : '') + (dl[k] ? ' due' : ''), disabled: tot || dl[k] ? null : '',
+      title: (tot ? D.kinds.filter(kk => c[kk]).map(kk => c[kk] + ' ' + TR_KIND[kk].toLowerCase()).join(', ') : 'Nothing recorded') + (dl[k] ? ' · due: ' + dl[k].map(x => x.title).join(', ') : ''),
+      onclick: () => { RX.trDay = k; renderPage(true); const el = document.getElementById('tr-' + k); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } },
+      h('span', { class: 'tm-d' }, d), tot ? h('span', { class: 'tm-dots' }, D.kinds.filter(kk => c[kk] && (filter === 'all' || filter === kk)).map(kk => h('span', { class: 'tm-dot k-' + kk, title: c[kk] + ' ' + TR_KIND[kk].toLowerCase() }))) : null,
+      tot ? h('span', { class: 'tm-n' }, tot) : null, dl[k] ? h('span', { class: 'tm-due' }, trunc(dl[k][0].title, 14)) : null));
+  }
+  return h('section', { class: 'tm' }, h('div', { class: 'tm-h' }, h('h3', null, MON[m - 1] + ' ' + y), h('span', { class: 'grow' }),
+      h('button', { class: 'btn sm', 'aria-label': 'Previous month', onclick: () => step(-1) }, '←'), h('button', { class: 'btn sm', onclick: () => { RX.trMonth = null; renderPage(true); } }, 'This month'), h('button', { class: 'btn sm', 'aria-label': 'Next month', onclick: () => step(1) }, '→')),
+    h('div', { class: 'tm-g head' }, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(w => h('div', { class: 'tm-w' }, w))), h('div', { class: 'tm-g' }, cells));
+}
+async function trLoad() {
+  if (RX.trailBusy) return; RX.trailBusy = true;
+  try { RX.trail = await apiGet('/api/trail'); RX.trailErr = null; } catch (e) { RX.trailErr = e.status === 404 || e.status === 501 ? 'This hub has no Trail yet. It appears after the hub updates.' : e.message; }
+  RX.trailBusy = false; const t = S.tabs[S.active]; if (t && (t.k === 'history' || t.k === 'trail')) renderPage(true);
+}
+function pageTrail() {
+  const nr = rxNotReady('Trail'); if (nr) return nr;
+  S.outline = [];
+  const root = doc(h('h1', { class: 'ptitle' }, 'Trail'));
+  const D = RX.trail;
+  if (!D) { if (RX.trailErr) return root.append(h('p', { class: 'muted' }, RX.trailErr)), root; trLoad(); return root.append(h('p', { class: 'muted' }, 'Reading the history…')), root; }
+  const F = RX.trFilter || 'all';
+  // ahead: deadlines
+  const ahead = D.ahead.map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(D.today)) / 864e5);
+    return h('div', { class: 'tr-e ahead' }, h('span', { class: 'tr-c mono' }, 'D-' + days), h('span', { class: 'tag tr-k' }, dmon(d.date)), h('span', null, d.title),
+      READONLY ? null : h('button', { class: 'linkbtn small', onclick: async () => { const r = await rxPost('/api/deadlines', { remove: d.id }); if (r) { RX.trail = r; RX.todo = null; renderPage(true); } } }, 'Remove')); });
+  let form = null;
+  if (!READONLY) { const di = h('input', { type: 'date', 'aria-label': 'Deadline date', min: D.today }), ti = h('input', { type: 'text', placeholder: 'Deadline, e.g. ICML abstract', 'aria-label': 'Deadline title', maxlength: '160' });
+    form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!di.value || !ti.value.trim()) return; const r = await rxPost('/api/deadlines', { date: di.value, title: ti.value.trim() }); if (r) { RX.trail = r; renderPage(true); } } }, di, ti, h('button', { class: 'btn sm', type: 'submit' }, 'Add deadline')); }
+  root.append(h('section', { class: 'tr-ahead' }, h('div', { class: 'dayhead' }, 'Ahead'), ahead.length ? ahead : h('div', { class: 'muted small' }, 'No deadlines yet.'), form));
+  root.append(h('div', { class: 'fchips' }, [['all', 'All']].concat(D.kinds.map(k => [k, TR_KIND[k] + ' ' + D.counts[k]])).map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.trFilter = k; renderPage(true); } }, l))));
+  const es = D.entries.filter(e => F === 'all' || e.kind === F), cap = RX.trAll ? es.length : 120;
+  if (!es.length) root.append(h('div', { class: 'muted' }, 'Nothing recorded yet.'));
+  let week = null, day = null;
+  es.slice(0, cap).forEach(e => {
+    const w = weekStart(e.t);
+    if (w !== week) { root.append(h('div', { class: 'tr-w' }, 'Week of ' + dmon(w) + (w.slice(0, 4) !== D.today.slice(0, 4) ? ' ' + w.slice(0, 4) : ''))); week = w; }
+    if (e.day !== day) { root.append(h('div', { class: 'dayhead tr-d' + (RX.trDay === e.day ? ' sel' : ''), id: 'tr-' + e.day }, e.day === D.today ? 'Today' : dmon(e.day) + ' · ' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(e.day + 'T00:00:00').getDay()])); day = e.day; }
+    root.append(trEntry(e));
+  });
+  if (es.length > cap) root.append(h('button', { class: 'linkbtn', onclick: () => { RX.trAll = true; renderPage(true); } }, 'Show all ' + es.length));
+  // the whole month, at the bottom
+  root.append(trMonth(D, RX.trMonth || (RX.trDay || D.last || D.today).slice(0, 7), F));
+  return root;
+}
+
+const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;
