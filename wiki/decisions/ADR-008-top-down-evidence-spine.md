@@ -1,7 +1,7 @@
 ---
 type: adr
 owner_agent: cto
-status: proposed
+status: approved
 sources:
   - "../sprints/S24/S24-01-cto-benchmark-to-lemmata.md (founder chat 2026-11-16 10:43 and 10:54 KST, quoted there; research facts and proposals)"
   - "../architecture/benchmark-structures.md (what each benchmark tool does, with URLs and [P]/[3P]/[NV] marks)"
@@ -304,4 +304,13 @@ W2 needs Juhyeong's approval. It is sharing of user data (CLAUDE.md). It also fa
 - **D14** Shell: S1 (top band; VS Code tree as the sidebar) vs S2 (left sidebar) vs S3 (§5.4).
 
 ## Approved by
-(Juhyeong, date)
+Juhyeong, 2026-11-16 (chat, about 11:20 KST), answered as four packages:
+
+| Package | Decisions | Answer |
+|---|---|---|
+| A. Evidence model | D1, D2, D3, D4, D5, D9 | Approved as proposed: the core message is the thesis and is labelled "Thesis"; link words supports / contradicts / inconclusive / not run; a tie counts as support unless a stricter criterion is confirmed; the thesis shows counts only; the hoped conclusion stays on Review |
+| B. Build now | D8 | Build steps 1-5 now (top-down Experiments page, rules shown, criteria, To-do and Trail on Digest) |
+| C. Reshape | D6, D7, D10, D11, D12, D14 | Approved now: nav Home · Thesis · Setup · Review · Trail; top band kept (S1), no left sidebar; native VS Code Thesis tree; To-do groups and Trail form as proposed; Digest becomes Home |
+| D. Watching | D13 | Exported snapshot now (W1). The invite-only viewer (W2) only after the GitHub App from ADR-006 and a check of Korea University's rules |
+
+Not decided: whether step 1 is shown in the 2nd presentation demo (its date is still unknown). The Trail was approved as a day-row list; Juhyeong had said he liked the portal's calendar, so show him the Trail early in step 5.

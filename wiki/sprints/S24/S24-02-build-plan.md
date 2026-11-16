@@ -1,7 +1,7 @@
 ---
 type: build-plan
 owner_agent: cto
-status: proposed
+status: approved
 sources:
   - "../../decisions/ADR-008-top-down-evidence-spine.md (proposed; this plan builds it)"
   - "S24-01-cto-benchmark-to-lemmata.md ; S24-01b-ibel-portal-reference.md (founder chat 2026-11-16 10:43, 10:54, 11:01 KST)"
@@ -10,7 +10,7 @@ last_reviewed: 2026-11-16
 ---
 # S24-02 Build plan: the top-down evidence spine
 
-**Nothing here starts before Juhyeong approves ADR-008**, or at least the decisions a step names. Each step is one task card, one handoff note and a QA pass (CLAUDE.md rule 6). Steps 1-7 change no nav. Steps 8-9 need explicit approval.
+**Approved by Juhyeong 2026-11-16 (see ADR-008, Approved by): build steps 1-5 now; steps 6-8 are approved to follow; step 9 waits for the GitHub App and the university-rules check.** Originally: nothing here starts before Juhyeong approves ADR-008, or at least the decisions a step names. Each step is one task card, one handoff note and a QA pass (CLAUDE.md rule 6). Steps 1-7 change no nav. Steps 8-9 need explicit approval.
 
 **Cut line for the 2nd presentation (MVP demo).** Ship steps 1-2. If time is short, ship step 1 alone: it is usable by itself. Cut steps 9 → 5 first, in reverse order. The date of the 2nd presentation is not in the facts I had (see the S24-01 handoff, Open questions).
 
