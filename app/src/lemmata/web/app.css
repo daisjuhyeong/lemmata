@@ -928,3 +928,26 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .tm-dot { width:7px; height:7px; border-radius:50%; background:var(--border-strong); } .tm-dot.k-paper { background:var(--accent-dark); } .tm-dot.k-code { background:var(--accent-light); } .tm-dot.k-claims { background:var(--success); } .tm-dot.k-runs { background:var(--warning); } .tm-dot.k-feedback,.tm-dot.k-decisions { background:var(--text); }
 .tm-due { font-size:11px; color:var(--error); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 @container app (max-width: 700px) { .tm-c { min-height:44px; padding:3px 4px; } .tm-due,.tm-n { display:none; } }
+
+/* ---------- S24 step 8: shell after the IBEL lab portal (founder, chat 2026-11-16 12:03 KST). Website, wide windows:
+   a slim top bar and one left sidebar that holds every page. VS Code and narrow windows keep the band with tabs. ---------- */
+.bsearch { display:none; }
+.sd-main .sd-i { font-size:var(--fs-14); padding:7px 10px; color:var(--text); }
+.sd-main { padding-bottom:var(--s-3); border-bottom:1px solid var(--border); }
+@container app (min-width: 1001px) {
+  #app.has-side #band { display:flex; align-items:center; gap:var(--s-3); text-align:left; padding:10px 24px; position:sticky; top:0; z-index:5; }
+  #app.has-side #band .bt { font-size:20px; } #app.has-side #band .bsub { margin:0; min-height:0; flex:1; }
+  #app.has-side #topnav { display:none; }
+  #app.has-side .bsearch { display:block; width:260px; text-align:left; padding:5px 12px; border-radius:999px; border:1px solid var(--accent-pale); background:color-mix(in srgb, var(--bg) 14%, transparent); color:var(--bg); font:400 var(--fs-13) var(--font-sans); cursor:pointer; }
+  #app.has-side #side { top:48px; max-height:calc(100vh - 48px); padding-top:24px; width:200px; }
+  #app.has-side #page { padding-top:28px; }
+}
+/* Home */
+.rx-th.home { border-top:0; padding-top:0; }
+.hm-cards { display:grid; grid-template-columns:minmax(0, 3fr) minmax(0, 2fr); gap:var(--s-4); margin-bottom:var(--s-5); }
+.hm-col { display:flex; flex-direction:column; gap:var(--s-4); min-width:0; }
+.hm-card { border:1px solid var(--border); border-radius:10px; padding:var(--s-3) var(--s-4) var(--s-3); background:var(--bg); min-width:0; }
+.hm-h { display:flex; gap:var(--s-2); align-items:baseline; margin-bottom:var(--s-2); } .hm-h h3 { margin:0; font:600 var(--fs-16) var(--font-serif); } .hm-n { font-size:var(--fs-13); color:var(--muted); }
+.hm-dl { display:flex; gap:var(--s-3); align-items:baseline; padding:5px 0; border-bottom:1px solid var(--border); font-size:var(--fs-13); } .hm-dd { font:600 var(--fs-12) var(--font-mono); color:var(--text-secondary); min-width:44px; } .hm-dd.soon { color:var(--error); }
+.hm-card .tr-e:last-child, .hm-dl:last-child { border-bottom:0; }
+@container app (max-width: 900px) { .hm-cards { grid-template-columns:minmax(0, 1fr); } }

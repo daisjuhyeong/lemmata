@@ -54,7 +54,8 @@ class UiTokensTest(unittest.TestCase):
         self.assertNotIn("id: 'ribbon'", js)
         self.assertNotIn("id: 'left'", js)
         # S23 (founder, chat 2026-11-13 14:28 KST): Setup is a top-level page of its own, beside Claims and Experiments
-        self.assertIn("const NAV = [['claims', 'Claims'], ['experiments', 'Experiments'], ['setup', 'Setup'], ['digest', 'Digest'], ['review', 'Review']]", js)
+        # S24 step 8 (founder approved ADR-008 D6 on 2026-11-16): Home, Thesis (Claims and Experiments merged), Setup, Review, Trail
+        self.assertIn("const NAV = [['digest', 'Home'], ['experiments', 'Thesis'], ['setup', 'Setup'], ['review', 'Review'], ['history', 'Trail']]", js)
         html = (WEB / "index.html").read_text(encoding="utf-8")
         self.assertNotIn("1024", html)
 

@@ -206,8 +206,8 @@ function pageClaims() {
   const nr = rxNotReady('Claims'); if (nr) return nr;
   S.outline = [];
   const d = RX.claims, cc = d.counts;
-  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['tree', 'Tree'], ['list', 'List']].map(([k, l]) => h('button', { 'aria-pressed': String(RX.view === k), onclick: () => { RX.view = k; renderPage(true); } }, l)));
-  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Claims'), seg,
+  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, h('button', { 'aria-pressed': 'false', title: 'Thesis, claims and experiments, top down', onclick: () => { RX.exView = 'table'; openTab('experiments'); } }, 'Outline'), [['tree', 'Tree'], ['list', 'List']].map(([k, l]) => h('button', { 'aria-pressed': String(RX.view === k), onclick: () => { RX.view = k; renderPage(true); } }, l)));
+  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), seg,
     h('button', { class: 'btn', title: 'Watch the tree grow', onclick: () => { RX.t = 0; openTab('timeline'); setTimeout(rxPlay, 300); } }, '▶ Growth'),
     READONLY ? null : h('a', { class: 'btn', href: apiUrl('/api/claims.md'), title: 'Download claims.md to commit to your repository' }, '↓ .md')));
   if (!d.has_paper) root.append(emptyState('◆', 'No paper connected', 'Connect a paper repository or upload the LaTeX source as a zip from the Project menu in the footer.'));
@@ -763,8 +763,8 @@ function pageExperiments() {
   const nr = rxNotReady('Experiments'); if (nr) return nr;
   S.outline = [];
   const E = RX.experiments;
-  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['map', 'Map'], ['table', 'Table']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'table') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)));
-  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Experiments'), E ? seg : null));
+  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['table', 'Outline'], ['map', 'Map']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'table') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)), h('button', { 'aria-pressed': 'false', title: 'The claims as a tree', onclick: () => { RX.view = 'tree'; openTab('claims'); } }, 'Tree'));
+  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
   const c = E.counts, mapped = !!E.unmapped;
   root.append(rxThesisHead(E));
@@ -1051,18 +1051,27 @@ function rxDigestBox() {
 
 
 /* ---------- Digest (S18): this week in prose, open tasks, then the history by week ---------- */
-function pageDigest() {
-  const nr = rxNotReady('Digest'); if (nr) return nr;
+function pageDigest() {      // Home (S24 step 8): one research as a whole. The tab key stays 'digest' so old links keep working.
+  const nr = rxNotReady('Home'); if (nr) return nr;
   S.outline = [];
-  const root = doc(h('h1', { class: 'ptitle' }, 'Digest'));
+  const root = doc(h('h1', { class: 'ptitle' }, S.project ? S.project.name : 'Home'));
+  const E = RX.experiments, T = RX.trail;
+  if (E && E.thesis) { const th = rxThesisHead(E); th.classList.add('home'); th.querySelector('.rx-th-k .linkbtn').replaceWith(h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the thesis')); root.append(th); }
+  const cards = h('div', { class: 'hm-cards' });
+  const todoN = RX.todo ? RX.todo.counts.total : 0, lim = RX.hmAll ? 0 : 6;
+  cards.append(h('section', { class: 'hm-card hm-todo' }, h('div', { class: 'hm-h' }, h('h3', null, 'Next to do'), h('span', { class: 'hm-n' }, todoN), h('span', { class: 'grow' }),
+      RX.todo && todoN > 6 ? h('button', { class: 'linkbtn small', onclick: () => { RX.hmAll = !RX.hmAll; renderPage(true); } }, RX.hmAll ? 'Show fewer' : 'Show all') : null, h('button', { class: 'linkbtn small', onclick: () => openTab('tasks') }, 'Add feedback')),
+    rxTodoList(lim)));
+  const side = h('div', { class: 'hm-col' });
+  side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Deadlines'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Add')),
+    T && T.ahead.length ? T.ahead.slice(0, 5).map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(T.today)) / 864e5); return h('div', { class: 'hm-dl' }, h('span', { class: 'hm-dd' + (days <= 7 ? ' soon' : '') }, 'D-' + days), h('span', { class: 'grow' }, d.title), h('span', { class: 'muted small' }, dmon(d.date))); }) : h('div', { class: 'muted small' }, 'No deadlines yet.')));
+  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.entries.filter(e => e.day >= since).slice(0, 8);
+    side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Last 7 days'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Trail')),
+      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]), h('span', null, trunc(e.title, 70)))) : h('div', { class: 'muted small' }, 'Nothing in the last 7 days.'))); }
+  cards.append(side);
+  root.append(cards);
   if (!READONLY) root.append(sec('This week', 'digest', rxDigestBox()));
-  root.append(sec('Next to do' + (RX.todo ? ' (' + RX.todo.counts.total + ')' : ''), 'todo', rxTodoList(),
-    h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('button', { class: 'linkbtn', onclick: () => openTab('tasks') }, 'Add feedback, or see all tasks'))));
-  const T = RX.trail;
-  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.entries.filter(e => e.day >= since).slice(0, 12);
-    root.append(sec('Last 7 days', 'history', T.ahead.length ? h('div', { class: 'row-line' }, h('span', { class: 'rtag' }, '[ahead]'), h('span', null, T.ahead.slice(0, 3).map(d => dmon(d.date) + ' ' + d.title).join(' · '))) : null,
-      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]), h('span', null, trunc(e.title, 110)))) : h('div', { class: 'muted' }, 'Nothing in the last 7 days.'),
-      h('div', { class: 'row-line' }, h('span', { class: 'rtag' }), h('button', { class: 'linkbtn', onclick: () => openTab('history') }, 'Open the Trail')))); }
+  root.classList.add('wide');
   return root;
 }
 

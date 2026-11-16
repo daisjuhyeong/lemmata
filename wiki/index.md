@@ -36,6 +36,7 @@ last_reviewed: 2026-11-02
   - S23 Setup page (metrics, datasets, baselines → experiments → claims): [handoff note S23-01](sprints/S23/S23-01-handoff.md) · [screenshots](sprints/S23/screenshots/) — on `s23-experiment-setup` (stacked on S22), awaiting QA
   - S24 top-down evidence spine (benchmark → Lemmata; IBEL portal reference): [S24-01 task card and CTO handoff](sprints/S24/S24-01-cto-benchmark-to-lemmata.md) · [S24-01b portal addendum](sprints/S24/S24-01b-ibel-portal-reference.md) · [S24-02 build plan](sprints/S24/S24-02-build-plan.md) — proposed, design only, on `s24-topdown-evidence`
   - S24 step 1, top-down Experiments page (thesis header, link words, gap buckets): [handoff note S24-03](sprints/S24/S24-03-step1-handoff.md) · [screenshots](sprints/S24/screenshots/) — on `s24-topdown-evidence`, awaiting QA
+  - S24 steps 2-5 and 8 (rules, criteria, To-do, Trail with month view, IBEL-style shell and Home): [handoff note S24-04](sprints/S24/S24-04-steps2-5-8-handoff.md) — on `s24-topdown-evidence`, awaiting QA
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

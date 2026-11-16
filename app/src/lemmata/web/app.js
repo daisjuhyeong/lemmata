@@ -1952,7 +1952,7 @@ function restoreUI() {
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
     S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
-  if (!S.tabs.length) { S.tabs = [{ k: 'claims' }]; S.active = 0; }
+  if (!S.tabs.length) { S.tabs = [{ k: 'digest' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
 }
 function pruneTabs() {
@@ -2008,13 +2008,13 @@ function navGo(d) {
 
 /* ---------- shell DOM (S18): band, one column, footer ---------- */
 /* The four top-level pages. Every other page belongs to one of them (shown as active) and is reached from a link on that page or from the footer. */
-const NAV = [['claims', 'Claims'], ['experiments', 'Experiments'], ['setup', 'Setup'], ['digest', 'Digest'], ['review', 'Review']];
-const NAV_OF = { claims: 'claims', timeline: 'claims', notation: 'claims', graph: 'claims', item: 'claims', node: 'claims', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'digest', ask: 'digest', review: 'review', changes: 'review', checks: 'review' };
+const NAV = [['digest', 'Home'], ['experiments', 'Thesis'], ['setup', 'Setup'], ['review', 'Review'], ['history', 'Trail']];
+const NAV_OF = { claims: 'experiments', timeline: 'experiments', notation: 'experiments', graph: 'experiments', item: 'experiments', node: 'experiments', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'history', trail: 'history', ask: 'digest', review: 'review', changes: 'review', checks: 'review' };
 const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
   app.append(
-    h('header', { id: 'band' }, h('h1', { class: 'bt' }, PRODUCT), h('p', { class: 'bsub', id: 'bsub' }, ''), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
+    h('header', { id: 'band' }, h('h1', { class: 'bt' }, PRODUCT), h('p', { class: 'bsub', id: 'bsub' }, ''), h('button', { class: 'bsearch', id: 'bsearch', onclick: () => quickSwitcher() }, 'Search…'), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
     h('div', { id: 'banner', class: 'hidden', role: 'alert' }),
     h('div', { id: 'body' }, window.LEMMATA_EMBED ? null : h('aside', { id: 'side', 'aria-label': 'More pages' }), h('main', { id: 'page', tabindex: '-1' })),
     h('footer', { id: 'status' }),
@@ -2047,8 +2047,7 @@ function usedByText(nid) {
 /* S24 (founder, chat 2026-11-16 11:34 KST): the secondary pages (History, Graph, ...) sit in a left sidebar on the website,
    not at the bottom of the page. The five main tabs stay in the band. The VS Code tab and narrow windows keep them in the footer. */
 const SIDE = [
-  ['Look back', [['history', 'Trail'], ['timeline', 'Growth'], ['changes', 'Changes']]],
-  ['Explore', [['graph', 'Graph'], ['notation', 'Notation'], ['checks', 'Checks']]],
+  ['Explore', [['graph', 'Graph'], ['notation', 'Notation'], ['timeline', 'Growth'], ['checks', 'Checks'], ['changes', 'Changes']]],
   ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
 ];
 function renderLeft() {
@@ -2059,6 +2058,8 @@ function renderLeft() {
   const t = S.tabs[S.active], cur = t ? t.k : null;
   const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0 };
   const go = k => k === 'search' ? quickSwitcher() : openTab(k);
+  const top = NAV_OF[cur] || null;
+  side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' }, b) : null); })));
   SIDE.forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
     items.map(([k, label]) => h('button', { class: 'sd-i' + (k === cur ? ' on' : ''), 'aria-current': k === cur ? 'page' : null, onclick: () => go(k) },
       h('span', null, label), n[k] ? h('span', { class: 'sd-n' }, n[k]) : null)))));
@@ -2066,11 +2067,12 @@ function renderLeft() {
 }
 
 /* ---------- tab bar, page ---------- */
+function navBadge(k) { return k === 'digest' ? (RX.todo ? RX.todo.counts.total : RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0) : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0)
+    : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : 0; }
 function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;
   const t = S.tabs[S.active], cur = t ? NAV_OF[t.k] : null;
-  const badge = k => k === 'claims' ? ((RX.claims && RX.claims.counts && RX.claims.counts.stages) ? (RX.claims.counts.stages.testing + RX.claims.counts.stages.refuted) || 0 : 0)
-    : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0) : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : (RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0);
+  const badge = k => navBadge(k);
   NAV.forEach(([k, label]) => {
     const on = k === cur, n = badge(k);
     bar.append(h('button', { class: 'navtab' + (on ? ' on' : ''), role: 'tab', 'aria-selected': String(on), 'aria-label': label + (n ? ', ' + n + ' to look at' : ''), title: label, onclick: () => openTab(k) },
@@ -2083,7 +2085,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
