@@ -35,7 +35,8 @@ INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code 
                 "then alarms (what to re-check after changes) and findings (integrity problems with file:line evidence). "
                 "Paths are repo-relative; the paper repo is 'paper' and the code repo is 'code'. To help Lemmata understand a project (what the method "
                 "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map. "
-                "For experiments that were never committed, use runs.")
+                "For experiments that were never committed, use runs. To say what a block of work was for, read sessions and "
+                "propose one sentence with session_summary; the researcher confirms it.")
 
 E_PARSE, E_REQUEST, E_METHOD, E_PARAMS, E_INTERNAL = -32700, -32600, -32601, -32602, -32603
 
@@ -620,6 +621,30 @@ def t_trail(ctx, args):
     return head + "\n" + "\n".join(lines), d, "Filter with since / until (YYYY-MM-DD)."
 
 
+def t_sessions(ctx, args):
+    from .engine import sessions as sessionsmod
+    pid, eng = _project(ctx, args)
+    d = eng.trail(args.get("since") or None, args.get("until") or None)
+    ss = [x for x in d["sessions"] if not args.get("missing") or not x.get("note")]
+    n = max(1, min(int(args.get("limit") or 15), 60))
+    head = "%d work sessions, newest first (a session is activity with no gap over %d minutes). %d have no summary yet." % (len(ss), d["gap_minutes"], sum(1 for x in d["sessions"] if not x.get("note")))
+    return head + "\n" + "\n".join(sessionsmod.brief(x) for x in ss[:n]), {"sessions": ss[:n]}, "Filter with since / until (YYYY-MM-DD), missing=true for sessions without a summary."
+
+
+def t_session_summary(ctx, args):
+    pid, eng = _project(ctx, args)
+    sid, text = args.get("id"), args.get("text")
+    if not isinstance(sid, str) or not isinstance(text, str):
+        raise _Fail("Arguments 'id' (a session id from the sessions tool) and 'text' (one sentence) are required.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            eng.session_note(sid, text, None, by="agent")
+    else:
+        eng.session_note(sid, text, None, by="agent")
+    return "Draft summary saved for %s. It shows as a draft until the researcher confirms it." % sid, {"id": sid, "state": "proposed"}, "Nothing to narrow."
+
+
 def _run_line(r):
     nums = ", ".join("%s=%s" % (k, ("%.4g" % v)) for k, v in list(r["metrics"].items())[:6])
     bits = [(r.get("time") or "")[:16].replace("T", " "), r["state"].upper(), (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else ""),
@@ -923,6 +948,19 @@ TOOLS = [
     {"name": "trail", "fn": t_trail, "title": "Research trail",
      "description": "What was done and when: commits to the paper and code, claim stage changes, logged runs, feedback, map and plan decisions, plus deadlines ahead.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "since": {"type": "string", "description": "YYYY-MM-DD"}, "until": {"type": "string", "description": "YYYY-MM-DD"}}, ["project"]), "annotations": dict(_RO)},
+    {"name": "sessions", "fn": t_sessions, "title": "Work sessions",
+     "description": "The research trail grouped into work sessions: for each, when it was, who ran it (the researcher, a coding agent, the file "
+                    "watcher), where (server, folder, commit), what was run, which experiment and claim it belongs to, how (script, settings, "
+                    "arguments) and what came out. Read it before drafting a session summary.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "since": {"type": "string", "description": "YYYY-MM-DD"}, "until": {"type": "string", "description": "YYYY-MM-DD"},
+                             "missing": {"type": "boolean", "description": "Only sessions with no summary yet."}, "limit": {"type": "integer", "description": "How many (default 15, at most 60)."}}, ["project"]), "annotations": dict(_RO)},
+    {"name": "session_summary", "fn": t_session_summary, "title": "Draft a session summary",
+     "description": "Propose one sentence (at most 300 characters) saying what a work session was for, in the researcher's terms: the question "
+                    "or claim it served and what was done, not a list of commands. Use only what the session's facts and the commands show; "
+                    "if the purpose is unclear, say what was done and stop. It is shown as a draft; only the researcher confirms it, and a "
+                    "confirmed summary is never replaced.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "id": {"type": "string", "description": "The session id from the sessions tool."}, "text": {"type": "string", "description": "One sentence."}}, ["project", "id", "text"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "runs", "fn": t_runs, "title": "Runs outside GitHub",
      "description": "Runs logged from the researcher's editor terminal, results folder or a coding agent, newest first: the command, the commit "
                     "it ran on (and whether there were uncommitted changes), the numbers it wrote and which tracked result files it wrote. "

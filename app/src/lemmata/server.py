@@ -448,7 +448,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/todo", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
+        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -497,6 +497,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("set_plan")(txt("id", True), txt("state"), sp, txt("title")))
                 if r == "/todo":
                     return self._json(need("snooze_todo")(txt("key", True), txt("snooze_until")))
+                if r == "/session":
+                    return self._json(need("session_note")(txt("id", True), txt("text"), txt("action")))
                 if r == "/deadlines":
                     return self._json(need("set_deadline")(txt("date"), txt("title"), txt("target"), txt("remove"), txt("kind"), txt("venue")))
                 if r == "/venue":

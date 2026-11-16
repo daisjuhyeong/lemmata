@@ -5,6 +5,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from . import sessions as sessionsmod
 from .errors import BadRequest, NotFound
 
 SCHEMA = "lemmata.trail/1"
@@ -90,7 +91,7 @@ def ics(deadlines, name, now=None):
     return "\r\n".join(out) + "\r\n"
 
 
-def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, plans, deadlines, github, start=None, end=None, today=None, exps=None):
+def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, plans, deadlines, github, start=None, end=None, today=None, exps=None, repos=None, notes=None):
     """-> the Trail document: entries newest first, days, months (for the month grid), deadlines ahead."""
     out = []
 
@@ -115,6 +116,7 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
             "%d file%s in %s%s" % (len(files), "" if len(files) == 1 else "s", ev.get("repo"), (", %d result file%s" % (n_res, "" if n_res == 1 else "s")) if n_res else ""),
             {"view": "commit", "url": (gh.group(1) + "/commit/" + ev["rev"]) if gh else None},
             ref=ev.get("short"))
+        out[-1].update(repo=ev.get("repo"), author=ev.get("author"), coauthors=ev.get("coauthors") or [])
         if st.get("decision"):
             out[-1]["decision"] = True
         # the detail shown when the day is opened: the files by kind, and what the commit did to each experiment's result
@@ -145,6 +147,8 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
     for r in (runs or {}).get("runs") or []:
         t = r.get("ended") or r.get("started")
         add(t, "runs", (r.get("command") or "run")[:120], "on %s%s" % (r.get("host") or "?", "" if r.get("exit_code") in (0, None) else ", exit %s" % r.get("exit_code")), {"view": "runs", "id": r.get("run_id")})
+        if isinstance(t, str) and len(t) >= 10:
+            out[-1]["_run"] = r
     for b in (tasks or {}).get("batches") or []:
         n = sum(1 for t in (tasks.get("tasks") or []) if t.get("batch") == b["id"])
         add(b.get("created"), "feedback", "Feedback: %s" % (b.get("source") or "Feedback"), "%d task%s" % (n, "" if n == 1 else "s"), {"view": "tasks"})
@@ -160,6 +164,9 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
     for p in (plans or {}).get("plans") or [] if isinstance(plans, dict) else []:
         add(p.get("at"), "decisions", "Planned: %s" % str(p.get("title") or "an experiment")[:100], None, {"view": "experiments"})
 
+    sess = sessionsmod.build(out, exps or [], repos or [], notes)
+    for e in out:
+        e.pop("_run", None)
     out.sort(key=lambda e: e["t"], reverse=True)
     counts = {k: sum(1 for e in out if e["kind"] == k) for k in KINDS}
     days = {}
@@ -170,7 +177,8 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
         out = [e for e in out if e["day"] >= start]
     if end:
         out = [e for e in out if e["day"] <= end]
+    sess = [x for x in sess if (not start or x["day"] >= start) and (not end or x["day"] <= end)]
     dl = sorted(deadlines or [], key=lambda d: d["date"])
-    return {"schema": SCHEMA, "entries": out[:1500], "days": days, "counts": counts, "kinds": list(KINDS),
+    return {"schema": SCHEMA, "entries": out[:1500], "sessions": sess[:600], "gap_minutes": sessionsmod.GAP // 60, "days": days, "counts": counts, "kinds": list(KINDS),
             "deadlines": dl, "ahead": [d for d in dl if not today or d["date"] >= today], "today": today,
             "first": min(days) if days else None, "last": max(days) if days else None}

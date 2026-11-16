@@ -1,6 +1,8 @@
 """Project map (S12): brief, proposal, rule checks, confirmation, and map-driven tracking. Standard library only."""
 import json
 import os
+
+import pytest
 import shutil
 import subprocess
 import sys
@@ -719,3 +721,85 @@ class MapTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_sessions_and_summaries(tmp_path):
+    """S26: a day's records become work sessions that say who, where, what, why, how and with what result; summaries are drafted by an agent and confirmed by the researcher."""
+    import datetime
+    from lemmata.engine import sessions as S
+    from lemmata.engine.errors import BadRequest, NotFound
+    # reading one command line, by rules
+    r = S.read_command("cd /w/code && DATA_ROOT=/d python scripts/run_main.py --dataset Covtype --seed=3 lr=0.1 --fast")
+    assert (r["type"], r["script"], r["cd"], r["env"]) == ("script", "scripts/run_main.py", "/w/code", {"DATA_ROOT": "/d"})
+    assert r["args"] == {"dataset": "Covtype", "seed": "3", "lr": "0.1", "fast": True}
+    assert S.read_command("python - <<'EOF'\nprint(1)\nEOF")["type"] == "analysis" and S.read_command("python3 -c 'print(1)'")["type"] == "analysis"
+    for c in ("pgrep -af train", "ls -la results | head", "git status", "nvidia-smi", "cd x && cat log.txt"):
+        assert S.read_command(c)["type"] == "inspection", c
+    assert S.read_command("pip install torch")["type"] == "setup" and S.read_command("git commit -m x")["type"] == "git" and S.read_command("latexmk -pdf main.tex")["type"] == "writing"
+    assert S.read_command("uv run python -m pkg.train --seed 1")["script"] == "pkg.train" and S.read_command("nohup bash run_all.sh")["script"] == "run_all.sh"
+    rx, fixed = S.matcher("results/main/{dataset},y_{method}_seed{seed}.csv")
+    assert fixed == "results/main" and rx.search("/abs/code/results/main/Covtype,y_MCD_seed3.csv").groupdict() == {"dataset": "Covtype", "method": "MCD", "seed": "3"}
+    assert S.matcher("results/ablation_*.csv")[0].search("results/ablation_a.csv") and not S.matcher("results/ablation_*.csv")[0].search("results/x/ablation_a.csv")
+
+    root = str(tmp_path / "p"); os.makedirs(root); make_project(root)
+    e = Engine(root); e.scan(); e.propose_map(agent); e.confirm_map()
+    code = os.path.join(root, "code")
+    base = datetime.datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0) - datetime.timedelta(days=1)
+    at = lambda m: (base + datetime.timedelta(minutes=m)).isoformat()
+    runs = [
+        dict(run_id="run-001", source="terminal", command="cd %s && python scripts/run_main.py --dataset Covtype --method MCD --seed 3" % code, cwd=code, host="srv", git_sha="a" * 40, dirty=True,
+             artifacts=[{"path": "results/main/Covtype,y_MCD_seed3.csv"}], metrics={"fp": 0.12}, started=at(0), ended=at(6), exit_code=0),
+        dict(run_id="run-002", source="terminal", command="python scripts/run_main.py --dataset Weather --method MCD --seed 3", cwd=code, host="srv", started=at(7), ended=at(8), exit_code=1),
+        dict(run_id="run-003", source="terminal", command="pgrep -af run_main", cwd=code, host="srv", started=at(9), ended=at(9), exit_code=1),
+        dict(run_id="run-004", source="terminal", command="python - <<'EOF'\nimport pandas\nEOF", cwd="/tmp/claude-1011/x/scratchpad", host="srv", started=at(20), ended=at(20), exit_code=0),
+        dict(run_id="run-005", source="terminal", command="python scripts/plot.py", cwd=code + "_rq2", host="srv", artifacts=[{"path": "figs/a.png"}], started=at(60), ended=at(61), exit_code=0),
+        dict(run_id="run-006", source="terminal", command="nvidia-smi", cwd=code, host="srv", started=at(200), ended=at(200), exit_code=0),
+    ]
+    e.add_runs(runs, "test")
+    T = e.trail()
+    day = base.isoformat()[:10]
+    ss = [s for s in T["sessions"] if s["day"] == day]
+    assert T["gap_minutes"] == 60 and len(ss) == 2                       # 61 minutes of activity with gaps under an hour, then one command 139 minutes later
+    late, s = ss
+    assert late["rule_title"].startswith("Looked around") and late["hidden_n"] == 1 and not late["why"]["known"]
+    assert s["start"][11:16] == "12:00" and s["end"][11:16] == "13:01" and s["minutes"] == 61 and s["commands_n"] == 5
+    assert s["who"] == [{"who": "you", "n": 4}, {"who": "agent", "n": 1}]   # a command run from the agent's scratch folder is the agent's
+    assert s["where"]["hosts"] == ["srv"] and s["where"]["dirty"] and s["where"]["scratch"] == 1
+    assert [p["name"] for p in s["where"]["places"]] == ["code", "code_rq2 (a second copy of code)"]   # a worktree counts as the same project
+    assert s["rule_title"].startswith("Ran Main comparison") and "C1" in s["why"]["claims"] and s["why"]["known"]
+    x = next(x for x in s["experiments"] if x["id"] == "map:main")
+    assert x["how"] == "wrote" and x["fields"] == {"dataset": ["Covtype"], "method": ["MCD"], "seed": ["3"]}
+    assert s["how"]["scripts"][0] == {"name": "scripts/run_main.py", "n": 2, "failed": 1} and {"key": "dataset", "values": ["Covtype", "Weather"]} in s["how"]["args"]
+    assert s["result"]["failed"] == 1 and s["result"]["metrics"] == [{"key": "fp", "value": 0.12}] and s["result"]["files"][0]["tracked"]   # a failed inspection is not a failure
+    assert s["counts"] == {"run": 1, "script": 2, "analysis": 1, "inspection": 1} and [c["hidden"] for c in s["commands"]].count(True) == 1
+    assert any("2 runs of scripts/run_main.py, 1 failed" == w for w in s["what"])
+    assert all("_run" not in en for en in T["entries"])
+    # a commit-only session keeps the commit message as its title and names who committed
+    old = next(z for z in T["sessions"] if z["commits"] and not z["commands_n"])
+    assert old["authors"] == ["j"] and old["title"] in [en["title"] for en in old["entries"] if en["kind"] in ("paper", "code")]
+
+    # summaries: the agent drafts, the researcher confirms; a confirmed one is never replaced by a draft
+    with pytest.raises(NotFound):
+        e.session_note("nope", "x")
+    with pytest.raises(BadRequest):
+        e.session_note(s["id"], " ", None, by="agent")
+    T = e.session_note(s["id"], "Third seed for the main comparison (RQ1).", None, by="agent")
+    s2 = next(z for z in T["sessions"] if z["id"] == s["id"])
+    assert s2["title"] == "Third seed for the main comparison (RQ1)." and s2["note"]["state"] == "proposed" and s2["rule_title"] == s["rule_title"]
+    with pytest.raises(BadRequest):
+        e.session_note(s["id"], None, "confirm", by="agent")
+    T = e.session_note(s["id"], None, "confirm")
+    assert next(z for z in T["sessions"] if z["id"] == s["id"])["note"]["state"] == "confirmed"
+    with pytest.raises(BadRequest):
+        e.session_note(s["id"], "Another draft.", None, by="agent")
+    T = e.session_note(s["id"], "My own words.")
+    assert next(z for z in T["sessions"] if z["id"] == s["id"])["note"]["by"] == "you"
+    T = e.session_note(s["id"], None, "remove")
+    assert next(z for z in T["sessions"] if z["id"] == s["id"])["note"] is None
+    assert "who:" in S.brief(s) and "why:" in S.brief(s)
+
+    # Setup: each experiment says where, how, when and who
+    c = next(x for x in e.setup()["experiments"] if x["id"] == "map:main")["context"]
+    assert c["where"]["folder"] == "results/main" and c["where"]["hosts"] == ["srv"] and c["how"]["scripts"] == ["scripts/run_main.py"]
+    assert c["who"]["runs"] == 2 and c["who"]["by"] == [{"who": "you", "n": 2}] and c["when"]["first"] and c["when"]["last"]
+    assert c["runs"][-1]["fields"]["method"] == ["MCD"] and c["runs"][-1]["dirty"] is True

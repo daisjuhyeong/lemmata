@@ -1057,7 +1057,7 @@ function pageDigest() {      // Home (S24 step 8): one research as a whole. The 
   const root = doc(h('h1', { class: 'ptitle' }, S.project ? S.project.name : 'Home'));
   const E = RX.experiments, T = RX.trail;
   if (E && E.thesis) { const th = rxThesisHead(E); th.classList.add('home'); th.querySelector('.rx-th-k .linkbtn').replaceWith(h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the thesis')); root.append(th); }
-  if (T) { const ym = RX.trMonth || (RX.trDay || T.today).slice(0, 7); root.append(h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day to see what was done: which experiment moved, for which claim, and the files.'))); }
+  if (T) { const ym = RX.trMonth || (RX.trDay || T.today).slice(0, 7); root.append(h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day to see its work sessions: what was done, why, by whom, where, how and with what result.'))); }
   const cards = h('div', { class: 'hm-cards' });
   const todoN = RX.todo ? RX.todo.counts.total : 0, lim = RX.hmAll ? 0 : 6;
   cards.append(h('section', { class: 'hm-card hm-todo' }, h('div', { class: 'hm-h' }, h('h3', null, 'Next to do'), h('span', { class: 'hm-n' }, todoN), h('span', { class: 'grow' }),
@@ -1066,9 +1066,10 @@ function pageDigest() {      // Home (S24 step 8): one research as a whole. The 
   const side = h('div', { class: 'hm-col' });
   side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Deadlines'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Add')),
     T && T.ahead.length ? T.ahead.slice(0, 5).map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(T.today)) / 864e5); return h('div', { class: 'hm-dl' }, h('span', { class: 'hm-dd' + (days <= 7 ? ' soon' : '') }, 'D-' + days), h('span', { class: 'grow' }, d.title), h('span', { class: 'muted small' }, dmon(d.date))); }) : h('div', { class: 'muted small' }, 'No deadlines yet.')));
-  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.entries.filter(e => e.day >= since).slice(0, 8);
+  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.sessions ? T.sessions.filter(x => x.day >= since).slice(0, 8).map(x => ({ day: x.day, kind: x.kinds.includes('runs') ? 'runs' : x.kinds[0], title: x.title, _s: x })) : T.entries.filter(e => e.day >= since).slice(0, 8);
     side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Last 7 days'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Trail')),
-      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]), h('span', null, trunc(e.title, 70)))) : h('div', { class: 'muted small' }, 'Nothing in the last 7 days.'))); }
+      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), e._s ? null : h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]),
+        e._s ? h('button', { class: 'ilink', title: 'Open this day', onclick: () => { RX.trDay = e.day; RX.trMonth = e.day.slice(0, 7); renderPage(true); } }, trunc(e.title, 64)) : h('span', null, trunc(e.title, 70)), e._s && e._s.why.claims.length ? h('span', { class: 'tag' }, e._s.why.claims.join(', ')) : null)) : h('div', { class: 'muted small' }, 'Nothing in the last 7 days.'))); }
   cards.append(side);
   root.append(cards);
   if (!READONLY) root.append(sec('This week', 'digest', rxDigestBox()));
@@ -1322,31 +1323,58 @@ function suTracePanel(x, method, col) {
   // 1 paper
   let pc = null; (d.cells || []).forEach(r => r.forEach(c => { if (c.row && nm(c.row) === nm(method) && nm(c.col) === nm(ds)) pc = c; }));
   const file = (x.grid.rows.find(r => r.label === method) || { values: {} }).values[col];
-  box.append(step(1, 'In the paper', !!pc, pc ? [h('span', { class: 'mono' }, pc.text), h('span', { class: 'muted small' }, ' in ' + (Array.isArray(d.paper) && d.paper[0] ? d.paper[0].name : d.name) + ' · '), d.loc ? rxWhere(d.loc, d.map ? 'paper' : (d.repo || 'paper')) : null,
+  box.append(step(1, 'What the paper says', !!pc, pc ? [h('span', { class: 'mono' }, pc.text), h('span', { class: 'muted small' }, ' in ' + (Array.isArray(d.paper) && d.paper[0] ? d.paper[0].name : d.name) + ' · '), d.loc ? rxWhere(d.loc, d.map ? 'paper' : (d.repo || 'paper')) : null,
       h('span', { class: 'tag' + (pc.status === 'match' || pc.status === 'rounding' ? '' : ' warn') }, pc.status === 'match' ? 'matches the file' : pc.status === 'rounding' ? 'matches after rounding' : pc.status === 'differs' ? 'differs: the file gives ' + rxFmt(pc.file) : pc.status || '')]
     : h('span', { class: 'muted small' }, Array.isArray(d.paper) && d.paper.length ? 'This cell is not in ' + d.paper[0].name + '.' : 'No paper table is linked to this experiment.')));
   // 2 result files
   const fs = ((d.design || {}).files || []).concat(!((d.design || {}).files || []).length && d.result ? [{ node_id: d.result.node_id, path: d.result.path }] : []), mine = fs.filter(f => f.fields && nm(f.fields.method) === nm(method) && nm(f.fields.dataset) === nm(ds)), shown = mine.length ? mine : fs.filter(f => !f.fields || (!f.fields.method && !f.fields.dataset)).slice(0, 6);
-  box.append(step(2, 'Result files' + (file != null ? ' → ' + rxFmt(file) : ''), shown.length > 0, shown.length ? shown.slice(0, 8).map(f => h('div', { class: 'su-f' }, h('button', { class: 'linkbtn mono small', title: 'Open this file', onclick: () => (EMBED && d.repo ? EMBED.openFile(d.repo, f.path, 1) : openTab('node', f.node_id)) }, f.path),
+  box.append(step(2, 'Where it comes from: result files' + (file != null ? ' → ' + rxFmt(file) : ''), shown.length > 0, shown.length ? shown.slice(0, 8).map(f => h('div', { class: 'su-f' }, h('button', { class: 'linkbtn mono small', title: 'Open this file', onclick: () => (EMBED && d.repo ? EMBED.openFile(d.repo, f.path, 1) : openTab('node', f.node_id)) }, f.path),
       f.fields && f.fields.seed ? h('span', { class: 'muted small' }, ' seed ' + f.fields.seed) : null)).concat(mine.length ? [h('div', { class: 'muted small' }, plural(mine.length, 'file') + ' averaged into this number.')] : [h('div', { class: 'muted small' }, 'The method and dataset are columns inside these files.')])
     : h('span', { class: 'muted small' }, 'No result file for this cell.')));
   // 3 scripts and settings
   const sc = ((d.design || {}).scripts || []).concat((d.design || {}).settings || [], ((d.design || {}).runs || []).filter(r => r.command).map(r => ({ node_id: r.node_id, name: r.command }))), vals = ((d.design || {}).values || []);
-  box.append(step(3, 'Script and settings', sc.length > 0, sc.length ? [h('div', null, sc.slice(0, 6).map(n => h('button', { class: 'linkbtn mono small su-fl', onclick: () => openTab('node', n.node_id) }, n.name))),
+  box.append(step(3, 'How: script and settings', sc.length > 0, sc.length ? [h('div', null, sc.slice(0, 6).map(n => h('button', { class: 'linkbtn mono small su-fl', onclick: () => openTab('node', n.node_id) }, n.name))),
       vals.length ? h('div', { class: 'su-vals' }, vals.slice(0, 10).map(v => h('span', { class: 'mono small' }, v.key + ' = ' + v.value))) : null] : h('span', { class: 'muted small' }, 'Lemmata found no script or settings file that writes these results.')));
-  // 4 when
+  // 4 who ran it: the logged runs of this experiment, the ones for this method and dataset first
+  const rs = ((x.context || {}).runs || []), hit = r => { const f = r.fields || {}; return (f.method || []).some(v => nm(v) === nm(method)) && (!(f.dataset || []).length || f.dataset.some(v => nm(v) === nm(ds))); };
+  const mineR = rs.filter(hit), showR = (mineR.length ? mineR : rs).slice(0, 3);
+  box.append(step(4, 'Who ran it' + (mineR.length ? '' : showR.length ? ' (runs of this experiment; none names this cell)' : ''), showR.length > 0, showR.length ? showR.map(r => h('div', { class: 'su-f' }, h('span', null, (r.who === 'you' ? 'You' : r.who === 'agent' ? 'Coding agent' : 'File watcher') + (r.host ? ' on ' + r.host : '') + ', ' + dmon(r.t) + ' ' + String(r.t).slice(11, 16)),
+      r.sha ? h('span', { class: 'mono muted small' }, ' ' + r.sha + (r.dirty ? ' + uncommitted changes' : '')) : null, r.exit ? h('span', { class: 'tag warn' }, 'exit ' + r.exit) : null, r.command ? h('div', { class: 'mono small muted', title: r.command }, '$ ' + trunc(r.command.replace(/\s*\n\s*/g, ' ⏎ '), 150)) : null))
+    : h('span', { class: 'muted small' }, 'No logged run wrote these files. Runs are logged from the VS Code terminal, the results watcher or your coding agent.')));
+  // 5 when
   const hs = d.history || [], last = hs[hs.length - 1];
-  box.append(step(4, 'Last written', !!last, last ? [h('span', null, dmon(last.time)), h('span', { class: 'mono muted small' }, ' ' + (last.short || '')), h('span', { class: 'muted small' }, ' “' + trunc(last.subject || '', 60) + '”'),
+  box.append(step(5, 'When: last written', !!last, last ? [h('span', null, dmon(last.time)), h('span', { class: 'mono muted small' }, ' ' + (last.short || '')), h('span', { class: 'muted small' }, ' “' + trunc(last.subject || '', 60) + '”'),
       (last.changes || []).length ? h('div', { class: 'muted small' }, 'Changed with it: ' + last.changes.flatMap(c => c.files || []).slice(0, 4).join(', ')) : null,
       d.stale ? h('div', { class: 'rx-warn' }, '! The code or settings changed after this.') : null] : h('span', { class: 'muted small' }, 'No commit history for these files.')));
   box.append(h('div', { class: 'su-tr-f' }, h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open the experiment'), rxVsLink('x:' + x.id)));
   return box;
+}
+function suContext(x, claim) {   // S26: why, what, where, how, when, who on one strip above the protocol
+  const C = x.context, P = x.protocol; if (!C) return null;
+  const cell = (k, v, miss) => h('div', { class: 'su-cx-c' + (miss ? ' miss' : '') }, h('span', { class: 'su-cx-k' }, k), h('div', { class: 'su-cx-v' }, v));
+  const base = P && !P.search ? P.methods.filter(m => m.role !== 'ours').length : 0;
+  const what = !P ? 'Result files that could not be read as a table.' : P.search ? 'A search over ' + plural(P.settings_n, 'setting') + ', judged by ' + P.metric + '.'
+    : (P.ours || 'Ours') + ' against ' + plural(base, 'other method') + (P.datasets.length ? ' on ' + plural(P.datasets.length, 'dataset') : '') + ', judged by ' + P.metric + (P.target != null ? '' : P.lower ? ' (lower is better)' : ' (higher is better)') + '.';
+  const W = C.where, H = C.how, T = C.when, O = C.who;
+  const howBits = H.scripts.concat(H.code.filter(c => !H.scripts.some(sc => sc.endsWith(c)))), noHow = !howBits.length && !H.settings.length;
+  const who = O.by.map(w => (w.who === 'you' ? 'you' : w.who === 'agent' ? 'coding agent' : 'file watcher') + ' ×' + w.n);
+  return h('div', { class: 'su-cx' },
+    cell('Why', claim ? [h('button', { class: 'ilink', onclick: () => suGotoClaim(claim.id) }, claim.label), h('span', { class: 'muted' }, ' ' + trunc(claim.text, 90))] : h('span', null, 'It tests no claim yet.'), !claim),
+    cell('What', what),
+    cell('Where', [W.hosts.length ? h('span', null, W.hosts.join(', ') + ' · ') : null, h('span', { class: 'mono small' }, (W.repo ? W.repo + ': ' : '') + (W.folder ? W.folder + '/' : '(top folder)')), h('span', { class: 'muted small' }, ' ' + plural(W.files_n || 0, 'file')),
+      W.hosts.length ? null : h('div', { class: 'muted small' }, 'No logged run, so the server is unknown.')]),
+    cell('How', noHow ? h('span', null, 'No script or settings file is linked to these results.') : [howBits.map(n => h('span', { class: 'mono small ss-kv' }, n)), H.settings.map(n => h('span', { class: 'mono small ss-kv' }, n)),
+      H.command ? h('div', { class: 'mono small muted su-cx-cmd', title: H.command }, '$ ' + trunc(H.command.replace(/\s*\n\s*/g, ' ⏎ '), 110)) : null], noHow),
+    cell('When', T.last ? [h('span', null, T.first && T.first.slice(0, 10) !== T.last.slice(0, 10) ? dmon(T.first) + ' → ' + dmon(T.last) : dmon(T.last)), h('span', { class: 'muted small' }, ' · results changed ' + (T.updates === 1 ? 'once' : (T.updates || 0) + ' times')),
+      T.stale ? h('div', { class: 'rx-warn' }, '! Code or settings changed after the last result.') : null] : h('span', null, 'No dated result yet.'), !T.last),
+    cell('Who', O.runs ? who.join(', ') + ' (' + plural(O.runs, 'logged run') + ')' : [h('span', null, 'No logged run.'), O.commit ? h('span', { class: 'muted small' }, ' Results came in with commit ' + O.commit + '.') : null], !O.runs));
 }
 function suSheet(x, claim, D, hl) {
   const P = x.protocol, link = claim && claim.links[x.id];
   const card = h('section', { class: 'su-sh' + (x.attention ? ' att' : '') });
   card.append(h('div', { class: 'su-sh-h' }, link ? rxLinkChip(Object.assign({ criterion_by: '' }, link)) : null, SU_XTYPE[x.type] ? h('span', { class: 'tag' }, SU_XTYPE[x.type]) : null, h('b', null, x.name), h('span', { class: 'grow' }),
     P && P.last ? h('span', { class: 'muted small' }, 'last result ' + dmon(P.last)) : null, h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, 'Open')));
+  card.append(suContext(x, claim));
   if (!P) return card.append(h('p', { class: 'muted small' }, 'Its result files could not be read as a table, so there is no protocol to show.')), card;
   const itemBtn = (kind, name, extra) => { const id = kind + ':' + name.toLowerCase().replace(/[^a-z0-9]/g, ''); const it = D.items.find(i => i.id === id);
     return h('button', { class: 'su-pi k-' + kind + (hl === id ? ' on' : '') + (it && it.checks.length ? ' chk' : ''), title: it ? 'Where the paper and the code name it' : null, onclick: () => { RX.suSel = RX.suSel === 'i:' + id ? null : 'i:' + id; renderPage(true); } }, name, extra && extra !== String(name).toLowerCase() ? h('span', { class: 'muted' }, ' ' + extra) : null); };
@@ -1368,7 +1396,7 @@ function suSheet(x, claim, D, hl) {
             h('button', { class: 'su-cb', title: v == null ? 'No result: ' + r.label + ' on ' + G.datasets[i] : 'Trace this number', 'aria-pressed': String(!!on), onclick: () => { RX.suCell = on ? null : { x: x.id, m: r.label, c }; if (!on) suLoadTrace(x.id); renderPage(true); } },
               v == null ? '—' : h('span', { class: 'mono' }, rxFmt(v)), v != null && r.n[c] ? h('span', { class: 'su-cn' }, '×' + r.n[c]) : null)); })))))));
     if (sel) card.append(suTracePanel(x, sel.m, sel.c));
-    else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it: paper → result files → script and settings → commit. ×n is the number of runs; bold is the best in its column.'));
+    else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it: what the paper says → where it comes from → how → who ran it → when. ×n is the number of runs; bold is the best in its column.'));
   }
   card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check. ' + c.why : c.why)); })));
   return card;
@@ -1517,25 +1545,89 @@ function trCalLink() {
         : base ? h('button', { class: 'btn sm', onclick: () => act('create') }, 'Make a subscription link') : h('span', { class: 'muted small' }, 'A subscription link needs the hub.')),
     url ? h('p', { class: 'muted small' }, 'In Google Calendar: Other calendars → + → From URL, and paste the link. It then updates by itself (Google re-reads it every few hours). Anyone with the link can read these dates.' + (isPrivate ? ' This address is private to your devices, so Google cannot reach it: open Lemmata at its public address and copy the link from there.' : '')) : null);
 }
+/* S26: a day is shown as work sessions. One card answers what, why, who, where, how, when and with what result;
+   the raw commands sit behind a switch, inspection commands hidden (founder, chat 2026-11-16 14:10 KST). */
+const SS_WHO = { you: 'You, in the terminal', agent: 'Coding agent', watcher: 'File watcher' };
+const SS_TYPE = { run: 'run', script: 'script', analysis: 'analysis', inspection: 'look', setup: 'set-up', git: 'git', writing: 'paper', other: 'other' };
+RX.ssOpen = RX.ssOpen || {}; RX.ssInsp = RX.ssInsp || {}; RX.ssCard = RX.ssCard || {};
+function ssTime(s) { const a = s.start.slice(11, 16), b = s.end.slice(11, 16); return a === b ? a : a + '–' + b; }
+function ssDur(m) { return m < 1 ? null : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : ''); }
+function ssWho(s) { return s.who.map(w => SS_WHO[w.who] + ' (' + plural(w.n, 'command') + ')').concat(s.authors.map(a => 'commit by ' + a)); }
+async function ssNote(body) { const r = await rxPost('/api/session', body); if (r) { RX.trail = r; RX.ssEdit = null; renderPage(true); } }
+function ssNoteBox(s) {
+  if (READONLY) return s.note && s.note.state === 'proposed' ? h('div', { class: 'ss-note' }, h('span', { class: 'tag warn' }, 'draft summary, not confirmed')) : null;
+  if (RX.ssEdit === s.id) {
+    const inp = h('input', { type: 'text', maxlength: 300, value: s.note ? s.note.text : '', placeholder: 'One sentence: what was this session for?', 'aria-label': 'Session summary' });
+    const save = () => { if (inp.value.trim()) ssNote({ id: s.id, text: inp.value.trim() }); };
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') { RX.ssEdit = null; renderPage(true); } });
+    setTimeout(() => inp.focus(), 0);
+    return h('div', { class: 'ss-note edit' }, inp, h('button', { class: 'btn sm', onclick: save }, 'Save'), h('button', { class: 'linkbtn small', onclick: () => { RX.ssEdit = null; renderPage(true); } }, 'Cancel'));
+  }
+  const edit = label => h('button', { class: 'linkbtn small', onclick: () => { RX.ssEdit = s.id; renderPage(true); } }, label);
+  if (!s.note) return h('div', { class: 'ss-note' }, h('span', { class: 'muted small' }, 'Title made by rules. '), edit('Write a summary'), h('span', { class: 'muted small' }, ' or ask your coding agent to draft one (Lemmata tool: session_summary).'));
+  if (s.note.state === 'proposed') return h('div', { class: 'ss-note' }, h('span', { class: 'tag warn' }, 'draft by your agent'), h('button', { class: 'btn sm', onclick: () => ssNote({ id: s.id, action: 'confirm' }) }, 'Confirm'), edit('Edit'),
+    h('button', { class: 'linkbtn small', onclick: () => ssNote({ id: s.id, action: 'remove' }) }, 'Discard'), h('span', { class: 'muted small' }, 'By rules: ' + s.rule_title));
+  return h('div', { class: 'ss-note' }, h('span', { class: 'muted small' }, 'Summary ' + (s.note.by === 'agent' ? 'drafted by your agent, confirmed by you. ' : 'written by you. ')), edit('Edit'), h('button', { class: 'linkbtn small', onclick: () => ssNote({ id: s.id, action: 'remove' }) }, 'Remove'));
+}
+function ssMoved(r) {
+  const moved = r.before != null && r.before !== r.after, better = moved && (r.lower ? r.after < r.before : r.after > r.before), ahead = r.best_other != null && (r.lower ? r.after <= r.best_other : r.after >= r.best_other);
+  return h('div', { class: 'tr-res' }, h('button', { class: 'ilink', onclick: () => rxOpenExp(r.x) }, r.name), r.claims.length ? h('span', { class: 'tag' }, 'tests ' + r.claims.join(', ')) : h('span', { class: 'tag warn' }, 'no claim'),
+    h('span', { class: 'mono' }, (r.before != null ? rxFmt(r.before) + ' → ' : 'first result ') + rxFmt(r.after)), moved ? h('span', { class: better ? 'good' : 'bad' }, better ? 'better' : 'worse') : r.before != null ? h('span', { class: 'muted' }, 'unchanged') : null,
+    r.best_other != null ? h('span', { class: 'muted small' }, 'best other ' + rxFmt(r.best_other) + (ahead ? ' · ours ahead' : ' · ours behind')) : null, r.metric ? h('span', { class: 'muted small' }, 'on ' + r.metric + (r.lower ? ' ↓' : ' ↑')) : null);
+}
+function ssCard(s) {
+  const row = (k, v) => v == null || (Array.isArray(v) && !v.flat(3).filter(Boolean).length) ? null : h('div', { class: 'ss-r' }, h('span', { class: 'ss-k' }, k), h('div', { class: 'ss-v' }, v));
+  const W = s.where, H = s.how, R = s.result, dur = ssDur(s.minutes);
+  const card = h('article', { class: 'ss' + (s.note && s.note.state === 'proposed' ? ' draft' : '') + (R.failed ? ' bad' : ''), id: 'ss-' + s.id });
+  card.append(h('div', { class: 'ss-h' }, h('span', { class: 'ss-t mono' }, ssTime(s)), dur ? h('span', { class: 'muted small' }, dur) : null, h('b', { class: 'ss-title' }, s.title)), ssNoteBox(s));
+  const why = [s.why.known ? null : h('span', { class: 'tag warn' }, 'unknown'), h('span', { class: s.why.known ? null : 'muted' }, s.why.text),
+    s.experiments.map(x => h('button', { class: 'ilink ss-x', title: x.how === 'wrote' ? 'It wrote result files of this experiment' : x.how === 'names' ? 'Its command names this experiment’s result folder' : x.how === 'reads' ? 'It read this experiment’s results' : 'A commit changed this experiment’s results', onclick: () => rxOpenExp(x.id) }, x.name))];
+  const where = [W.hosts.length ? h('span', null, W.hosts.join(', ')) : null, W.places.map(p => h('span', { class: 'mono small' }, p.name)), W.shas.length ? h('span', { class: 'muted small' }, 'at commit ' + W.shas.join(', ') + (W.dirty ? ' with uncommitted changes' : '')) : null,
+    W.scratch ? h('span', { class: 'muted small' }, plural(W.scratch, 'command') + ' from the agent’s scratch folder') : null];
+  const how = [H.scripts.map(x => h('span', { class: 'mono small' }, x.name + (x.n > 1 ? ' ×' + x.n : ''))), H.configs.length ? h('span', { class: 'muted small' }, 'settings file: ' + H.configs.join(', ')) : null,
+    H.env.map(v => h('span', { class: 'mono small ss-kv' }, v.key + '=' + trunc(v.value, 40))), H.args.map(a => h('span', { class: 'mono small ss-kv' }, a.key + ': ' + a.values.join(', ')))];
+  const res = [R.moved.map(ssMoved), R.metrics.length ? h('div', null, R.metrics.map(m => h('span', { class: 'mono small ss-kv' }, m.key + ' = ' + rxFmt(m.value)))) : null,
+    R.files.map(f => h('div', { class: 'tr-files' }, h('span', { class: 'tag' + (f.tracked ? '' : ' muted') }, f.n + (f.tracked ? ' result' : '') + (f.n === 1 ? ' file' : ' files')), h('span', { class: 'mono small muted' }, f.dir + '/  ' + f.names.join('  ') + (f.n > f.names.length ? '  …' : '')))),
+    R.notes.map(n => h('div', { class: /failed|uncommitted/.test(n) ? 'rx-warn' : 'muted small' }, n))];
+  card.append(h('div', { class: 'ss-b' },
+    row('What', h('ul', { class: 'ss-ul' }, s.what.map(w => h('li', null, w)))),
+    row('Why', why), row('Who', ssWho(s).length ? ssWho(s).join(' · ') : null), row('Where', where), row('How', how),
+    row('Result', res.flat().filter(Boolean).length ? res : h('span', { class: 'muted small' }, 'Nothing was written or changed.'))));
+  const open = RX.ssOpen[s.id], insp = RX.ssInsp[s.id], nrec = s.commands_n + s.entries.length;
+  if (nrec) {
+    const label = [s.commands_n ? plural(s.commands_n, 'command') : null, s.commits ? plural(s.commits, 'commit') : null, s.entries.length - s.commits > 0 ? plural(s.entries.length - s.commits, 'other record') : null].filter(Boolean).join(', ');
+    card.append(h('button', { class: 'linkbtn small ss-more', 'aria-expanded': String(!!open), onclick: () => { RX.ssOpen[s.id] = !open; renderPage(true); } }, (open ? 'Hide the records' : 'Show the records') + ' (' + label + ') ' + (open ? '▾' : '▸')));
+    if (open) {
+      const box = h('div', { class: 'ss-rec' });
+      s.entries.forEach(e => { box.append(trEntry(e)); const d = e.detail; if (d) Object.keys(d.files || {}).forEach(k => box.append(h('div', { class: 'tr-files tr-dd' }, h('span', { class: 'tag' }, k + ' · ' + d.files_n[k]), h('span', { class: 'mono small muted' }, d.files[k].join('  ') + (d.files_n[k] > d.files[k].length ? '  …' : ''))))); });
+      s.commands.filter(c => insp || !c.hidden).forEach(c => box.append(h('div', { class: 'ss-c' + (c.exit ? ' bad' : '') + (c.hidden ? ' insp' : '') }, h('span', { class: 'tr-c mono' }, c.t.slice(11, 16)), h('span', { class: 'tag' }, SS_TYPE[c.type]), h('span', { class: 'tag' + (c.who === 'agent' ? ' warn' : '') }, c.who),
+        h('code', { class: 'ss-cmd', title: c.command }, trunc(c.command.replace(/\s*\n\s*/g, ' ⏎ '), 260)), c.exit ? h('span', { class: 'tag warn' }, 'exit ' + c.exit) : null)));
+      if (s.commands_n > s.commands.length) box.append(h('div', { class: 'muted small' }, 'Only the last ' + s.commands.length + ' commands are listed.'));
+      if (s.hidden_n) box.append(h('button', { class: 'linkbtn small', onclick: () => { RX.ssInsp[s.id] = !insp; renderPage(true); } }, insp ? 'Hide the inspection commands' : 'Also show ' + plural(s.hidden_n, 'inspection command') + ' (ls, cat, pgrep and the like)'));
+      card.append(box);
+    }
+  }
+  return card;
+}
+function ssRow(s) {   // one line per session on the Trail list; click for the card
+  const open = RX.ssCard[s.id];
+  const line = h('button', { class: 'ss-row' + (open ? ' on' : ''), 'aria-expanded': String(!!open), onclick: () => { RX.ssCard[s.id] = !open; renderPage(true); } }, h('span', { class: 'tr-c mono' }, ssTime(s)), h('span', { class: 'ss-row-t' }, trunc(s.title, 110)),
+    s.note && s.note.state === 'proposed' ? h('span', { class: 'tag warn' }, 'draft') : null, s.why.claims.length ? h('span', { class: 'tag' }, s.why.claims.join(', ')) : null,
+    s.who.map(w => h('span', { class: 'tag' + (w.who === 'agent' ? ' warn' : '') }, w.who === 'you' ? 'you' : w.who)), s.result.failed ? h('span', { class: 'tag warn' }, s.result.failed + ' failed') : null,
+    h('span', { class: 'muted small' }, [s.commands_n ? plural(s.commands_n, 'command') : null, s.commits ? plural(s.commits, 'commit') : null].filter(Boolean).join(', ')));
+  return open ? [line, ssCard(s)] : line;
+}
 function trDayPanel(D, day) {
-  const es = D.entries.filter(e => e.day === day), dls = D.deadlines.filter(d => d.date === day);
-  const box = h('section', { class: 'tr-day' }, h('div', { class: 'tr-day-h' }, h('b', null, dmon(day) + ' ' + day.slice(0, 4) + ' · ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(day + 'T00:00:00').getDay()]), h('span', { class: 'grow' }),
+  const dls = D.deadlines.filter(d => d.date === day), ss = (D.sessions || []).filter(s => s.day === day).slice().reverse();
+  const box = h('section', { class: 'tr-day' }, h('div', { class: 'tr-day-h' }, h('b', null, dmon(day) + ' ' + day.slice(0, 4) + ' · ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(day + 'T00:00:00').getDay()]),
+    ss.length ? h('span', { class: 'muted small' }, plural(ss.length, 'work session') + ' · ' + (ssDur(ss.reduce((a, s) => a + s.minutes, 0)) || 'under a minute') + ' of recorded activity') : null, h('span', { class: 'grow' }),
     h('button', { class: 'linkbtn small', onclick: () => { RX.trDay = null; renderPage(true); } }, 'Close')));
   dls.forEach(d => { const open = RX.todo ? RX.todo.items.filter(i => i.group !== 'gap').length : 0;
     box.append(trDeadlineRow(d, D), h('div', { class: 'tr-dd muted small' }, d.venue ? d.venue + ' · ' : '', open ? open + ' to-do items are still open (not counting gaps).' : 'No to-do items open.')); });
-  if (!es.length && !dls.length) box.append(h('div', { class: 'muted small' }, 'Nothing recorded on this day.'));
-  es.forEach(e => {
-    box.append(trEntry(e));
-    const d = e.detail; if (!d) return;
-    const sub = h('div', { class: 'tr-dd' });
-    (d.results || []).forEach(r => { const moved = r.before != null && r.before !== r.after, better = moved && (r.lower ? r.after < r.before : r.after > r.before), ahead = r.best_other != null && (r.lower ? r.after <= r.best_other : r.after >= r.best_other);
-      sub.append(h('div', { class: 'tr-res' }, h('button', { class: 'ilink', onclick: () => rxOpenExp(r.x) }, r.name), r.claims.length ? h('span', { class: 'tag' }, 'tests ' + r.claims.join(', ')) : h('span', { class: 'tag warn' }, 'no claim'),
-        h('span', { class: 'mono' }, (r.before != null ? rxFmt(r.before) + ' → ' : 'first result ') + rxFmt(r.after)), moved ? h('span', { class: better ? 'good' : 'bad' }, better ? 'better' : 'worse') : r.before != null ? h('span', { class: 'muted' }, 'unchanged') : null,
-        r.best_other != null ? h('span', { class: 'muted small' }, 'best other ' + rxFmt(r.best_other) + (ahead ? ' · ours ahead' : ' · ours behind')) : null, r.metric ? h('span', { class: 'muted small' }, 'on ' + r.metric + (r.lower ? ' ↓' : ' ↑')) : null)); });
-    Object.keys(d.files || {}).forEach(k => sub.append(h('div', { class: 'tr-files' }, h('span', { class: 'tag' }, k + ' · ' + d.files_n[k]), h('span', { class: 'mono small muted' }, d.files[k].join('  ') + (d.files_n[k] > d.files[k].length ? '  …' : '')))));
-    if ((d.affects || []).length) sub.append(h('div', { class: 'small muted' }, 'Touches: ' + d.affects.join(', ')));
-    if (sub.childNodes.length) box.append(sub);
-  });
+  if (!D.sessions) { D.entries.filter(e => e.day === day).forEach(e => box.append(trEntry(e))); return box; }   // a hub from before S26
+  if (!ss.length && !dls.length) box.append(h('div', { class: 'muted small' }, 'Nothing recorded on this day.'));
+  ss.forEach(s => box.append(ssCard(s)));
+  if (ss.length) box.append(h('div', { class: 'muted small su-hint' }, 'A session is activity with no gap longer than ' + (D.gap_minutes || 60) + ' minutes. Everything except a confirmed summary is worked out by rules from the logged commands, commits and result files.'));
   return box;
 }
 async function trLoad() {
@@ -1552,14 +1644,15 @@ function pageTrail() {
   const F = RX.trFilter || 'all';
   root.append(trAhead(D));
   root.append(h('div', { class: 'fchips' }, [['all', 'All']].concat(D.kinds.map(k => [k, TR_KIND[k] + ' ' + D.counts[k]])).map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.trFilter = k; renderPage(true); } }, l))));
-  const es = D.entries.filter(e => F === 'all' || e.kind === F), cap = RX.trAll ? es.length : 120;
+  const bySession = !!D.sessions;
+  const es = bySession ? D.sessions.filter(x => F === 'all' || x.kinds.includes(F)).map(x => Object.assign({ t: x.start, _s: true }, x)) : D.entries.filter(e => F === 'all' || e.kind === F), cap = RX.trAll ? es.length : (bySession ? 60 : 120);
   if (!es.length) root.append(h('div', { class: 'muted' }, 'Nothing recorded yet.'));
   let week = null, day = null;
   es.slice(0, cap).forEach(e => {
     const w = weekStart(e.t);
     if (w !== week) { root.append(h('div', { class: 'tr-w' }, 'Week of ' + dmon(w) + (w.slice(0, 4) !== D.today.slice(0, 4) ? ' ' + w.slice(0, 4) : ''))); week = w; }
     if (e.day !== day) { root.append(h('div', { class: 'dayhead tr-d' + (RX.trDay === e.day ? ' sel' : ''), id: 'tr-' + e.day }, e.day === D.today ? 'Today' : dmon(e.day) + ' · ' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(e.day + 'T00:00:00').getDay()])); day = e.day; }
-    root.append(trEntry(e));
+    root.append(e._s ? ssRow(e) : trEntry(e));
   });
   if (es.length > cap) root.append(h('button', { class: 'linkbtn', onclick: () => { RX.trAll = true; renderPage(true); } }, 'Show all ' + es.length));
   // the whole month, at the bottom

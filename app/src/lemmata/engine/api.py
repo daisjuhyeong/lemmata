@@ -22,6 +22,7 @@ from . import tree as treemod
 from . import review as reviewmod
 from . import plans as plansmod
 from . import runs as runsmod
+from . import sessions as sessionsmod
 from . import setup as setupmod
 from . import todo as todomod
 from . import trail as trailmod
@@ -686,7 +687,57 @@ class Engine:
     def setup(self):
         """The metrics, datasets and methods the experiments use, each with how every experiment uses it (S23)."""
         s = self._ensure()
-        return setupmod.build(self.experiments(), s["G"], s["trees"])
+        E = self.experiments()
+        doc = setupmod.build(E, s["G"], s["trees"])
+        self._setup_context(doc, E, s)
+        return doc
+
+    def _setup_context(self, doc, E, s):
+        """S26: for each experiment the where, how, when and who behind it (the why and what are its claim and protocol)."""
+        pats = self._exp_patterns(undmod.load(self.hub))
+        full = {x["id"]: x for sec in E["sections"] for x in sec["experiments"]}
+        led = {r["node_id"]: r for r in self.ledger()["rows"]}
+        runs = (runsmod.load(self.hub).get("runs") or [])
+        for x in doc["experiments"]:
+            f = full.get(x["id"]) or {}
+            res = f.get("result") or {}
+            ms = [sessionsmod.matcher(p_) for p_ in pats.get(x["id"]) or ([res["path"]] if res.get("path") else [])]
+            probe = [dict(x, _match=ms)]
+            mine = []
+            for r in runs:
+                hit = sessionsmod.experiments_of(r, probe)
+                if hit and (hit[0][2] == "wrote" or sessionsmod.read_command(r.get("command"))["type"] == "script"):
+                    mine.append((r, hit[0][1], hit[0][2]))
+            wrote = {sessionsmod.read_command(r.get("command")).get("script") for r, _, h in mine if h == "wrote"} - {None}
+            have = {id(r) for r, _, _ in mine}
+            for r in runs:            # another run of a script that is known to write these results (it may have failed before writing)
+                rd = sessionsmod.read_command(r.get("command"))
+                if id(r) not in have and rd["type"] == "script" and rd.get("script") in wrote:
+                    mine.append((r, {k: [v] for k, v in rd["args"].items() if k in ("dataset", "method", "seed") and isinstance(v, str)}, "script"))
+            mine.sort(key=lambda m: m[0].get("ended") or m[0].get("started") or "")
+            who, hosts, scripts = {}, [], []
+            for r, _, _ in mine:
+                w = sessionsmod.who_of(r)
+                who[w] = who.get(w, 0) + 1
+                if r.get("host") and r["host"] not in hosts:
+                    hosts.append(r["host"])
+                sc = sessionsmod.read_command(r.get("command")).get("script")
+                if sc and sc not in scripts:
+                    scripts.append(sc)
+            row = led.get(res.get("node_id")) or {}
+            folder = (ms[0][1] if ms else "") or (res.get("path") or "").rsplit("/", 1)[0]
+            sp = [p_ for p_ in f.get("spark") or [] if p_.get("t")]
+            made = row.get("made") or {}
+            x["context"] = {
+                "where": {"repo": f.get("repo"), "folder": folder or None, "hosts": hosts, "files_n": x.get("files_n")},
+                "how": {"scripts": scripts[:4], "code": [c["name"] for c in row.get("code") or []][:4], "settings": [c["name"] for c in row.get("settings") or []][:4],
+                        "command": next((r.get("command") for r, _, h in reversed(mine) if r.get("command") and h == "wrote"), None)},
+                "when": {"first": sp[0]["t"] if sp else made.get("time"), "last": f.get("last") or made.get("time"), "updates": f.get("history_n") or len(sp), "stale": bool(f.get("stale"))},
+                "who": {"runs": len(mine), "by": [{"who": k, "n": who[k]} for k in ("you", "agent", "watcher") if who.get(k)], "commit": made.get("short"), "subject": made.get("subject")},
+                "runs": [{"id": r.get("run_id"), "t": r.get("ended") or r.get("started"), "who": sessionsmod.who_of(r), "host": r.get("host"), "command": (r.get("command") or "")[:400],
+                          "sha": (r.get("git_sha") or "")[:7] or None, "dirty": bool(r.get("dirty")), "exit": r.get("exit_code"), "how": h, "fields": {k: v[:6] for k, v in fl.items()}}
+                         for r, fl, h in mine[-12:]][::-1],
+            }
 
     def set_experiment(self, exp_id, ours=None, metric=None, lower=None, measure=None, claim=None, criterion=None):
         s = self._ensure()
@@ -927,11 +978,26 @@ class Engine:
                 if sec.get("kind") != "other" and short.get(cid) and short[cid] not in rec["_claims"]:
                     rec["_claims"].append(short[cid])
         paths = {s["G"].nodes[n]["loc"]["path"] for n in res if s["G"].nodes[n].get("loc")}
+        pats = self._exp_patterns(d)
         for rec in exps.values():
             rec["_paths"] = paths
+            rec["_match"] = [sessionsmod.matcher(p_) for p_ in pats.get(rec["id"]) or ([rec["result"]["path"]] if (rec.get("result") or {}).get("path") else [])]
         return trailmod.build(s["events"], self.timeline()["steps"], self.hub.read_json("stages.json", None) or {}, C, runsmod.load(self.hub),
                               processmod.load_tasks(self.hub), d, self.checkpoints(), self.plans(), trailmod.load_deadlines(self.hub)["deadlines"],
-                              self._github(), start, end, today or now_iso()[:10], list(exps.values()))
+                              self._github(), start, end, today or now_iso()[:10], list(exps.values()), s["repos"], sessionsmod.load_notes(self.hub))
+
+    @staticmethod
+    def _exp_patterns(d):
+        """experiment id -> the result-file patterns the confirmed map gives it."""
+        return {"map:%s" % x["id"]: [f for f in x.get("files") or [] if isinstance(f, str)] for x in ((d.get("confirmed") or {}).get("experiments") or [])}
+
+    def session_note(self, sid, text=None, action=None, by="you"):
+        """The one-line summary of a work session: an agent proposes, the researcher confirms, edits or removes (ADR-007)."""
+        self._ensure()
+        known = {x["id"] for x in self.trail()["sessions"]}
+        st = sessionsmod.set_note(sessionsmod.load_notes(self.hub), known, sid, text, action, by, now_iso())
+        self.hub.write_json("sessions.json", st)
+        return self.trail()
 
     def set_deadline(self, date=None, title=None, target=None, remove=None, kind=None, venue=None):
         self._ensure()

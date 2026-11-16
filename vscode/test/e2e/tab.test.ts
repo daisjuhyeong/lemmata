@@ -125,7 +125,7 @@ test('S24-S25 pages in the tab: Home with its calendar, Setup with a traced numb
   const day = await page.$('.hm-cal .tm-c.has');
   if (!day) { await page.click('.hm-cal .tm-h button[aria-label="Previous month"]'); await settle(500); }
   const d2 = await page.$('.hm-cal .tm-c.has');
-  if (d2) { await d2.click(); await settle(600); assert.ok(await page.$('.tr-day'), 'a day opens its panel'); }
+  if (d2) { await d2.click(); await settle(600); assert.ok(await page.$('.tr-day'), 'a day opens its panel'); assert.ok(await page.$('.tr-day .ss .ss-r'), 'the day shows work sessions that answer what, why, who, where, how (S26)'); if (shots) await page.screenshot({ path: path.join(shots, 'vscode-day-sessions.png') }); }
   if (shots) await page.screenshot({ path: path.join(shots, 'vscode-home.png'), fullPage: true });
   await tab.open(client, fx.url, fx.pid, 'Demo', 'setup');
   await settle(3000);
