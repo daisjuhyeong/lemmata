@@ -12,3 +12,4 @@ Architecture decision records, ADR-NNN-title.md. Status proposed -> accepted onl
 - [ADR-003: macOS desktop app](ADR-003-macos-desktop-app.md) — proposed, 2026-11-05.
 - [ADR-004: Hub on the Mac mini over Tailscale](ADR-004-hub-on-mac-mini.md) — proposed, 2026-11-05.
 - [ADR-005: No Overleaf; paper on GitHub, compiled locally](ADR-005-no-overleaf-paper-on-github.md) — proposed, 2026-11-06; supersedes the Overleaf parts of S05, amends ADR-004 Context.
+- [ADR-008: Top-down evidence spine](ADR-008-top-down-evidence-spine.md) — proposed, 2026-11-16; Thesis → Claim → link (criterion, status) → Experiment; rule-made statuses; To-do, Trail, Home, shell.

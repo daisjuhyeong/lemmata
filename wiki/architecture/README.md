@@ -12,3 +12,4 @@ architecture.md, data-model.md, threat-model.md.
 - [desktop-architecture.md](desktop-architecture.md) — S03 Lemmata.app internals (proposed; ADR-003).
 - [threat-model.md](threat-model.md) — hub mode threats and must-fixes (proposed; ADR-004).
 - [overview.md](overview.md) — the whole system after S06 on one diagram: MacBook, Mac mini hub, GitHub, Tailscale; data flows, what runs where, where secrets live (proposed; ADR-003/004/005).
+- [benchmark-structures.md](benchmark-structures.md) — S24: how Reviewer3, Google PAT / Deep Review, Refine, paperreview.ai, GPTZero, scite, q.e.d, trackers and the IBEL portal are built; what Lemmata takes and why (proposed; ADR-008). Diagrams of Lemmata today and proposed: `docs/map/`.
