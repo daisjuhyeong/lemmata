@@ -41,3 +41,18 @@ Screenshots: [screenshots/](screenshots/).
 ## Next
 Step 2 (rule ids on claim stages and in MCP), then steps 3-5. Step 5's Trail gets a whole-month grid at the bottom
 (recorded in the build plan).
+
+## Added 11:34 KST: left sidebar
+Juhyeong: "the history section and the graph section is at the bottom of the page, but I want it at the sidebar".
+- `web/app.js`: `buildShell` wraps the page in `#body` with an `aside#side` (website only, not the VS Code tab);
+  `renderLeft` (a no-op since S18) now draws three groups (Look back: History, Growth, Changes · Explore: Graph,
+  Notation, Checks · Work: Tasks, Ask, Search) plus Project menu and How Lemmata works, with the current page marked
+  and counts for Changes, Checks and Tasks.
+- `web/app.css`: the sidebar is sticky; below 1000 px (container query) it hides and the footer links come back.
+  The footer's state line (last looked at, sync) stays at the bottom.
+- Checked in the browser at 1440 px (Experiments, History, Graph) and 900 px; no console errors. Screenshots
+  `sidebar-*.png`.
+
+## Checked on the live hub (11:40 KST)
+The hub at 100.111.135.94:8765 was already serving step 1: its `app.js`, `research.js` and `app.css` have exactly the
+lengths of this branch's files at commit b3c6f3c. Project data was not checked (the browser pane is not signed in).

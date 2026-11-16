@@ -2016,7 +2016,7 @@ function buildShell() {
   app.append(
     h('header', { id: 'band' }, h('h1', { class: 'bt' }, PRODUCT), h('p', { class: 'bsub', id: 'bsub' }, ''), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
     h('div', { id: 'banner', class: 'hidden', role: 'alert' }),
-    h('main', { id: 'page', tabindex: '-1' }),
+    h('div', { id: 'body' }, window.LEMMATA_EMBED ? null : h('aside', { id: 'side', 'aria-label': 'More pages' }), h('main', { id: 'page', tabindex: '-1' })),
     h('footer', { id: 'status' }),
     h('div', { id: 'extras' }));
 }
@@ -2044,7 +2044,26 @@ function usedByText(nid) {
   if (its[0].shared) return 'Shared by ' + its[0].users.map(u => lead(M.byId.get(u))).slice(0, 3).join(' and ');
   return 'Part of ' + lead(its[0]);
 }
-function renderLeft() { }   // S18: no sidebar; the counts that lived here are in the nav and the footer
+/* S24 (founder, chat 2026-11-16 11:34 KST): the secondary pages (History, Graph, ...) sit in a left sidebar on the website,
+   not at the bottom of the page. The five main tabs stay in the band. The VS Code tab and narrow windows keep them in the footer. */
+const SIDE = [
+  ['Look back', [['history', 'History'], ['timeline', 'Growth'], ['changes', 'Changes']]],
+  ['Explore', [['graph', 'Graph'], ['notation', 'Notation'], ['checks', 'Checks']]],
+  ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
+];
+function renderLeft() {
+  const side = $('#side'); if (!side) return;
+  clear(side);
+  $('#app').classList.toggle('has-side', !!S.project);
+  if (!S.project) return;
+  const t = S.tabs[S.active], cur = t ? t.k : null;
+  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0 };
+  const go = k => k === 'search' ? quickSwitcher() : openTab(k);
+  SIDE.forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
+    items.map(([k, label]) => h('button', { class: 'sd-i' + (k === cur ? ' on' : ''), 'aria-current': k === cur ? 'page' : null, onclick: () => go(k) },
+      h('span', null, label), n[k] ? h('span', { class: 'sd-n' }, n[k]) : null)))));
+  side.append(h('div', { class: 'sd-g sd-foot' }, h('button', { class: 'sd-i', onclick: ev => projectMenu(ev.currentTarget) }, 'Project menu'), h('button', { class: 'sd-i', onclick: () => intro(true) }, 'How Lemmata works')));
+}
 
 /* ---------- tab bar, page ---------- */
 function renderTabbar() {
@@ -2145,7 +2164,7 @@ function renderStatus() {
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
   const more = [link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('History', () => openTab('history')), link('Graph', () => openTab('graph')),
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher())];
-  bar.append(h('div', { class: 'flinks' }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
+  bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
       h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
       ' · ', plural(M.todo || 0, 'thing') + ' to look at',

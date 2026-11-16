@@ -313,6 +313,8 @@ Juhyeong, 2026-11-16 (chat, about 11:20 KST), answered as four packages:
 | C. Reshape | D6, D7, D10, D11, D12, D14 | Approved now: nav Home · Thesis · Setup · Review · Trail; top band kept (S1), no left sidebar; native VS Code Thesis tree; To-do groups and Trail form as proposed; Digest becomes Home |
 | D. Watching | D13 | Exported snapshot now (W1). The invite-only viewer (W2) only after the GitHub App from ADR-006 and a check of Korea University's rules |
 
+Amended 2026-11-16 11:34 KST (chat: "the history section and the graph section is at the bottom of the page, but I want it at the sidebar"): D14 changes from S1 to a mix. The five main tabs stay in the band; the secondary pages (History, Growth, Changes, Graph, Notation, Checks, Tasks, Ask, Search, Project menu) move from the footer to a left sidebar on the website. In the VS Code tab and in windows narrower than 1000 px they stay in the footer.
+
 Amended 2026-11-16 11:21 KST (chat: "Go. add a whole month view at the bottom."): building starts; the Trail keeps its day rows and gains a whole-month grid at the bottom (D11).
 
 Not decided: whether step 1 is shown in the 2nd presentation demo (its date is still unknown). The Trail was approved as a day-row list; Juhyeong had said he liked the portal's calendar, so show him the Trail early in step 5.
