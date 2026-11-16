@@ -45,3 +45,15 @@ journal date added; Home calendar and day panel; no console errors.
 - The feed under Tailscale Funnel: a private hub refuses Funnel requests, so the link works only once the hub has a
   public URL configured.
 - Any real project. QA.
+
+## Added 12:44 KST: the same pages in VS Code (extension 0.7.0)
+Juhyeong: "apply this to VS code as well and I want to see the updates on both vs code and website".
+- The VS Code tab shows the hub's pages, so Home, Thesis, Setup and Trail appear there once the hub runs this branch.
+  Extension changes: views `history` and `trail`; commands **Open Home** (`lemmata.openTab.digest`) and **Open Trail**
+  (`lemmata.openTab.history`); "Open Experiments" is now titled **Open Thesis**. Wide pages use the editor's width.
+- In the tab there is no left sidebar (the five tabs stay in a row), and the calendar link is made on the website
+  (the tab cannot be reached by Google). Commit links in the trail open in the browser.
+- Fixed in the Setup trace: an experiment read from a paper table showed "in undefined" and "no result file".
+- `test/e2e/tab.test.ts` opens Home (with a day), Setup (with a traced number) and Trail in the real tab against a real
+  hub; all 10 end-to-end tests pass. Screenshots `screenshots/vscode-*.png` (the test webview has no VS Code theme, so
+  borders are missing there; inside VS Code they come from the theme).

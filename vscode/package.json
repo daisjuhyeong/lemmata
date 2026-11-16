@@ -2,7 +2,7 @@
   "name": "lemmata",
   "displayName": "Lemmata",
   "description": "Lemmata in your editor: the Review, Claims tree and Experiments pages in a tab, alarms and findings on the lines they concern, and a log of the experiments you run.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "lemmata-local",
   "license": "UNLICENSED",
   "private": true,
@@ -182,6 +182,16 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "lemmata.openTab.digest",
+        "title": "Open Home (thesis, calendar, next to do)",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.openTab.history",
+        "title": "Open Trail (deadlines and what was done)",
+        "category": "Lemmata"
+      },
+      {
         "command": "lemmata.openTab.review",
         "title": "Open Review",
         "category": "Lemmata"
@@ -193,12 +203,12 @@
       },
       {
         "command": "lemmata.openTab.experiments",
-        "title": "Open Experiments",
+        "title": "Open Thesis (claims and experiments, top down)",
         "category": "Lemmata"
       },
       {
         "command": "lemmata.openTab.setup",
-        "title": "Open Setup (metrics, datasets, baselines)",
+        "title": "Open Setup (protocol, coverage, traces)",
         "category": "Lemmata"
       }
     ],

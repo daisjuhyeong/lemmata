@@ -85,8 +85,12 @@ after(async () => { if (skip) return; try { await browser.close(); } catch { /* 
 test('the tab shows the hub\'s pages with real data, with no network access of its own', { skip }, async () => {
   await tab.open(client, fx.url, fx.pid, 'Demo');
   await settle(3500);
-  const t = await text();
-  assert.match(t, /Claims/);
+  let t = await text();
+  assert.match(t, /Home/);
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'claims');
+  await settle(2500);
+  t = await text();
+  assert.match(t, /Thesis/);
   assert.match(t, /A Tiny Transformer for Sequence Labelling/, 'the claims tree of the sample project is drawn');
   assert.doesNotMatch(t, /Can't reach Lemmata/);
   assert.doesNotMatch(t, /← Projects/);
@@ -103,9 +107,43 @@ test('Open Review / Experiments switch the page in the same tab', { skip }, asyn
   assert.match(await text(), /Hoped conclusion/);
   await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments');
   await settle(2500);
-  assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Experiments') ?? null), true);
+  assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Thesis') ?? null), true);
   assert.equal(navigations, before, 'the page was not rebuilt');
   assert.deepEqual(errors, []);
+});
+
+test('S24-S25 pages in the tab: Home with its calendar, Setup with a traced number, the Trail', { skip }, async () => {
+  const shots = process.env.LEMMATA_SHOTS || '';
+  await page.setViewportSize({ width: 960, height: 900 });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'digest');
+  await settle(3000);
+  let t = await text();
+  assert.match(t, /Next to do/);
+  assert.ok(await page.$('.hm-cal .tm-c'), 'the month grid is on Home');
+  assert.equal(await page.$('#side'), null, 'no sidebar inside VS Code: the tabs stay in the band');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('.navtab')).map((e: any) => e.innerText.replace(/\s+\d+$/, '').trim())), ['Home', 'Thesis', 'Setup', 'Review', 'Trail']);
+  const day = await page.$('.hm-cal .tm-c.has');
+  if (!day) { await page.click('.hm-cal .tm-h button[aria-label="Previous month"]'); await settle(500); }
+  const d2 = await page.$('.hm-cal .tm-c.has');
+  if (d2) { await d2.click(); await settle(600); assert.ok(await page.$('.tr-day'), 'a day opens its panel'); }
+  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-home.png'), fullPage: true });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup');
+  await settle(3000);
+  t = await text();
+  assert.match(t, /Setup/);
+  const cell = await page.$('.su-g td:not(.miss) .su-cb');
+  if (cell) { await cell.click(); await settle(1500); assert.ok(await page.$('.su-tr .su-st'), 'a number opens its trace'); }
+  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-setup.png'), fullPage: true });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'history');
+  await settle(2500);
+  t = await text();
+  assert.match(t, /Trail/);
+  assert.match(t, /Ahead/);
+  assert.ok(await page.$('.tm'), 'the month view is at the bottom of the Trail');
+  assert.equal(await page.$('.tr-cal input'), null, 'the calendar link is made on the website, not in the tab');
+  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-trail.png'), fullPage: true });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 
 test('editing works: the hoped conclusion typed in the tab is saved on the hub', { skip }, async () => {
@@ -178,17 +216,17 @@ test('S18 width modes: narrow, medium and wide switch without a reload, and the 
   assert.equal(narrow.sideways, false, 'no sideways scrolling at 300px');
   assert.equal(narrow.pad, '12px'); assert.equal(narrow.tag, false, 'no bracket tag on screen when narrow');
   assert.equal(narrow.band, 'none', 'no header band in VS Code');
-  assert.equal(narrow.tabs.length, 4); assert.equal(narrow.tabsFit, true, 'the four tabs fit on one row'); assert.equal(narrow.active, 'Claims', 'the active tab keeps its name');
-  assert.ok(narrow.tabs.every((t: string) => t.length === 1 || ['Claims', 'Experiments', 'Digest', 'Review'].includes(t)), 'a tab is either its full name or its first letter');
+  assert.equal(narrow.tabs.length, 5); assert.equal(narrow.tabsFit, true, 'the five tabs fit on one row'); assert.equal(narrow.active, 'Thesis', 'the active tab keeps its name');
+  assert.ok(narrow.tabs.every((t: string) => t.length === 1 || ['Home', 'Thesis', 'Setup', 'Review', 'Trail'].includes(t)), 'a tab is either its full name or its first letter');
   assert.equal(narrow.outline, true, 'Claims is an outline with collapse arrows when narrow');
   await page.setViewportSize({ width: 500, height: 800 }); await settle(500);
   const medium = await probe();
   assert.equal(medium.pad, '16px'); assert.equal(medium.sideways, false); assert.equal(medium.tag, true, 'bracket tags are back from 360px');
-  assert.deepEqual(medium.tabs, ['Claims', 'Experiments', 'Digest', 'Review'], 'all four names fit from 360px');
+  assert.deepEqual(medium.tabs, ['Home', 'Thesis', 'Setup', 'Review', 'Trail'], 'all five names fit from 360px');
   assert.equal(medium.outline, false, 'medium keeps the vertical graph: no collapse arrows');
   await page.setViewportSize({ width: 1200, height: 800 }); await settle(500);
   const wide = await probe();
-  assert.equal(wide.sideways, false); assert.ok(wide.wide <= 800, 'content is capped at 800px in a wide tab');
+  assert.equal(wide.sideways, false); assert.ok(wide.wide <= 1100, 'content is capped in a wide tab');
   assert.equal(navigations, before, 'the mode changed without a reload');
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
@@ -229,7 +267,7 @@ test('S19: a website link opens Experiments with that item selected, and an expe
   await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments', 'q:h1');
   await settle(2500);
   assert.equal(await page.evaluate(() => (window as any).eval('RX.mapSel')), 'q:h1', 'the selection from the link reached the page');
-  assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Experiments') ?? null), true);
+  assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Thesis') ?? null), true);
   assert.equal(navigations, before, 'the page was not rebuilt');
   // an experiment's details: "Open in editor" buttons for its scripts, settings and result file
   await page.evaluate(() => { (window as any).eval("RX.mapSel = null; RX.exView = 'list'"); openTab('experiments'); });

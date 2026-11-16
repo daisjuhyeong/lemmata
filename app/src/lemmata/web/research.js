@@ -1322,16 +1322,16 @@ function suTracePanel(x, method, col) {
   // 1 paper
   let pc = null; (d.cells || []).forEach(r => r.forEach(c => { if (c.row && nm(c.row) === nm(method) && nm(c.col) === nm(ds)) pc = c; }));
   const file = (x.grid.rows.find(r => r.label === method) || { values: {} }).values[col];
-  box.append(step(1, 'In the paper', !!pc, pc ? [h('span', { class: 'mono' }, pc.text), h('span', { class: 'muted small' }, ' in ' + ((d.paper || [])[0] || {}).name + ' · '), d.loc ? rxWhere(d.loc, 'paper') : null,
+  box.append(step(1, 'In the paper', !!pc, pc ? [h('span', { class: 'mono' }, pc.text), h('span', { class: 'muted small' }, ' in ' + (Array.isArray(d.paper) && d.paper[0] ? d.paper[0].name : d.name) + ' · '), d.loc ? rxWhere(d.loc, d.map ? 'paper' : (d.repo || 'paper')) : null,
       h('span', { class: 'tag' + (pc.status === 'match' || pc.status === 'rounding' ? '' : ' warn') }, pc.status === 'match' ? 'matches the file' : pc.status === 'rounding' ? 'matches after rounding' : pc.status === 'differs' ? 'differs: the file gives ' + rxFmt(pc.file) : pc.status || '')]
-    : h('span', { class: 'muted small' }, (d.paper || []).length ? 'This cell is not in ' + d.paper[0].name + '.' : 'No paper table is linked to this experiment.')));
+    : h('span', { class: 'muted small' }, Array.isArray(d.paper) && d.paper.length ? 'This cell is not in ' + d.paper[0].name + '.' : 'No paper table is linked to this experiment.')));
   // 2 result files
-  const fs = ((d.design || {}).files || []), mine = fs.filter(f => f.fields && nm(f.fields.method) === nm(method) && nm(f.fields.dataset) === nm(ds)), shown = mine.length ? mine : fs.filter(f => !f.fields || (!f.fields.method && !f.fields.dataset)).slice(0, 6);
+  const fs = ((d.design || {}).files || []).concat(!((d.design || {}).files || []).length && d.result ? [{ node_id: d.result.node_id, path: d.result.path }] : []), mine = fs.filter(f => f.fields && nm(f.fields.method) === nm(method) && nm(f.fields.dataset) === nm(ds)), shown = mine.length ? mine : fs.filter(f => !f.fields || (!f.fields.method && !f.fields.dataset)).slice(0, 6);
   box.append(step(2, 'Result files' + (file != null ? ' → ' + rxFmt(file) : ''), shown.length > 0, shown.length ? shown.slice(0, 8).map(f => h('div', { class: 'su-f' }, h('button', { class: 'linkbtn mono small', title: 'Open this file', onclick: () => (EMBED && d.repo ? EMBED.openFile(d.repo, f.path, 1) : openTab('node', f.node_id)) }, f.path),
       f.fields && f.fields.seed ? h('span', { class: 'muted small' }, ' seed ' + f.fields.seed) : null)).concat(mine.length ? [h('div', { class: 'muted small' }, plural(mine.length, 'file') + ' averaged into this number.')] : [h('div', { class: 'muted small' }, 'The method and dataset are columns inside these files.')])
     : h('span', { class: 'muted small' }, 'No result file for this cell.')));
   // 3 scripts and settings
-  const sc = ((d.design || {}).scripts || []).concat((d.design || {}).settings || []), vals = ((d.design || {}).values || []);
+  const sc = ((d.design || {}).scripts || []).concat((d.design || {}).settings || [], ((d.design || {}).runs || []).filter(r => r.command).map(r => ({ node_id: r.node_id, name: r.command }))), vals = ((d.design || {}).values || []);
   box.append(step(3, 'Script and settings', sc.length > 0, sc.length ? [h('div', null, sc.slice(0, 6).map(n => h('button', { class: 'linkbtn mono small su-fl', onclick: () => openTab('node', n.node_id) }, n.name))),
       vals.length ? h('div', { class: 'su-vals' }, vals.slice(0, 10).map(v => h('span', { class: 'mono small' }, v.key + ' = ' + v.value))) : null] : h('span', { class: 'muted small' }, 'Lemmata found no script or settings file that writes these results.')));
   // 4 when
@@ -1349,7 +1349,7 @@ function suSheet(x, claim, D, hl) {
     P && P.last ? h('span', { class: 'muted small' }, 'last result ' + dmon(P.last)) : null, h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, 'Open')));
   if (!P) return card.append(h('p', { class: 'muted small' }, 'Its result files could not be read as a table, so there is no protocol to show.')), card;
   const itemBtn = (kind, name, extra) => { const id = kind + ':' + name.toLowerCase().replace(/[^a-z0-9]/g, ''); const it = D.items.find(i => i.id === id);
-    return h('button', { class: 'su-pi k-' + kind + (hl === id ? ' on' : '') + (it && it.checks.length ? ' chk' : ''), title: it ? 'Where the paper and the code name it' : null, onclick: () => { RX.suSel = RX.suSel === 'i:' + id ? null : 'i:' + id; renderPage(true); } }, name, extra ? h('span', { class: 'muted' }, ' ' + extra) : null); };
+    return h('button', { class: 'su-pi k-' + kind + (hl === id ? ' on' : '') + (it && it.checks.length ? ' chk' : ''), title: it ? 'Where the paper and the code name it' : null, onclick: () => { RX.suSel = RX.suSel === 'i:' + id ? null : 'i:' + id; renderPage(true); } }, name, extra && extra !== String(name).toLowerCase() ? h('span', { class: 'muted' }, ' ' + extra) : null); };
   const row = (k, ...v) => h('div', { class: 'su-pr' }, h('span', { class: 'su-pk' }, k), h('div', { class: 'su-pv' }, v));
   card.append(h('div', { class: 'su-p' },
     row('Metric', itemBtn('metric', P.metric, P.target != null ? '→ ' + rxFmt(P.target) : P.lower ? '↓ lower is better' : '↑ higher is better'), P.measures.filter(m => m !== P.metric).length ? h('span', { class: 'muted small' }, 'also recorded: ' + P.measures.filter(m => m !== P.metric).join(', ')) : null),
@@ -1362,7 +1362,7 @@ function suSheet(x, claim, D, hl) {
     const G = x.grid, sel = RX.suCell && RX.suCell.x === x.id ? RX.suCell : null;
     const hlM = hl && hl.startsWith('method:') ? hl.slice(7) : null, hlD = hl && hl.startsWith('dataset:') ? hl.slice(8) : null, nm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
     card.append(h('div', { class: 'su-gw' }, h('table', { class: 'su-g' }, h('thead', null, h('tr', null, h('th', null, P.metric + (P.lower ? ' ↓' : P.target != null ? '' : ' ↑')), G.cols.map((c, i) => h('th', { class: hlD === nm(G.datasets[i]) ? 'hl' : null }, G.datasets[i])))),
-      h('tbody', null, G.rows.map(r => h('tr', { class: (r.role === 'ours' ? 'ours' : '') + (hlM === nm(r.label) ? ' hl' : '') }, h('th', null, r.label, r.role !== 'baseline' ? h('span', { class: 'tag' }, SU_ROLE[r.role].toLowerCase()) : null),
+      h('tbody', null, G.rows.map(r => h('tr', { class: (r.role === 'ours' ? 'ours' : '') + (hlM === nm(r.label) ? ' hl' : '') }, h('th', null, r.label, r.role !== 'baseline' && SU_ROLE[r.role].toLowerCase() !== String(r.label).toLowerCase() ? h('span', { class: 'tag' }, SU_ROLE[r.role].toLowerCase()) : null),
         G.cols.map((c, i) => { const v = r.values[c], on = sel && sel.m === r.label && sel.c === c;
           return h('td', { class: (v == null ? 'miss' : '') + (r.best.includes(c) ? ' best' : '') + (on ? ' on' : '') + (hlD === nm(G.datasets[i]) ? ' hl' : '') },
             h('button', { class: 'su-cb', title: v == null ? 'No result: ' + r.label + ' on ' + G.datasets[i] : 'Trace this number', 'aria-pressed': String(!!on), onclick: () => { RX.suCell = on ? null : { x: x.id, m: r.label, c }; if (!on) suLoadTrace(x.id); renderPage(true); } },
@@ -1414,7 +1414,7 @@ function rxOpenTarget(t) {
   if (t.view === 'experiments' && t.sel && t.sel.startsWith('x:')) return rxOpenExp(t.sel.slice(2));
   if (t.view === 'setup') return rxGoto('setup', t.sel);
   if (t.view === 'node' && t.id) return openTab('node', t.id);
-  if (t.view === 'commit') { if (t.url) window.open(t.url, '_blank', 'noopener'); return; }
+  if (t.view === 'commit') { if (t.url) { if (EMBED) { const a = h('a', { href: t.url }); document.body.append(a); a.click(); a.remove(); } else window.open(t.url, '_blank', 'noopener'); } return; }
   if (t.view === 'runs') return openTab('experiments');
   return openTab(t.view || 'digest');
 }
@@ -1503,6 +1503,7 @@ function trAhead(D) {
   return box;
 }
 function trCalLink() {
+  if (EMBED) return EMBED.site ? h('div', { class: 'muted small tr-cal' }, 'The calendar link for Google Calendar is on the website: ', h('a', { href: EMBED.site }, 'open the Trail there'), '.') : null;
   const C = RX.cal;
   if (C === undefined) { RX.cal = null; apiGet('/api/calendar').then(r => { RX.cal = r; renderPage(true); }).catch(() => { RX.cal = { err: true }; }); }
   if (!C || C.err) return null;

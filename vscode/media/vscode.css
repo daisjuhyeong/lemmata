@@ -78,3 +78,10 @@ html.embed .code, html.embed .rx-ev-tablewrap { max-width: 100%; overflow-x: aut
   html.embed .rtag { display: none; }
   html.embed .rx-rv-two, html.embed .rx-rv-checks { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* S24-S25: wide pages (Home, Thesis, Setup) use the editor's width; the Home cards and the month grid stack when narrow */
+html.embed #page.wide { max-width: var(--col-wide); }
+html.embed .hm-card, html.embed .su-sh, html.embed .tr-day { border-radius: 4px; }
+html.embed .hm-h h3, html.embed .tm-h h3 { font-size: 14px; }
+html.embed .tm-c { min-height: 40px; }
+html.embed .su-cl-h { margin-top: 20px; }
