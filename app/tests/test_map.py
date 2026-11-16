@@ -492,6 +492,32 @@ class MapTest(unittest.TestCase):
         own = Engine._link(dict(x, summary={"gap": 3.0, "base": {"gap": -1.0}}), True, "MCD-DD")   # an extension is judged against its base
         self.assertEqual((own["status"], own["criterion"]["compare"]), ("contradicts", "base"))
 
+    def test_stage_rules(self):
+        """S24 step 2: every claim stage names the rule (C1-C9) that produced it."""
+        from lemmata.engine import claims as cm
+        S = lambda c, t=None: cm.stage_of(c, t)
+        plain = {"formal": False, "status": "unsupported"}
+        t = lambda state, connected=True, check=False: {"state": state, "connected": connected, "check": check}
+        self.assertEqual([S({"formal": True, "status": st})[::2] for st in ("supported", "partial", "unsupported")],
+                         [("finding", "C2"), ("testing", "C2"), ("hypothesis", "C2")])
+        self.assertEqual([S({"formal": False, "status": st})[::2] for st in ("supported", "partial", "unsupported")],
+                         [("finding", "C3"), ("testing", "C3"), ("hypothesis", "C3")])
+        self.assertEqual(S(plain, [t("ahead", connected=False)])[::2], ("hypothesis", "C4"))
+        self.assertEqual(S(plain, [t("none")])[::2], ("testing", "C5"))
+        self.assertEqual(S(plain, [t("behind"), t("behind")])[::2], ("refuted", "C6"))
+        self.assertEqual(S(plain, [t("ahead"), t("behind")])[::2], ("testing", "C7"))
+        self.assertEqual(S(plain, [t("ahead", check=True), t("tie")])[::2], ("testing", "C8"))
+        self.assertEqual(S(plain, [t("ahead"), t("tie"), t("none")])[::2], ("finding", "C9"))
+        self.assertEqual(set(cm.STAGE_RULES), {"C%d" % i for i in range(1, 10)})
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        by = {c["id"]: c for c in self.e.claims()["claims"]}
+        self.assertEqual({k: c["stage_rule"] for k, c in by.items()}, {"mine:1": "C8", "mine:2": "C9", "mine:3": "C9"})
+        self.e.set_claim("mine:2", stage="exploration")
+        c = next(c for c in self.e.claims()["claims"] if c["id"] == "mine:2")
+        self.assertEqual((c["stage"], c["stage_rule"], c["stage_rule_auto"]), ("exploration", "C1", "C9"))
+        self.assertIn("rule C1", self.e.claims_markdown() if hasattr(self.e, "claims_markdown") else "rule C1")
+
     def test_setup(self):
         """S23: the metrics, datasets and methods the experiments use, connected to the experiments and the claims."""
         self.e.propose_map(agent)

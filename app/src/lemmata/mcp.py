@@ -494,6 +494,13 @@ def t_claims(ctx, args):
     pid, eng = _project(ctx, args)
     d = eng.claims()
     lines = []
+    links = {}
+    try:      # the status of each claim-experiment link (ADR-008): supports / contradicts / inconclusive / not run
+        for sec in eng.experiments()["sections"]:
+            for xid, l in (sec.get("links") or {}).items():
+                links[(sec.get("claim_id") or sec["id"], xid)] = l
+    except Exception:
+        links = {}
     core = d.get("core")
     if core:
         lines.append("CORE MESSAGE [%s]%s: %s" % (core["status"], _where(core.get("loc")), _short(core["text"], 400)))
@@ -502,10 +509,12 @@ def t_claims(ctx, args):
             continue
         lines.append("%s · %s%s [stage: %s%s; evidence: %s, %s%s]%s: %s" % (
             c["id"], c.get("short") or c["label"], " (%s)" % c["label"] if c.get("short") and c["label"] != c["short"] else "", c.get("stage", "hypothesis"),
-            ", set by the researcher" if c.get("stage_by") == "you" else "", c["status"], c["state"],
+            (", set by the researcher" if c.get("stage_by") == "you" else "") + (", rule %s" % c["stage_rule"] if c.get("stage_rule") else ""), c["status"], c["state"],
             ", RECHECK: " + _short(c["recheck"], 80) if c["recheck"] else "", _where(c.get("loc")), _short(c["text"], 240)))
         for x in c.get("experiments") or []:
-            lines.append("    experiment run for it: %s (%s): %s" % (x["name"], x["id"], x["state"] if x["connected"] else "no results yet"))
+            l = links.get((c["id"], x["id"]))
+            lines.append("    experiment run for it: %s (%s): %s" % (x["name"], x["id"], ("%s, rule %s, %s criterion. %s" % (l["status"].replace("_", " "), l["rule"], l["criterion_by"], l["why"])) if l
+                                                                 else x["state"] if x["connected"] else "no results yet"))
         for s_ in c["support"]:
             ch = s_.get("chain") or {}
             files = ", ".join(x.split("/", 1)[-1] for x in (ch.get("results", []) + ch.get("code", []) + ch.get("runs", []))[:5])

@@ -13,7 +13,7 @@ const RX_STAGE = { hypothesis: ['○', 'Hypothesis', 'plain', 'hyp'], testing: [
 const RX_STAGES = ['finding', 'testing', 'hypothesis', 'refuted', 'exploration'];
 const RX_SCOPE = { new: ['New', 'A claim of this work'], original: ['Original', 'A claim of the paper this work extends, re-checked here'] };
 function rxSt(stage) { return ' st-' + (RX_STAGE[stage] || RX_STAGE.hypothesis)[3]; }
-function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', s = RX_STAGE[k]; const ch = plainChip(s[0], s[1], s[2] + ' stg-' + k); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || ''); return ch; }
+function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', s = RX_STAGE[k]; const ch = plainChip(s[0], s[1], s[2] + ' stg-' + k); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || '') + (c.stage_rule ? ' (rule ' + c.stage_rule + (c.stage_by === 'you' && c.stage_rule_auto ? '; the evidence alone gives rule ' + c.stage_rule_auto : '') + ')' : ''); return ch; }
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
 function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */

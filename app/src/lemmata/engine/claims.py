@@ -505,29 +505,42 @@ STAGES = ("hypothesis", "testing", "finding", "refuted", "exploration")
 STAGE_WORD = {"hypothesis": "Hypothesis", "testing": "Being tested", "finding": "Finding", "refuted": "Not supported", "exploration": "Exploration"}
 
 
+STAGE_RULES = {
+    "C1": "You set the stage yourself.",
+    "C2": "A formal statement: the proof decides.",
+    "C3": "No experiment is linked: the evidence traced to it decides.",
+    "C4": "Experiments are linked, but none has a result yet.",
+    "C5": "Some experiments have results, but none can be compared.",
+    "C6": "Every experiment that can be compared contradicts it.",
+    "C7": "Some experiments support it and some contradict it.",
+    "C8": "Every comparable experiment supports it, but one needs checking first.",
+    "C9": "Every comparable experiment supports it, with nothing to check.",
+}
+
+
 def stage_of(c, tests=None):
-    """-> (stage, why) from the evidence alone. tests: the experiments run because of this claim, each
-    {state: ahead | behind | tie | none, connected, check}. A proof decides a formal statement; experiments decide the rest."""
+    """-> (stage, why, rule) from the evidence alone (rules C2-C9, ADR-008 section 1). tests: the experiments run because of this
+    claim, each {state: ahead | behind | tie | none, connected, check}. A proof decides a formal statement; experiments decide the rest."""
     if c.get("formal"):
-        return {"supported": ("finding", "Proved: the proof is complete."), "partial": ("testing", "There is a proof, but part of it is open."),
-                "unsupported": ("hypothesis", "No proof yet.")}[c["status"]]
+        return {"supported": ("finding", "Proved: the proof is complete.", "C2"), "partial": ("testing", "There is a proof, but part of it is open.", "C2"),
+                "unsupported": ("hypothesis", "No proof yet.", "C2")}[c["status"]]
     run = [t for t in (tests or []) if t.get("connected")]
     cmp_ = [t for t in run if t.get("state") in ("ahead", "behind", "tie")]
     if cmp_:
         n, behind = len(cmp_), sum(t["state"] == "behind" for t in cmp_)
         if behind == n:
-            return "refuted", "Behind in %s that tests it." % ("the one experiment" if n == 1 else "all %d experiments" % n)
+            return "refuted", "Behind in %s that tests it." % ("the one experiment" if n == 1 else "all %d experiments" % n), "C6"
         if behind:
-            return "testing", "Mixed results: behind in %d of %d experiments." % (behind, n)
+            return "testing", "Mixed results: behind in %d of %d experiments." % (behind, n), "C7"
         if any(t.get("check") for t in run):
-            return "testing", "The results agree, but something in them needs checking first."
-        return "finding", "Ahead or level in %s, with nothing to check." % ("the one experiment that tests it" if n == 1 else "all %d experiments that test it" % n)
+            return "testing", "The results agree, but something in them needs checking first.", "C8"
+        return "finding", "Ahead or level in %s, with nothing to check." % ("the one experiment that tests it" if n == 1 else "all %d experiments that test it" % n), "C9"
     if run:
-        return "testing", "%d experiment%s linked, none with a comparison yet." % (len(run), "" if len(run) == 1 else "s")
+        return "testing", "%d experiment%s linked, none with a comparison yet." % (len(run), "" if len(run) == 1 else "s"), "C5"
     if tests:
-        return "hypothesis", "Experiments are planned for it, but none has results yet."
-    return {"supported": ("finding", "Backed by evidence traced to result files."), "partial": ("testing", "Evidence is linked, but not all of it is traced."),
-            "unsupported": ("hypothesis", "Nothing backs this yet.")}[c["status"]]
+        return "hypothesis", "Experiments are planned for it, but none has results yet.", "C4"
+    return {"supported": ("finding", "Backed by evidence traced to result files.", "C3"), "partial": ("testing", "Evidence is linked, but not all of it is traced.", "C3"),
+            "unsupported": ("hypothesis", "Nothing backs this yet.", "C3")}[c["status"]]
 
 
 def _roll(stages):
@@ -545,10 +558,11 @@ def restage(doc, store=None, tests=None, meta=None):
         c["experiments"] = tests.get(c["id"], [])
         if any(x.get("stale") for x in c["experiments"]) and not c["recheck"]:
             c["recheck"] = "a result is older than the code or settings behind it"
-        auto, why = stage_of(c, c["experiments"] if c["id"] in tests else None)
+        auto, why, rule = stage_of(c, c["experiments"] if c["id"] in tests else None)
         mine = ents.get(c["id"], {}).get("stage")
         c["stage"], c["stage_by"], c["stage_auto"] = (mine, "you", auto) if mine in STAGES else (auto, "evidence", auto)
         c["stage_why"] = why
+        c["stage_rule"], c["stage_rule_auto"] = ("C1" if mine in STAGES else rule), rule
     doc["claims"].sort(key=lambda c: {"new": 0, None: 1, "original": 2}[c["scope"]])     # the work's own claims first (the sort is stable)
     live = [c for c in doc["claims"] if c["state"] != "rejected"]
     k = 0
@@ -563,6 +577,7 @@ def restage(doc, store=None, tests=None, meta=None):
     core = doc.get("core")
     if core:
         core["stage"], core["stage_by"], core["stage_why"] = _roll([c["stage"] for c in live]), "evidence", ""
+        core["stage_rule"] = "T1"
         core["recheck"] = core.get("recheck") or next((c["recheck"] for c in live if c["recheck"]), None)
     doc["counts"]["stages"] = {s: sum(c["stage"] == s for c in live) for s in STAGES}
     doc["counts"]["recheck"] = sum(bool(c["recheck"]) for c in live)
@@ -873,7 +888,7 @@ def to_markdown(doc, project_name, when):
         name = c.get("short") or c["label"]
         out.append("### %s%s%s" % (name, " (%s)" % c["label"] if c["label"] != name else "", "" if c["state"] == "confirmed" else " (draft, not confirmed)"))
         out += ["", c["text"], "", "- Stage: **%s**%s%s — %s" % (STAGE_WORD[c.get("stage", "hypothesis")], " (set by you)" if c.get("stage_by") == "you" else "",
-                                                            " · %s claim" % c["scope"] if c.get("scope") else "", c.get("stage_why", "")),
+                                                            " · %s claim" % c["scope"] if c.get("scope") else "", c.get("stage_why", "") + (" (rule %s)" % c["stage_rule"] if c.get("stage_rule") else "")),
                 "- Evidence: %s%s" % (EVID[c["status"]], " — recheck: %s" % c["recheck"] if c["recheck"] else "")]
         for x in c.get("experiments") or []:
             out.append("- Experiment: %s (%s)" % (x["name"], x["state"] if x["state"] != "none" else "no comparison"))
