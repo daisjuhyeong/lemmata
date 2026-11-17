@@ -84,6 +84,20 @@ Run locally on a copy of the repo; the jobs were answered by me in the role of t
 | 10 Premise check | Job and storage built; the URL quote check is **not built** (stored as `unverified`). |
 | 11 Provenance, 12 report-vs-table numbers, 13 novelty watch and published baselines | **Not built.** |
 
+## VS Code
+- **The Lemmata tab gets the new section without a new extension.** The tab fetches `app.js`, `research.js` and `app.css`
+  from the hub when it opens (`vscode/src/core/embed.ts` `ASSETS`), and its request filter already lets the page call
+  `/p/<pid>/api/hypothesis*` and `/api/hub/projects/<pid>/branch`. So once the hub runs this branch, Thesis in the tab shows
+  the problem, hypotheses, Tell box, jobs and proposed changes. The job `.md` and proposal links open as markdown
+  documents beside the editor (the tab's existing link handling).
+- Checked at VS Code width (640 px, with `vscode/media/vscode.css` and the `embed` class): [screenshot](screenshots/s27-vscode-width.png).
+  Not checked inside a real VS Code window; the e2e suite was not run here.
+- **Fixed on 2026-11-17 13:10:** in hypothesis-first mode the paper-based part of the Thesis page listed the hypotheses a
+  second time as "Not tested yet". It now shows only result files that no hypothesis covers. The job and proposal links
+  used `/api/…` instead of the project's path, which broke them on the hub and in the tab.
+- **Not changed:** the extension's native sidebar (project status, Runs) and its commands. There is no native tree of
+  hypotheses with Confirm / Fix / Delete / Combine yet (Step 9).
+
 ## Tests
 - `app/tests/test_hypo.py` (10 tests, a synthetic repo with a frozen protocol, a deviation log and a test table).
 - `test_hub.HubTest.test_tracked_branch_newer_and_switch`.

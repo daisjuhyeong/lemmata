@@ -763,14 +763,21 @@ function rxExpMap(E, renderSec) {
 function pageExperiments() {
   const nr = rxNotReady('Experiments'); if (nr) return nr;
   S.outline = [];
-  const E = RX.experiments;
+  let E = RX.experiments;
   const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['table', 'Outline'], ['map', 'Map']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'table') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)), h('button', { 'aria-pressed': 'false', title: 'The claims as a tree', onclick: () => { RX.view = 'tree'; openTab('claims'); } }, 'Tree'));
   const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
   const c = E.counts, mapped = !!E.unmapped;
   const HF = RX.hf && RX.hf.mode === 'hypothesis_first';
-  if (HF) { root.append(rxHypoFirst()); if (!E.sections.length) return root; root.append(h('h2', { class: 'hf-h2' }, 'From the result files')); }
-  root.append(rxThesisHead(E));
+  if (HF) {
+    // hypotheses are shown above with their own test; below, only what no hypothesis covers (no duplicate rows in the website or the VS Code tab)
+    const own = new Set(RX.hf.hypotheses.map(x => x.claim_id).filter(Boolean));
+    E = Object.assign({}, E, { sections: E.sections.filter(s => !own.has(mapped ? s.claim_id : s.id)) });
+    root.append(rxHypoFirst());
+    if (!E.sections.length && !(E.unassigned || []).length && !mapped) return root;
+    root.append(h('h2', { class: 'hf-h2' }, 'Result files no hypothesis covers yet'));
+  }
+  if (!HF) root.append(rxThesisHead(E));
   const X = E.extends;
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
     X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal')));
@@ -1763,7 +1770,7 @@ function hfJobs(D) {
   return h('section', { class: 'hf-sec hf-jobs' }, h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Waiting for your LLM'), h('span', { class: 'muted small' }, 'Lemmata never calls a model. In Claude Code, say: “do Lemmata’s jobs for this project” (tools hypothesis_job and submit_hypothesis_job). Or copy a job into any LLM and paste its answer back.')),
     D.jobs.map(j => h('div', { class: 'hf-row' }, h('span', { class: 'hf-tag' }, '[' + j.id + ']'), h('span', { class: 'grow' }, h('b', null, HF_JOB[j.type] || j.type), h('span', { class: 'muted small' }, ' · ' + j.trigger + (j.target ? ' · ' + j.target : ''))),
       h('button', { class: 'linkbtn small', onclick: async () => { try { copyText(await hfJobText(j.id)); } catch (e) { toast(e.message); } } }, 'Copy job'),
-      h('a', { class: 'linkbtn small', href: '/api/hypothesis/job.md?id=' + encodeURIComponent(j.id), download: '' }, '.md'),
+      h('a', { class: 'linkbtn small', href: apiUrl('/api/hypothesis/job.md?id=' + encodeURIComponent(j.id)), download: '' }, '.md'),
       h('button', { class: 'linkbtn small', onclick: () => hfPaste(j) }, 'Paste answer'))));
 }
 function hfChangeSets(D) {
@@ -1779,7 +1786,7 @@ function hfChangeSets(D) {
           o.op === 'revise' || o.op === 'relink' ? h('span', { class: 'hf-ba' }, h('span', { class: 'hf-before' }, val(o.before)), ' → ', h('span', { class: 'hf-after' }, val(o.after))) : o.after ? h('span', { class: 'hf-ba' }, h('span', { class: 'hf-after' }, val(o.after))) : null,
           o.reason ? h('span', { class: 'muted small' }, o.reason) : null, o.from ? h('span', { class: 'muted small' }, 'from your words: “' + o.from.quote + '”') : null)))),
       (cs.report || []).length ? h('p', { class: 'muted small' }, plural(cs.report.length, 'item') + ' dropped or flagged by the checker.') : null,
-      READONLY ? null : h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => { const w = picks.map((p, i) => p.checked ? i : -1).filter(i => i >= 0); if (!w.length) { toast('Tick at least one change.'); return; } hfPost('/api/hypothesis/change', { id: cs.id, decision: 'accept', which: w }).then(r => { if (r && /proposal/.test(r.message || '')) toast(r.message, { label: 'Download the proposal', fn: () => { const a = h('a', { href: '/api/hypothesis/proposal.md?id=' + encodeURIComponent(cs.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }); }); } }, 'Accept'),
+      READONLY ? null : h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => { const w = picks.map((p, i) => p.checked ? i : -1).filter(i => i >= 0); if (!w.length) { toast('Tick at least one change.'); return; } hfPost('/api/hypothesis/change', { id: cs.id, decision: 'accept', which: w }).then(r => { if (r && /proposal/.test(r.message || '')) toast(r.message, { label: 'Download the proposal', fn: () => { const a = h('a', { href: apiUrl('/api/hypothesis/proposal.md?id=' + encodeURIComponent(cs.id)), download: '' }); document.body.append(a); a.click(); a.remove(); } }); }); } }, 'Accept'),
         h('button', { class: 'btn', onclick: () => hfPost('/api/hypothesis/change', { id: cs.id, decision: 'reject' }) }, 'Reject')));
   });
 }
