@@ -11,6 +11,7 @@ import json
 import mimetypes
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -367,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans"), "/hypothesis": need("hypothesis")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -435,6 +436,15 @@ class Handler(BaseHTTPRequestHandler):
             if r == "/experiment":
                 with self.app.lock:
                     return self._json(need("experiment")(q.get("id", "")))
+            if r == "/hypothesis/job":
+                with self.app.lock:
+                    return self._json(need("hypothesis_job")(q.get("id", "")))
+            if r in ("/hypothesis/job.md", "/hypothesis/proposal.md"):
+                with self.app.lock:
+                    md = need("hypothesis_job")(q.get("id", ""))["markdown"] if r == "/hypothesis/job.md" else need("hypothesis_proposal")(q.get("id", ""))
+                name = re.sub(r"[^A-Za-z0-9-]+", "-", q.get("id", "x"))[:40]
+                fn = ("lemmata-%s.md" % name) if r == "/hypothesis/job.md" else ("%s-lemmata-proposal.md" % time.strftime("%Y-%m-%d"))
+                return self._send(200, md.encode("utf-8"), "text/markdown; charset=utf-8", {"Content-Disposition": 'attachment; filename="%s"' % fn})
             if r == "/evidence":
                 with self.app.lock:
                     return self._json(need("evidence")(q.get("node", "")))
@@ -448,7 +458,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans")
+        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -485,6 +495,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("edit_map")(body.get("change")))
                 if r in ("/map/draft", "/map/confirm", "/map/discard"):
                     return self._json(need(r[5:] + "_map")())
+                if r == "/hypothesis":
+                    ts, fs = body.get("targets"), body.get("fields")
+                    if ts is not None and not (isinstance(ts, list) and all(isinstance(t, str) for t in ts)):
+                        raise ApiError(400, "bad_request", "targets must be a list of ids")
+                    if fs is not None and not (isinstance(fs, dict) and all(isinstance(v, str) for v in fs.values())):
+                        raise ApiError(400, "bad_request", "fields must be an object of text")
+                    return self._json(need("hypothesis_act")(txt("action", True), txt("target"), txt("text"), txt("note"), ts, fs, txt("stage"), txt("prediction")))
+                if r == "/hypothesis/submit":
+                    if not isinstance(body.get("result"), dict):
+                        raise ApiError(400, "bad_request", "result must be an object")
+                    return self._json(need("submit_hypothesis_job")(txt("job", True), body["result"], "you"))
+                if r == "/hypothesis/change":
+                    w = body.get("which")
+                    if w is not None and not (isinstance(w, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in w)):
+                        raise ApiError(400, "bad_request", "which must be a list of numbers")
+                    return self._json(need("hypothesis_change")(txt("id", True), txt("decision", True), w))
                 if r == "/review":
                     rs, mine, days = body.get("resolve"), body.get("mine"), body.get("days", 30)
                     if (rs is not None and (not isinstance(rs, int) or isinstance(rs, bool))) or (mine is not None and not isinstance(mine, bool)) or days not in (30, 7, 1):

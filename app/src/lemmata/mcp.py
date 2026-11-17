@@ -853,6 +853,59 @@ def t_propose_map(ctx, args):
             "researcher can confirm it, on the Experiments page of Lemmata. Tell them it is ready for review."), d, "Nothing to narrow."
 
 
+def _hf_text(d):
+    p = d["problem"].get("confirmed") or d["problem"].get("proposed")
+    lines = ["Mode: %s. Problem: %s." % (d["mode"], "confirmed" if d["problem"].get("confirmed") else "proposed, waiting for the researcher" if d["problem"].get("proposed") else "not stated yet")]
+    if p:
+        lines += ["  %s: %s" % (k, _short((p.get(k) or {}).get("text") or "-", 200)) for k in ("gap", "why_it_matters", "approach", "if_solved")]
+    for h in d["hypotheses"]:
+        if h.get("archived"):
+            continue
+        res = h.get("result") or {}
+        lines.append("  %s [%s, %s, %s] %s -> %s (%s)%s" % (h["id"], h["tier"], h["stance"], h["validity"], _short(h["statement"], 120), h["stage"], h["stage_rule"],
+                                                     " · " + _short(res.get("why"), 160) if res.get("why") else ""))
+    for j in d["jobs"]:
+        lines.append("Job waiting: %s %s (%s)%s. Call hypothesis_job with job=%s." % (j["id"], j["type"], j["trigger"], " on " + j["target"] if j.get("target") else "", j["id"]))
+    for c in d["change_sets"]:
+        lines.append("Change set %s waiting for the researcher: %s" % (c["id"], _short(c["understood"], 160)))
+    return "\n".join(lines)
+
+
+def t_hypotheses(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.hypothesis()
+    return _hf_text(d), d, "Call hypothesis_job for one job's full instructions."
+
+
+def t_hypothesis_job(ctx, args):
+    pid, eng = _project(ctx, args)
+    jid = _need_str(args, "job", required=False)
+    if not jid:
+        d = eng.hypothesis()
+        if not d["jobs"]:
+            return "No job is waiting. Nothing to do.", {"jobs": []}, "Nothing to narrow."
+        jid = d["jobs"][0]["id"]
+    j = eng.hypothesis_job(jid)
+    return _quote([j["markdown"]]), j, "Open the source files themselves; quote them exactly."
+
+
+def t_submit_hypothesis_job(ctx, args):
+    pid, eng = _project(ctx, args)
+    jid = _need_str(args, "job")
+    if not isinstance(args.get("result"), dict):
+        raise _Fail("Argument 'result' must be an object in the format hypothesis_job gives.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.submit_hypothesis_job(jid, args["result"], "agent")
+    else:
+        d = eng.submit_hypothesis_job(jid, args["result"], "agent")
+    rep = d.get("submit_report") or []
+    text = ("Stored for the researcher to review; nothing changes until they accept it in Lemmata.\n"
+            + "\n".join("%s · %s: %s" % (r["level"].upper(), r["where"], _short(r["why"], 200)) for r in rep[:30]))
+    return text + "\n" + _hf_text(d), {"submitted": d.get("submitted"), "report": rep}, "Nothing to narrow."
+
+
 _PROJECT_PROP = {"type": "string", "description": "Project id, project name, or GitHub repo name (see list_projects)."}
 
 
@@ -1006,6 +1059,23 @@ TOOLS = [
                     "it when the user asked you to map or understand the project.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "map": {"type": "object", "description": "The map: method, questions, experiments, ignore."}}, ["project", "map"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "hypotheses", "fn": t_hypotheses, "title": "Problem, hypotheses and tests",
+     "description": "Hypothesis-first view of a project: the problem the research tries to solve, each hypothesis with its tier "
+                    "(confirmatory, secondary, exploratory), stage read by rule from the project's own test table, deviations, and the jobs "
+                    "Lemmata has queued for you (the researcher's own LLM). Lemmata never calls a model itself.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "hypothesis_job", "fn": t_hypothesis_job, "title": "One hypothesis-first job", "max_text": 30000,
+     "description": "The full instructions, context and answer format of one queued job (state the problem, draft hypotheses, revise after a "
+                    "fix, combine, comprehend the researcher's input, check a premise). Leave job out for the oldest open job. Read the "
+                    "source files it names, then call submit_hypothesis_job.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "job": {"type": "string", "description": "Job id, e.g. job-3. Optional."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "submit_hypothesis_job", "fn": t_submit_hypothesis_job, "title": "Hand back a hypothesis-first job",
+     "description": "Submit the answer to one job. Lemmata checks every quote against the files and every rule against the test table, "
+                    "drops what fails, and stores the rest as a proposal; only the researcher can accept it. It never edits the repository. "
+                    "Only call it when the user asked you to do Lemmata's jobs.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "job": {"type": "string", "description": "The job id from hypothesis_job, e.g. job-3."}, "result": {"type": "object", "description": "The answer, in the job's format."}}, ["project", "job", "result"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
     {"name": "confound_brief", "fn": t_confound_brief, "title": "Brief for checking confounds", "max_text": 30000,
      "description": "For the Review page's checklist. Returns each research question with its experiments (files, methods, runs, scripts, "
                     "settings, commands) and how to report confounds: things other than the method that could explain a result. Read it, "

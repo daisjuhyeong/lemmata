@@ -29,6 +29,7 @@ from . import trail as trailmod
 from . import venues as venuesmod
 from . import triage as triagemod
 from . import understand as undmod
+from . import hypo as hypomod
 from .errors import BadRequest, NotFound
 
 VERSION = "0.1.0"
@@ -256,6 +257,7 @@ class Engine:
                     tests[sec["claim_id"]] = [self._judged(self._outcome(x, own, vs if own else "the best other method"), x, sec, own, vs if own else "the best other method", crit)
                                               for x in sec["experiments"]]
         claimsmod.restage(doc, claimsmod.load(self.hub), tests, meta)
+        self._hf_stages(doc)
         # stages over time: what the stored results show for the past, then what Lemmata has recorded since it started watching
         log = self.hub.read_json("stages.json", None)
         if not isinstance(log, dict) or not isinstance(log.get("log"), dict):
@@ -889,6 +891,130 @@ class Engine:
         d.update(confirmed=m, proposed=None, report=report, confirmed_at=now_iso())
         self.hub.write_json("map.json", d)
         return self.project_map()
+
+    # ------------------------------------------------------------------ hypothesis-first (S27)
+    def _hf_ctx(self):
+        s = self._ensure()
+        files = hypomod.Files(s["trees"], s["infos"])
+        key = (id(s["G"]), s["scanned_at"])
+        c = getattr(self, "_hf_src", None)
+        if c is None or c[0] != key:
+            c = self._hf_src = (key, hypomod.detect(files))
+        has_paper = s["G"].paper is not None and bool(getattr(s["G"].paper, "lines", None))
+        return s, files, c[1], has_paper
+
+    def hypothesis(self):
+        """The research's problem, hypotheses, tests, deviations and the jobs waiting for the researcher's own LLM."""
+        s, files, src, has_paper = self._hf_ctx()
+        d = hypomod.load(self.hub)
+        mode = d["enabled"] if d["enabled"] is not None else hypomod.wanted(src, has_paper)
+        if hypomod.ensure_jobs(d, mode):
+            self.hub.write_json("hypothesis.json", d)
+        return hypomod.view(files, src, d, s["hist"], has_paper)
+
+    def _hf_claims(self, d):
+        """A confirmed hypothesis is a claim (one claim store, S17 stages); an archived one is a rejected claim."""
+        st = claimsmod.load(self.hub)
+        manual = {m["id"]: m for m in st["manual"]}
+        changed = False
+        for h in d["hypotheses"]:
+            cid = h.get("claim_id")
+            if h.get("confirmed") and not h.get("archived") and cid not in manual:
+                m = claimsmod.add_manual(st, h["statement"], "contribution")
+                m["label"] = h["id"]
+                h["claim_id"], cid, changed = m["id"], m["id"], True
+                manual[cid] = m
+            if cid in manual:
+                want = "rejected" if h.get("archived") else "confirmed" if h.get("confirmed") else "proposed"
+                e = st["entries"].setdefault(cid, {})
+                if e.get("state") != want or manual[cid].get("text") != h["statement"] or manual[cid].get("label") != h["id"]:
+                    e["state"], manual[cid]["text"], manual[cid]["label"], changed = want, h["statement"], h["id"], True
+        if changed:
+            self.hub.write_json("claims.json", st)
+
+    def _hf_stages(self, doc):
+        """Claims made from hypotheses take their stage from the project's own test table (rules R0-R5), not from ours vs best."""
+        try:
+            d = hypomod.load(self.hub)
+            if not d["hypotheses"]:
+                return
+            s, files, src, has_paper = self._hf_ctx()
+            xs = {x["id"]: hypomod.experiment_status(files, x) for x in d["experiments"]}
+        except Exception:      # the claims page must never fail because of this
+            return
+        by_claim = {h["claim_id"]: h for h in d["hypotheses"] if h.get("claim_id")}
+        live = []
+        for c in doc["claims"]:
+            h = by_claim.get(c["id"])
+            if h is not None:
+                stg, rule, why, _ = hypomod.stage(files, d, h, xs)
+                c.update(stage=stg, stage_auto=stg, stage_by="you" if rule == "R0" else "rule", stage_rule=rule, stage_rule_auto=rule,
+                         stage_why=why, ref=h["id"], short=h["id"], hypothesis=h["id"], tier=h["tier"])
+            if c["state"] != "rejected":
+                live.append(c)
+        doc["counts"]["stages"] = {k: sum(c["stage"] == k for c in live) for k in claimsmod.STAGES}
+
+    def _hf_save(self, d):
+        self._hf_claims(d)
+        self.hub.write_json("hypothesis.json", d)
+
+    def hypothesis_act(self, action, target=None, text=None, note=None, targets=None, fields=None, stage=None, prediction=None):
+        d = hypomod.load(self.hub)
+        msg = hypomod.act(d, action, target, text, note, targets, fields, stage, prediction)
+        self._hf_save(d)
+        return dict(self.hypothesis(), message=msg)
+
+    def hypothesis_job(self, job_id):
+        s, files, src, has_paper = self._hf_ctx()
+        d = hypomod.load(self.hub)
+        j = next((j for j in d["jobs"] if j["id"] == job_id), None)
+        if j is None:
+            raise NotFound("unknown job %r" % job_id)
+        return hypomod.job_doc(d, j, src, s["man"].get("name", self.root.name))
+
+    def submit_hypothesis_job(self, job_id, result, by=None):
+        s, files, src, has_paper = self._hf_ctx()
+        d = hypomod.load(self.hub)
+        j, report = hypomod.submit(files, d, job_id, result, by or "agent")
+        self._hf_save(d)
+        return dict(self.hypothesis(), submitted=j, submit_report=report)
+
+    def hypothesis_change(self, cs_id, decision, which=None):
+        d = hypomod.load(self.hub)
+        if decision == "accept":
+            done, proposals = hypomod.accept(d, cs_id, which)
+            if proposals:
+                d.setdefault("proposals", []).append({"id": cs_id, "at": now_iso(), "ops": proposals})
+            msg = "Applied: " + "; ".join(done) + (". %d change(s) the protocol does not say: download the proposal for your notes." % len(proposals) if proposals else ".")
+        elif decision == "reject":
+            msg = hypomod.reject(d, cs_id)
+        else:
+            raise BadRequest("decision must be accept or reject")
+        self._hf_save(d)
+        return dict(self.hypothesis(), message=msg)
+
+    def hypothesis_proposal(self, cs_id):
+        """The protocol change a change set implies, as a notes file for the researcher to commit (Lemmata never edits the protocol)."""
+        d = hypomod.load(self.hub)
+        p = next((p for p in d.get("proposals", []) if p["id"] == cs_id), None)
+        if p is None:
+            raise NotFound("no proposal for %r" % cs_id)
+        cs = next((c for c in d["change_sets"] if c["id"] == cs_id), {})
+        out = ["# Proposed protocol change (from Lemmata, %s)" % p["at"][:10], "",
+               "Not applied to the protocol. Lemmata accepted these changes into its own view on %s; the protocol does not say them yet." % p["at"][:10], "",
+               "What was understood: %s" % (cs.get("understood") or "-"), ""]
+        for o in p["ops"]:
+            what = o.get("target") or ", ".join(o.get("targets") or []) or (o.get("after") or {}).get("id")
+            after = o.get("after")
+            out += ["## %s %s" % (o["op"], what), "", "- Reason: %s" % (o.get("reason") or "-")]
+            if isinstance(after, dict):
+                out.append("- Statement: %s" % after.get("statement"))
+            elif after is not None:
+                out.append("- New value: %s" % (after if isinstance(after, str) else ", ".join(after)))
+            if o.get("from"):
+                out.append("- From the researcher's input: \"%s\"" % o["from"]["quote"])
+            out.append("")
+        return "\n".join(out)
 
     # ------------------------------------------------------------------ notation
     def notation(self):

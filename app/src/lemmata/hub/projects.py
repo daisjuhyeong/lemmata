@@ -836,6 +836,41 @@ class Manager:
             except Exception as e:
                 print("lemmata hub: sync %s failed: %s" % (pid, scrub(str(e), self.gh.token(), self.ol.token())), flush=True)
 
+    # --- tracked branch (S27): research often lives on a branch other than the default one
+    def branch_info(self, pid):
+        """The tracked branch and every branch of the code repo, newest first, with the ones pushed after the tracked one."""
+        m = self.meta(pid)
+        owner = self.owner_of(pid)
+        got = self.gh.branches(m["code_repo"], login=owner)
+        tracked = next((b for b in got["branches"] if b["name"] == m.get("branch")), None)
+        newer = [b for b in got["branches"] if tracked and b["date"] and tracked.get("date") and b["date"] > tracked["date"]]
+        return {"tracked": m.get("branch"), "tracked_date": (tracked or {}).get("date"), "default": got["default"], "branches": got["branches"][:40],
+                "newer": [{"name": b["name"], "date": b["date"]} for b in newer[:5]]}
+
+    def set_branch(self, pid, branch):
+        """Track another branch: fetch it into the existing clone, check it out, rescan. Never pushes."""
+        if not isinstance(branch, str) or not valid_branch(branch):
+            raise ProjectError(400, "bad_request", "bad branch name.")
+        code = self.root(pid) / "code"
+        token = self._token(pid)
+        if not token:
+            raise ProjectError(409, "not_signed_in", "Sign in with GitHub first.")
+        a = self.app(pid)
+        with self.oplock(pid):
+            m = self.meta(pid)
+            try:
+                git(code, ["fetch", "--no-tags", "--depth", "1000", "origin", branch], token=token, scope_url=self.cfg.load()["github_web"])
+            except ProjectError as e:
+                if e.code == "git_failed" and "remote ref" in e.message:
+                    raise ProjectError(404, "branch_not_found", "The repository has no branch %r." % branch)
+                raise
+            with a.lock:
+                git(code, ["checkout", "-q", "-B", branch, "FETCH_HEAD"])
+                m["branch"], m["last_sync"] = branch, now_iso()
+                self._save_meta(pid, m)
+                a.engine.scan()
+        return self.summary(pid)
+
     def set_online_refs(self, pid, value):
         if not isinstance(value, bool):
             raise ProjectError(400, "bad_request", "online_refs must be true or false.")

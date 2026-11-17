@@ -642,6 +642,26 @@ class HubTest(HubBase):
         self.assertNotIn(str(self.data), json.dumps(r))
         self.assertEqual(projects.mask("fatal: %s/projects/x" % self.data), "fatal: <data>/projects/x")
 
+    def test_tracked_branch_newer_and_switch(self):
+        """S27: research on a branch other than the default one; the hub says so and can track it."""
+        self.fake.state = "approved"
+        self.signin()
+        pid = self.make_project()
+        self.fake.push_branch("alice/demo-code", "s27-work", {"protocol/short.md": "# Pre-registered\n| H1 | X beats Y. |\n"}, "protocol", when="2099-02-01T00:00:00+00:00")
+        s, b = self.api("GET", "/api/hub/projects/%s/branch" % pid)
+        self.assertEqual(s, 200, b)
+        self.assertEqual(b["tracked"], "main")
+        self.assertIn("s27-work", [x["name"] for x in b["newer"]])
+        self.assertEqual(self.api("POST", "/api/hub/projects/%s/branch" % pid, {"branch": "--upload-pack=x"})[0], 400)
+        self.assertEqual(self.api("POST", "/api/hub/projects/%s/branch" % pid, {"branch": "no-such"})[0], 404)
+        s, p = self.api("POST", "/api/hub/projects/%s/branch" % pid, {"branch": "s27-work"})
+        self.assertEqual((s, p["branch"]), (200, "s27-work"), p)
+        self.assertTrue((self.data / "projects" / pid / "code" / "protocol" / "short.md").is_file())
+        self.assertEqual(self.api("GET", "/api/hub/projects/%s/branch" % pid)[1]["newer"], [])
+        s, d = self.api("GET", "/p/%s/api/hypothesis" % pid)
+        self.assertEqual((s, d["sources"]["hypothesis_source"]), (200, ["protocol/short.md"]))
+        self.assertEqual(self.api("POST", "/api/hub/projects/%s/sync" % pid)[0], 200)
+
     def test_online_refs_default_off_and_check_status(self):
         from unittest import mock
         self.signin()

@@ -514,7 +514,7 @@ class HubHandler(Handler):
                                      body.get("paper_repo"), body.get("paper_branch"), body.get("paper_subdir"), user=user)
                 hub.log_event(user, "project_created", v=(hub.gh.user_public(user) or {}).get("variant"), p=out["id"])
                 return self._json(out, 201)
-        m = re.match(r"^/projects/([a-z0-9-]{1,64})(/paper|/sync|/paper-source|/digest|/digest/send)?$", r)
+        m = re.match(r"^/projects/([a-z0-9-]{1,64})(/paper|/sync|/paper-source|/digest|/digest/send|/branch)?$", r)
         if m:
             pid, sub = m.group(1), m.group(2)
             self._own(pid, dev)  # 404 before any body is read
@@ -530,6 +530,11 @@ class HubHandler(Handler):
                 return self._json(hub.mgr.send_digest(pid))
             if sub is None and method == "DELETE":
                 return self._json(hub.mgr.delete(pid))
+            if sub == "/branch" and method == "GET":
+                return self._json(hub.mgr.branch_info(pid))
+            if sub == "/branch" and method == "POST":
+                body = self._body()
+                return self._json(hub.mgr.set_branch(pid, body.get("branch")))
             if sub == "/sync" and method == "POST":
                 self._body()
                 return self._json(hub.mgr.sync(pid))

@@ -71,9 +71,10 @@ async function rxLoad() {
     let todo = null; try { todo = await apiGet('/api/todo'); } catch (e) { /* older hubs and snapshots */ }
     let trail = null; try { trail = await apiGet('/api/trail'); } catch (e) { /* older hubs and snapshots */ }
     let setup = null; try { setup = await apiGet('/api/setup'); } catch (e) { /* older hubs and snapshots: the page says so */ }
+    let hf = null; try { hf = await apiGet('/api/hypothesis'); } catch (e) { /* older hubs and snapshots have no hypothesis-first view */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -767,6 +768,8 @@ function pageExperiments() {
   const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
   const c = E.counts, mapped = !!E.unmapped;
+  const HF = RX.hf && RX.hf.mode === 'hypothesis_first';
+  if (HF) { root.append(rxHypoFirst()); if (!E.sections.length) return root; root.append(h('h2', { class: 'hf-h2' }, 'From the result files')); }
   root.append(rxThesisHead(E));
   const X = E.extends;
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
@@ -1714,6 +1717,171 @@ function pageFaq() {
   if (!shown) root.append(h('p', { class: 'muted' }, 'No question matches. Try Ask for a question about this project’s content.'), h('button', { class: 'btn sm', onclick: () => openTab('ask') }, 'Open Ask'));
   return root;
 }
+/* ---------- S27 hypothesis-first: problem -> hypotheses -> test -> experiments, on the Thesis page ----------
+   Everything comes from /api/hypothesis. Lemmata never calls a model: what needs one is a job for the researcher's own LLM
+   (Claude Code over MCP, or any LLM given the job's markdown). The researcher decides: Confirm, Fix, Delete, Combine, Tell. */
+const HF_TIER = { confirmatory: ['Confirmatory', 'Pre-registered: its test was fixed before the data.'], secondary: ['Secondary', 'Pre-registered without a confirmatory claim: numbers, no verdict.'], exploratory: ['Exploratory', 'Decided after seeing the data, or no frozen test.'] };
+const HF_JOB = { understand_problem: 'State the problem', draft_hypotheses: 'Draft the hypotheses', revise: 'Propose what else must change', combine: 'Combine hypotheses', comprehend_input: 'Read what you told Lemmata', premise_check: 'Check the cited source' };
+const HF_PF = [['gap', 'Gap'], ['why_it_matters', 'Why it matters'], ['approach', 'Approach'], ['if_solved', 'If it works']];
+const HF_RULE = { R0: 'set by you', R1: 'test met', R2: 'test not met', R3: 'tested, no verdict', R4: 'not run or no rule', R5: 'exploratory' };
+async function hfPost(path, body, okMsg) {
+  try { const r = await apiPost(path, body); RX.hf = r; toast(r.message || okMsg || 'Saved.'); try { RX.claims = await apiGet('/api/claims'); RX.experiments = await apiGet('/api/experiments'); } catch (e) { /* the page still shows the new view */ } renderPage(true); return r; }
+  catch (e) { toast(e.message); return null; }
+}
+const hfAct = (action, extra) => hfPost('/api/hypothesis', Object.assign({ action }, extra || {}));
+function hfAsk(title, label, value, fn, opts) {
+  const ta = h('textarea', { class: 'hf-ta', rows: (opts && opts.rows) || 4, 'aria-label': label, placeholder: (opts && opts.placeholder) || '' }); ta.value = value || '';
+  modal(title, h('div', null, h('p', { class: 'muted small' }, label), ta), [{ label: 'Cancel' }, { label: (opts && opts.ok) || 'Save', primary: true, fn: () => fn(ta.value) }], { width: 560 });
+}
+function hfFix(hy) {
+  const st = h('textarea', { class: 'hf-ta', rows: 3, 'aria-label': 'Statement' }); st.value = hy.statement;
+  const an = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': 'What it answers' }); an.value = hy.answers || '';
+  const why = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': 'What is wrong', placeholder: 'Or say in plain words what is wrong: "this is not my point; the point is…"' });
+  modal('Fix ' + hy.id, h('div', null,
+    h('label', { class: 'hf-l' }, 'Statement'), st, h('label', { class: 'hf-l' }, 'What it answers'), an, h('label', { class: 'hf-l' }, 'What is wrong (optional)'), why,
+    hy.criterion && hy.criterion.frozen ? h('p', { class: 'muted small' }, 'Its test was frozen in ', mono(hy.criterion.frozen.file), '. Changing the hypothesis is recorded as a deviation; the frozen test stays as it is.') : null,
+    h('p', { class: 'muted small' }, 'Your edit applies now. Your LLM is then asked what else must change; you review that before it applies.')),
+  [{ label: 'Cancel' }, { label: 'Save', primary: true, fn: () => hfAct('fix', { target: hy.id, text: st.value, note: why.value || null, fields: { answers: an.value } }) }], { width: 600 });
+}
+function hfFixProblem(p) {
+  const tas = HF_PF.map(([k, l]) => { const t = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': l }); t.value = ((p || {})[k] || {}).text || ''; return [k, l, t]; });
+  const why = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': 'What is wrong', placeholder: 'Or say in plain words what is wrong.' });
+  modal('Fix the problem', h('div', null, tas.map(([k, l, t]) => [h('label', { class: 'hf-l' }, l), t]), h('label', { class: 'hf-l' }, 'What is wrong (optional)'), why,
+    h('p', { class: 'muted small' }, 'Every hypothesis under it is marked stale, and your LLM proposes what else must change.')),
+  [{ label: 'Cancel' }, { label: 'Save', primary: true, fn: () => { const f = {}; tas.forEach(([k, l, t]) => { if (t.value !== (((p || {})[k] || {}).text || '')) f[k] = t.value; }); hfAct('fix', { target: 'problem', fields: f, note: why.value || null }); } }], { width: 620 });
+}
+async function hfJobText(id) { const j = await apiGet('/api/hypothesis/job?id=' + encodeURIComponent(id)); return j.markdown; }
+function hfPaste(j) {
+  hfAsk('Paste your LLM’s answer', 'The JSON your LLM returned for ' + j.id + ' (' + (HF_JOB[j.type] || j.type) + '). Lemmata checks every quote and rule against the files and drops what fails.', '', async v => {
+    let res; try { res = JSON.parse(v); } catch (e) { toast('That is not valid JSON.'); return; }
+    const r = await hfPost('/api/hypothesis/submit', { job: j.id, result: res }, 'Checked and stored for your review.');
+    if (r && r.submit_report && r.submit_report.length) modal('What Lemmata dropped or flagged', h('ul', { class: 'hf-rep' }, r.submit_report.map(x => h('li', null, h('b', null, x.level), ' · ' + x.where + ': ' + x.why))), [{ label: 'Close', primary: true }]);
+  }, { rows: 10, ok: 'Check and store' });
+}
+function hfJobs(D) {
+  if (!D.jobs.length || READONLY) return null;
+  return h('section', { class: 'hf-sec hf-jobs' }, h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Waiting for your LLM'), h('span', { class: 'muted small' }, 'Lemmata never calls a model. In Claude Code, say: “do Lemmata’s jobs for this project” (tools hypothesis_job and submit_hypothesis_job). Or copy a job into any LLM and paste its answer back.')),
+    D.jobs.map(j => h('div', { class: 'hf-row' }, h('span', { class: 'hf-tag' }, '[' + j.id + ']'), h('span', { class: 'grow' }, h('b', null, HF_JOB[j.type] || j.type), h('span', { class: 'muted small' }, ' · ' + j.trigger + (j.target ? ' · ' + j.target : ''))),
+      h('button', { class: 'linkbtn small', onclick: async () => { try { copyText(await hfJobText(j.id)); } catch (e) { toast(e.message); } } }, 'Copy job'),
+      h('a', { class: 'linkbtn small', href: '/api/hypothesis/job.md?id=' + encodeURIComponent(j.id), download: '' }, '.md'),
+      h('button', { class: 'linkbtn small', onclick: () => hfPaste(j) }, 'Paste answer'))));
+}
+function hfChangeSets(D) {
+  if (!D.change_sets.length) return null;
+  return D.change_sets.map(cs => {
+    const picks = cs.operations.map(() => h('input', { type: 'checkbox', checked: '' }));
+    const val = v => v == null ? '–' : Array.isArray(v) ? v.join(', ') || '–' : typeof v === 'object' ? (v.id ? v.id + ': ' : '') + (v.statement || '') : String(v);
+    return h('section', { class: 'hf-sec hf-cs' }, h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Proposed change'), h('span', { class: 'muted small' }, (HF_JOB[cs.trigger.kind] || cs.trigger.kind) + ' · by ' + cs.by)),
+      cs.understood ? h('p', { class: 'hf-und serif' }, 'Understood: ', cs.understood) : null,
+      h('div', { class: 'hf-ops' }, cs.operations.map((o, i) => h('label', { class: 'hf-op' }, READONLY ? null : picks[i],
+        h('span', { class: 'hf-op-w' }, h('span', null, h('b', null, o.op + ' ' + (o.target || (o.targets || []).join(' + ') || (o.after && o.after.id) || '')), o.field ? h('span', { class: 'muted' }, ' · ' + o.field) : null,
+          (cs.not_in_protocol || []).includes(i) ? h('span', { class: 'tag hf-nip', title: 'The protocol does not say this; accepting it gives you a proposal file for your notes' }, 'not in protocol') : null),
+          o.op === 'revise' || o.op === 'relink' ? h('span', { class: 'hf-ba' }, h('span', { class: 'hf-before' }, val(o.before)), ' → ', h('span', { class: 'hf-after' }, val(o.after))) : o.after ? h('span', { class: 'hf-ba' }, h('span', { class: 'hf-after' }, val(o.after))) : null,
+          o.reason ? h('span', { class: 'muted small' }, o.reason) : null, o.from ? h('span', { class: 'muted small' }, 'from your words: “' + o.from.quote + '”') : null)))),
+      (cs.report || []).length ? h('p', { class: 'muted small' }, plural(cs.report.length, 'item') + ' dropped or flagged by the checker.') : null,
+      READONLY ? null : h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => { const w = picks.map((p, i) => p.checked ? i : -1).filter(i => i >= 0); if (!w.length) { toast('Tick at least one change.'); return; } hfPost('/api/hypothesis/change', { id: cs.id, decision: 'accept', which: w }).then(r => { if (r && /proposal/.test(r.message || '')) toast(r.message, { label: 'Download the proposal', fn: () => { const a = h('a', { href: '/api/hypothesis/proposal.md?id=' + encodeURIComponent(cs.id), download: '' }); document.body.append(a); a.click(); a.remove(); } }); }); } }, 'Accept'),
+        h('button', { class: 'btn', onclick: () => hfPost('/api/hypothesis/change', { id: cs.id, decision: 'reject' }) }, 'Reject')));
+  });
+}
+function hfProblem(D) {
+  const P = D.problem, p = P.confirmed || P.proposed;
+  const sec = h('section', { class: 'hf-sec hf-prob' + (P.confirmed ? ' ok' : '') },
+    h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Problem'), h('span', { class: 'hf-tag' }, P.confirmed ? '[confirmed]' : P.validity === 'not_valid' ? '[not valid]' : p ? '[confirm]' : '[waiting for your LLM]'), h('span', { class: 'grow' }),
+      p && !READONLY ? [!P.confirmed ? h('button', { class: 'btn primary small', onclick: () => hfAct('confirm', { target: 'problem' }) }, 'Confirm') : null,
+        h('button', { class: 'linkbtn small', onclick: () => hfFixProblem(p) }, 'Fix'),
+        !P.confirmed ? h('button', { class: 'linkbtn small', onclick: () => hfAsk('Not the problem you are solving?', 'Say what is wrong. Your LLM tries again from the sources and your words.', '', v => hfAct('not_valid', { target: 'problem', note: v }), { ok: 'Send' }) }, 'Not valid') : null,
+        h('button', { class: 'linkbtn small', onclick: () => hfAsk('Delete the problem statement', 'A project needs a root. Say in your words what the problem is; your LLM states it again from that.', '', v => hfAct('delete', { target: 'problem', text: v }), { ok: 'Delete and replace' }) }, 'Delete')] : null));
+  if (!p) return sec.append(h('p', { class: 'muted' }, 'Your LLM states what problem the research is trying to solve, from the protocol, the report and the notes. You then say whether that is right.')), sec;
+  if (!P.confirmed) sec.append(h('p', { class: 'hf-q' }, 'Is this the problem you are solving?'));
+  sec.append(h('dl', { class: 'hf-dl' }, HF_PF.map(([k, l]) => { const f = p[k] || {}; return [h('dt', null, l), h('dd', null, f.text ? h('span', { class: 'serif' }, f.text) : h('span', { class: 'muted' }, f.note || 'not stated'),
+    (f.evidence || []).map(ev => [' ', rxWhere(ev, 'code')]), f.edited ? h('span', { class: 'muted small' }, ' (edited)') : null)]; })));
+  return sec;
+}
+function hfResult(hy) {
+  const r = hy.result; if (!r || !r.values) return null;
+  const v = Object.entries(r.values).map(([k, x]) => h('span', { class: 'hf-v' }, h('span', { class: 'muted' }, k + ' '), mono(typeof x === 'number' ? (Math.abs(x) < 1e-3 && x !== 0 ? x.toExponential(1) : String(+x.toFixed(4))) : String(x))));
+  return h('span', { class: 'hf-vals' }, v);
+}
+function hfHyp(hy, D) {
+  const open = RX.hfOpen === hy.id, sel = (RX.hfSel || []).includes(hy.id);
+  const row = h('div', { class: 'hf-h' + (open ? ' open' : '') + ' t-' + hy.tier + rxSt(hy.stage) },
+    h('div', { class: 'hf-hr' },
+      READONLY ? null : h('input', { type: 'checkbox', checked: sel ? '' : null, title: 'Select to combine', 'aria-label': 'Select ' + hy.id + ' to combine', onchange: ev => { const s = new Set(RX.hfSel || []); ev.target.checked ? s.add(hy.id) : s.delete(hy.id); RX.hfSel = [...s]; renderPage(true); } }),
+      h('button', { class: 'hf-id', 'aria-expanded': String(open), onclick: () => { RX.hfOpen = open ? null : hy.id; renderPage(true); } }, hy.id),
+      rxStageChip(Object.assign({}, hy, { stage_by: hy.stage_rule === 'R0' ? 'you' : 'rule' })),
+      h('span', { class: 'hf-st serif grow' }, hy.statement, hy.stance === 'tested' ? h('span', { class: 'muted small' }, ' — ' + ((hy.source || {}).cite || 'someone else’s claim')) : null),
+      hfResult(hy),
+      hy.tested_by.length ? h('span', { class: 'muted small' }, 'by ' + hy.tested_by.join(', ')) : null,
+      hy.deviations.after ? h('span', { class: 'hf-dev', title: plural(hy.deviations.after, 'deviation') + ' after its data: ' + hy.deviations.ids.join(', ') }, plural(hy.deviations.after, 'deviation')) : null,
+      hy.validity === 'unreviewed' ? h('span', { class: 'hf-tag', title: 'Not confirmed by you yet' }, '[confirm]') : null,
+      hy.stale ? h('span', { class: 'hf-tag', title: hy.stale }, '[stale]') : null),
+    open ? hfDetail(hy, D) : null);
+  return row;
+}
+function hfDetail(hy, D) {
+  const c = hy.criterion || {}, devs = D.deviations.filter(x => hy.deviations.ids.includes(x.id));
+  return h('div', { class: 'hf-d' },
+    h('dl', { class: 'hf-dl' },
+      hy.answers ? [h('dt', null, 'Answers'), h('dd', null, hy.answers)] : null,
+      h('dt', null, 'Tier'), h('dd', null, HF_TIER[hy.tier][0], h('span', { class: 'muted small' }, ' · ' + HF_TIER[hy.tier][1]), hy.tier_was ? h('span', { class: 'muted small' }, ' (was ' + hy.tier_was + ')') : null),
+      h('dt', null, 'Test'), h('dd', null, c.text || h('span', { class: 'muted' }, 'none stated'), c.frozen ? h('span', { class: 'muted small' }, ' · frozen in ', mono(c.frozen.file), hy.frozen_at ? ' (' + hy.frozen_at.day + ', ' + hy.frozen_at.sha + ')' : '') : null),
+      h('dt', null, 'Rule'), h('dd', null, c.rule ? [mono(c.rule.file), ' row ', mono(JSON.stringify(c.rule.select)), ': ', c.rule.conditions.map(k => k.column + ' ' + k.op + ' ' + k.value).join(' and ')] : h('span', { class: 'muted' }, 'no rule yet: the stage stays where it is'),
+        (hy.sub_rules || []).length ? h('span', { class: 'muted small' }, ' + ' + plural(hy.sub_rules.length, 'sub-condition') + ' from the merged hypotheses') : null),
+      h('dt', null, 'Stage'), h('dd', null, RX_STAGE[hy.stage][1], h('span', { class: 'muted small' }, ' · rule ' + hy.stage_rule + ' (' + HF_RULE[hy.stage_rule] + '): ' + hy.stage_why)),
+      hy.evidence.length ? [h('dt', null, 'Source'), h('dd', null, hy.evidence.map(ev => [rxWhere(ev, 'code'), ' ']))] : null,
+      hy.aliases.length ? [h('dt', null, 'Merged from'), h('dd', null, hy.aliases.join(', '))] : null,
+      (hy.prediction || []).length ? [h('dt', null, 'Your prediction'), h('dd', null, hy.prediction.map(p => p.outcome.replace('_', ' ') + ' (' + p.at.slice(0, 10) + ')').join(' → '))] : null,
+      devs.length ? [h('dt', null, 'Deviations'), h('dd', null, devs.map(x => h('div', { class: 'small' }, h('b', null, x.id), ' ' + (x.date || ''), ' · ' + x.title + ' · ', x.timing[hy.id] === 'after_data' ? h('b', null, 'after data') : x.timing[hy.id] === 'before_data' ? 'before data' : 'date unknown', x.path ? [' ', rxWhere({ path: x.path, line: x.line }, 'code')] : null)))] : null),
+    READONLY ? null : h('div', { class: 'row hf-acts' },
+      hy.validity !== 'valid' ? h('button', { class: 'btn primary small', onclick: () => hfAct('confirm', { target: hy.id }) }, 'Confirm') : null,
+      h('button', { class: 'btn small', onclick: () => hfFix(hy) }, 'Fix'),
+      h('button', { class: 'btn small', onclick: () => hfAsk('Delete ' + hy.id, 'It is archived, not erased. Restore it from the list of archived hypotheses. Why (optional)?', '', v => hfAct('delete', { target: hy.id, note: v || null }), { ok: 'Delete', rows: 2 }) }, 'Delete'),
+      !hy.result || hy.result.met == null ? h('select', { class: 'hf-pred', 'aria-label': 'Your prediction', onchange: ev => { if (ev.target.value) hfAct('predict', { target: hy.id, prediction: ev.target.value }); } }, h('option', { value: '' }, 'Predict…'), h('option', { value: 'supported' }, 'Supported'), h('option', { value: 'not_supported' }, 'Not supported'), h('option', { value: 'mixed' }, 'Mixed')) : null,
+      hy.stance === 'tested' ? h('button', { class: 'linkbtn small', onclick: () => hfAct('premise', { target: hy.id }) }, 'Check the source') : null,
+      h('span', { class: 'grow' }),
+      h('select', { class: 'hf-pred', 'aria-label': 'Set the stage yourself', onchange: ev => { if (ev.target.value) hfAct('stage', { target: hy.id, stage: ev.target.value }); } }, h('option', { value: '' }, 'Stage…'), h('option', { value: 'auto' }, 'By the rule'), RX_STAGES.map(k => h('option', { value: k }, RX_STAGE[k][1])))));
+}
+function hfBranch() {
+  if (typeof PID === 'undefined' || !PID || READONLY) return null;
+  if (RX.hfBranch === undefined) { RX.hfBranch = null; fetch('/api/hub/projects/' + encodeURIComponent(PID) + '/branch', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(b => { RX.hfBranch = b; if (b && b.newer && b.newer.length) renderPage(true); }).catch(() => {}); }
+  const B = RX.hfBranch; if (!B) return null;
+  const sw = name => async () => { toast('Switching to ' + name + '…'); try { const r = await fetch('/api/hub/projects/' + encodeURIComponent(PID) + '/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch: name }) }); const j = await r.json(); if (!r.ok) throw new Error((j.error || {}).message || 'failed'); RX.hfBranch = undefined; await loadAll(); await rxRefresh(); toast('Now tracking ' + name + '.'); } catch (e) { toast(e.message); } };
+  const pick = h('select', { class: 'hf-pred', 'aria-label': 'Track another branch', onchange: ev => { if (ev.target.value) sw(ev.target.value)(); } }, h('option', { value: '' }, 'Track another branch…'), B.branches.filter(b => b.name !== B.tracked).map(b => h('option', { value: b.name }, b.name + (b.date ? ' · ' + b.date.slice(0, 10) : ''))));
+  return h('div', { class: 'hf-branch' + (B.newer.length ? ' warn' : '') }, h('span', null, 'Tracking ', mono(B.tracked)), B.newer.length ? h('span', null, ' · ', mono(B.newer[0].name), ' has newer commits (' + B.newer[0].date.slice(0, 10) + ')', ' ', h('button', { class: 'linkbtn small', onclick: sw(B.newer[0].name) }, 'Track it')) : null, h('span', { class: 'grow' }), pick);
+}
+function rxHypoFirst() {
+  const D = RX.hf, out = h('div', { class: 'hf' });
+  out.append(hfBranch() || h('span'));
+  if (!READONLY) {
+    const ta = h('textarea', { class: 'hf-ta hf-tell', rows: 2, 'aria-label': 'Tell Lemmata', placeholder: 'Tell Lemmata: a hypothesis, a correction, what your advisor said… Your LLM works out what it changes; you accept it.' });
+    out.append(h('div', { class: 'hf-tellbox' }, ta, h('button', { class: 'btn', onclick: () => { if (ta.value.trim()) hfAct('tell', { text: ta.value }); } }, 'Tell')));
+  }
+  out.append(hfJobs(D) || h('span'));
+  (hfChangeSets(D) || []).forEach(x => out.append(x));
+  out.append(hfProblem(D));
+  const live = D.hypotheses.filter(x => !x.archived), gone = D.hypotheses.filter(x => x.archived);
+  const C = D.counts.stages;
+  const head = h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Hypotheses'), h('span', { class: 'muted small' }, RX_STAGES.filter(k => C[k]).map(k => C[k] + ' ' + RX_STAGE[k][1].toLowerCase()).join(' · ') || 'none yet'), h('span', { class: 'grow' }),
+    (RX.hfSel || []).length >= 2 && !READONLY ? h('button', { class: 'btn small', onclick: () => hfAsk('Combine ' + RX.hfSel.join(' + '), 'How do they relate (optional)? Your LLM drafts one hypothesis that keeps each original test as a sub-condition.', '', v => { const t = RX.hfSel; RX.hfSel = []; hfAct('combine', { targets: t, note: v || null }); }, { ok: 'Ask my LLM', rows: 2 }) }, 'Combine ' + RX.hfSel.length) : null,
+    live.some(x => x.validity === 'unreviewed') && !READONLY ? h('button', { class: 'linkbtn small', onclick: async () => { for (const x of live.filter(x => x.validity === 'unreviewed')) { try { await apiPost('/api/hypothesis', { action: 'confirm', target: x.id }); } catch (e) { toast(e.message); } } await rxRefresh(); } }, 'Confirm all') : null);
+  const hs = h('section', { class: 'hf-sec' }, head);
+  if (!live.length) hs.append(h('p', { class: 'muted' }, D.problem.confirmed ? 'Your LLM drafts the hypotheses under the confirmed problem.' : 'Hypotheses are drafted once you confirm the problem.'));
+  for (const t of ['confirmatory', 'secondary', 'exploratory']) {
+    const g = live.filter(x => x.tier === t); if (!g.length) continue;
+    hs.append(h('div', { class: 'hf-tier t-' + t }, h('div', { class: 'hf-th' }, HF_TIER[t][0], h('span', { class: 'muted small' }, ' · ' + HF_TIER[t][1])), g.map(x => hfHyp(x, D))));
+  }
+  if (gone.length) hs.append(h('details', { class: 'details' }, h('summary', null, 'Archived (' + gone.length + ')'), gone.map(x => h('div', { class: 'hf-row' }, h('b', null, x.id), h('span', { class: 'grow muted' }, ' ' + trunc(x.statement, 90) + ' · ' + (x.archived.reason === 'merged' ? 'merged into ' + x.archived.merged_into : 'deleted')),
+    READONLY ? null : h('button', { class: 'linkbtn small', onclick: () => hfAct('restore', { target: x.id }) }, 'Restore')))));
+  out.append(hs);
+  if (D.experiments.length) out.append(h('section', { class: 'hf-sec' }, h('div', { class: 'hf-sh' }, h('span', { class: 'tag' }, 'Experiments')),
+    D.experiments.map(x => h('div', { class: 'hf-row' }, h('span', { class: 'hf-tag' }, '[' + x.status + ']'), h('b', null, x.id), h('span', { class: 'grow' }, ' ' + x.title), h('span', { class: 'muted small' }, x.tests_claims.length ? 'tests ' + x.tests_claims.join(', ') : 'no hypothesis'), x.deliverables[0] ? rxWhere({ path: x.deliverables[0] }, 'code') : null))));
+  const devA = D.deviations.filter(x => x.after_data);
+  if (D.deviations.length) out.append(h('details', { class: 'details hf-sec' }, h('summary', null, 'Deviations from the frozen design (' + D.deviations.length + ', ' + devA.length + ' after data)'),
+    D.deviations.map(x => h('div', { class: 'hf-row small' }, h('b', null, x.id), h('span', { class: 'muted' }, ' ' + (x.date || '–')), h('span', { class: 'grow' }, ' ' + x.title), x.affects.length ? h('span', { class: 'muted' }, x.affects.join(', ')) : null, x.after_data ? h('span', { class: 'hf-dev' }, 'after data') : null))));
+  if (D.questions.length) out.append(h('details', { class: 'details hf-sec' }, h('summary', null, 'Open questions (' + D.questions.length + ')'), D.questions.map(q => h('div', { class: 'hf-row small' }, q.text))));
+  return out;
+}
+
 const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
