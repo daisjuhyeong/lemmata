@@ -1494,12 +1494,14 @@ function bdDetail(B, sel) {      // what the selected card is, in rows (an item 
     return h('section', { class: 'rx-x-sec su-detail' }, head(hf ? 'Step' : 'Experiment', bdXName(B, x), hf ? h('span', { class: 'tag' }, x.status) : SU_XTYPE[x.type] ? h('span', { class: 'tag' }, SU_XTYPE[x.type]) : null),
       h('div', { class: 'su-body' }, hf ? h('p', { class: 'su-ct' }, x.name) : null, h('div', { class: 'su-p' },
         row('Tests', cs.length ? cs.map(cBtn) : h('span', { class: 'rx-warn' }, '! No claim. What it uses does not reach the thesis yet.')),
-        U && U.rows ? row('Runs', h('span', null, plural(U.rows, dims.length ? 'run' : 'row') + (dims.length ? ': ' + dims.join(' × ') : '')), U.failed ? h('span', { class: 'rx-warn' }, '! ' + U.failed + ' marked failed in the result files') : null) : null,
+        U && U.rows && U.methods ? row('Runs', h('span', null, plural(U.rows, 'run') + ': ' + dims.join(' × ')), U.failed ? h('span', { class: 'rx-warn' }, '! ' + U.failed + ' marked failed in the result files') : null)
+          : U && U.datasets ? row('Covers', h('span', null, plural(U.datasets, 'dataset'))) : null,
         byKind(x.items),
         hf ? row('Writes', x.deliverables.length ? x.deliverables.map(d => /\.[a-z0-9]+$/i.test(d) && !/\.gz$/i.test(d) ? rxWhere({ path: d }, 'code') : h('span', { class: 'mono small' }, d)) : h('span', { class: 'muted small' }, 'nothing named yet')) : null,
         hf && x.depends_on.length ? row('Needs', x.depends_on.map(d => { const o = B.experiments.find(q => q.id === d); return o ? xBtn(o) : h('span', { class: 'mono small' }, d); })) : null,
-        hf && !x.items.length ? row('Used', h('span', { class: 'muted small' }, U && U.files ? 'Its tables name no method, dataset or metric column.' : 'No readable table among its result files (csv or tsv), so what it used is unknown.')) : null,
+        hf && !x.items.length ? row('Used', h('span', { class: 'muted small' }, U && U.files ? 'Its tables name no method, dataset or metric column.' : 'No readable table among its result files (csv or tsv, plain or .gz), so what it used is unknown.')) : null,
         hf && U && U.skipped ? row('', h('span', { class: 'muted small' }, plural(U.skipped, 'file') + ' too large to read.')) : null,
+        hf && U && U.partial ? row('', h('span', { class: 'muted small' }, plural(U.partial, 'compressed file') + ' read in part only (very large).')) : null,
         x.sheets.length ? row('Sheets', h('span', { class: 'muted small' }, plural(x.sheets.length, 'result-file sheet') + ' below ↓')) : null,
         hf ? null : row('', h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open the experiment'))))); }
   const it = B.items.find(q => q.id === id), kind = BD_KIND[it.kind] || ['Items', 'item'], byX = new Map(B.experiments.map(x => [x.id, x]));

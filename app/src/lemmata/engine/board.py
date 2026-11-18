@@ -7,12 +7,13 @@ setup connects to the thesis ... think of a kanban system"). Two sources, one sh
 
 - a paper project: the Setup document itself (claims, experiments and items it already holds) and the thesis text;
 - a hypothesis-first project: the problem, the hypotheses and the protocol's steps, and for each step what its own
-  result tables name (a "model" column, a "dataset" column, metric columns).
+  result tables name (a "model" column, a "dataset" column, metric columns; csv or tsv, plain or gzip).
 
 Rules only: no language model, nothing is run. A card that does not reach the thesis is kept and marked, because that
 gap is what the board is for.
 """
 import csv
+import gzip
 import io
 import re
 
@@ -22,6 +23,7 @@ from .hypo import rel
 SCHEMA = "lemmata.board/1"
 KINDS = ("metric", "dataset", "method", "condition")
 MAX_FILES, MAX_FILE, MAX_BYTES, MAX_NAMES = 120, 2_000_000, 24_000_000, 60
+MAX_GZ, MAX_GZ_TEXT = 12_000_000, 96_000_000      # a compressed table: its size on disk, and how much of its text is read
 
 # columns of a long result table (one row per run), by header name; the first one present wins
 METHOD_COLS = ("model", "method", "detector", "algorithm", "algo", "approach", "baseline", "learner", "classifier", "system")
@@ -29,6 +31,9 @@ DATASET_COLS = ("dataset", "benchmark", "task", "corpus", "source", "stream", "s
 GROUP_COLS = ("group", "suite", "collection", "benchmark", "family", "category", "domain")
 SEED_COLS = ("seed", "run", "trial", "rep", "repeat", "fold")
 COND_COLS = ("variant", "condition", "setting", "perturbation", "shuffle", "ablation")
+# a tidy table names its measures in one column and puts the numbers in another
+NAME_COLS = ("measure", "metric", "statistic", "stat", "metricname", "measurename")
+VALUE_COLS = ("value", "score", "val", "result")
 STATUS_COLS = ("status", "state")
 FAILED = {"error", "failed", "fail", "crashed", "oom", "timeout", "killed"}
 METRIC_RE = re.compile(
@@ -77,7 +82,31 @@ def _files_of(files, deliverables):
             listing = sorted(q for _, q in files.listing())
         pre = p.rstrip("/") + "/"
         out += [q for q in listing if q.startswith(pre)]
-    return [p for p in dict.fromkeys(out) if p.lower().endswith((".csv", ".tsv"))]
+    return [p for p in dict.fromkeys(out) if p.lower().endswith(TABLES)]
+
+
+TABLES = (".csv", ".tsv", ".csv.gz", ".tsv.gz")
+
+
+def _lines(raw, gz):
+    """The text lines of a table; a compressed one is read as a stream and cut at MAX_GZ_TEXT. -> (iterator, state)"""
+    state = {"partial": False}
+    if not gz:
+        return io.StringIO(raw.decode("utf-8", "replace")), state
+
+    def gen():
+        n = 0
+        try:
+            with gzip.open(io.BytesIO(raw), "rt", encoding="utf-8", errors="replace", newline="") as f:
+                for line in f:
+                    n += len(line)
+                    if n > MAX_GZ_TEXT:
+                        state["partial"] = True
+                        return
+                    yield line
+        except (OSError, EOFError):
+            state["partial"] = True
+    return gen(), state
 
 
 def _first(header, names):
@@ -88,7 +117,8 @@ def _first(header, names):
 def read_step(files, deliverables):
     """What one step's result tables name. -> {"methods": {name: {...}}, "datasets": {...}, "metrics": [...], ...}"""
     methods, datasets, conds, seeds, metrics, measures, cells = {}, {}, {}, set(), {}, {}, {}
-    rows_n = failed = read = skipped = total = 0
+    rows_n = failed = read = skipped = total = partial = 0
+    named = {}      # measures a tidy table names; when a step has them, they are its list (other tables' unnamed number columns are summaries of them)
     paths = _files_of(files, deliverables)
     for p in paths:
         rid, path = files.find(p)
@@ -99,17 +129,19 @@ def read_step(files, deliverables):
             size = t.size(path)
         except Exception:
             size = None
-        if size is None or size > MAX_FILE or read >= MAX_FILES or total + size > MAX_BYTES:
+        gz = path.lower().endswith(".gz")
+        if size is None or size > (MAX_GZ if gz else MAX_FILE) or read >= MAX_FILES or total + size > MAX_BYTES:
             skipped += 1
             continue
         try:
-            raw = t.read(path).decode("utf-8", "replace")
+            raw = t.read(path)
         except Exception:
             skipped += 1
             continue
         read += 1
         total += size
-        rd = csv.reader(io.StringIO(raw), dialect="excel-tab" if path.endswith(".tsv") else "excel")
+        lines, state = _lines(raw, gz)
+        rd = csv.reader(lines, dialect="excel-tab" if ".tsv" in path.lower() else "excel")
         try:
             header = [h.strip() for h in next(rd)]
         except (StopIteration, csv.Error):
@@ -117,11 +149,13 @@ def read_step(files, deliverables):
         idx = {h: i for i, h in enumerate(header)}
         mc, dc, sc, cc, stc = (_first(header, n) for n in (METHOD_COLS, DATASET_COLS, SEED_COLS, COND_COLS, STATUS_COLS))
         gc = _first([h for h in header if h != dc], GROUP_COLS)
+        nc, vc = _first(header, NAME_COLS), _first(header, VALUE_COLS)
+        tidy = nc is not None and vc is not None and nc not in (mc, dc)
         role = {mc, dc, sc, cc, stc, gc} - {None}
-        mcols = [h for h in header if h not in role and METRIC_RE.match(norm(h))]
-        ocols = [h for h in header if h not in role and h not in mcols]
+        mcols = [] if tidy else [h for h in header if h not in role and METRIC_RE.match(norm(h))]
+        ocols = [] if tidy else [h for h in header if h not in role and h not in mcols]
         got = lambda r, c: (r[idx[c]].strip() if c is not None and idx[c] < len(r) else "")
-        seen_num = set()
+        seen_num, todo, names = set(), mcols + ocols, set()
         try:
             for r in rd:
                 if not r:
@@ -130,9 +164,10 @@ def read_step(files, deliverables):
                 # one run = one (method, dataset, condition, seed); a failed attempt that was later repeated with success is not a failed run
                 key = (m, g, d, c, s) if (m or d) else ("row", path, tuple(r))
                 cells[key] = cells.get(key, False) or got(r, stc).lower() not in FAILED
-                for h in mcols + ocols:
-                    if h in seen_num:
-                        continue
+                if tidy:
+                    names.add(got(r, nc))
+                    continue
+                for h in todo:
                     v = got(r, h)
                     if v:
                         try:
@@ -140,14 +175,21 @@ def read_step(files, deliverables):
                         except ValueError:
                             continue
                         seen_num.add(h)
+                if seen_num and len(todo) != len(mcols) + len(ocols) - len(seen_num):
+                    todo = [h for h in todo if h not in seen_num]
         except csv.Error:
             pass
+        partial += state["partial"]
         for h in mcols:
             if h in seen_num:
                 metrics.setdefault(h, []).append(p)
         for h in ocols:
             if h in seen_num:
                 measures.setdefault(h, []).append(p)
+        for n in sorted(names - {""}):      # a tidy table: the measure names are the values of one column
+            (metrics if METRIC_RE.match(norm(n)) else named).setdefault(n, []).append(p)
+    if named:
+        measures = named
     plain = lambda k: k[0] == "row" and len(k) == 3
     keyed = any(not plain(k) for k in cells)        # runs are counted when the tables name them; plain rows only when none does
     for key, ok in cells.items():
@@ -176,7 +218,7 @@ def read_step(files, deliverables):
         if c:
             conds[c] = conds.get(c, 0) + 1
     return {"methods": methods, "datasets": datasets, "conditions": conds, "seeds": len(seeds), "metrics": metrics, "measures": measures,
-            "rows": rows_n, "failed": failed, "files": paths, "read": read, "skipped": skipped}
+            "rows": rows_n, "failed": failed, "files": paths, "read": read, "skipped": skipped, "partial": partial, "named": bool(named)}
 
 
 def from_hypothesis(H, files, S=None, used=None):
@@ -225,7 +267,7 @@ def from_hypothesis(H, files, S=None, used=None):
                     it["named_by"].append(h)
             use(it, x["id"], files=len(paths))
             ids.append(it["id"])
-        if not U["metrics"] and U["measures"]:
+        if U["measures"] and (not U["metrics"] or U.get("named")):      # number columns count only when nothing better is named; a tidy table's names always do
             n = len(U["measures"])
             it = item("metric", "measures of " + x["id"], named_by=[], names=sorted(U["measures"])[:MAX_NAMES], n=n, summary=True)
             it["name"] = "%d measure%s" % (n, "" if n == 1 else "s")
@@ -262,7 +304,7 @@ def from_hypothesis(H, files, S=None, used=None):
         exps.append({"id": x["id"], "name": x.get("title") or x["id"], "type": "step", "status": _status_word(x.get("status")), "claims": [h for h in tests[x["id"]] if h in hid],
                      "items": list(dict.fromkeys(ids)), "sheet": False, "sheets": sheets.get(x["id"], []), "deliverables": list(x.get("deliverables") or []),
                      "depends_on": list(x.get("depends_on") or []), "acceptance": x.get("acceptance"),
-                     "used": {"methods": len(U["methods"]), "datasets": len(D), "seeds": U["seeds"], "rows": U["rows"], "failed": U["failed"], "files": U["read"], "skipped": U["skipped"],
+                     "used": {"methods": len(U["methods"]), "datasets": len(D), "seeds": U["seeds"], "rows": U["rows"], "failed": U["failed"], "files": U["read"], "skipped": U["skipped"], "partial": U.get("partial", 0),
                               "conditions": sorted(U["conditions"])[:12]},
                      "attention": bool(U["failed"])})
     for it in items.values():

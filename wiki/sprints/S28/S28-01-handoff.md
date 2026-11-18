@@ -26,7 +26,7 @@ the thesis, in the manner of a kanban board. Built from the chat session. Branch
     and an experiment with no claim are kept and counted (`counts.claims_untested`, `experiments_no_claim`,
     `items_unreached`).
   - *Hypothesis-first project* (once a hypothesis or a step exists): problem, live hypotheses, the protocol's
-    steps. For each step, "what was used" is read from its own deliverable tables (csv, tsv) by column name:
+    steps. For each step, "what was used" is read from its own deliverable tables (csv or tsv, plain or `.gz`) by column name:
     a method column (`model`, `method`, `detector` …), a dataset column (`dataset`, `source` …), a suite
     column (`group`, `suite` …), `seed`, a condition column (`variant` …), `status`, and metric columns with a
     known metric name (`auc_pr`, `f1` …).
@@ -34,6 +34,10 @@ the thesis, in the manner of a kanban board. Built from the chat session. Branch
       once; a failed attempt that was repeated with success is not a failed run.
     - More than 8 datasets with a suite column: one card per suite (e.g. `TSB-AD-U`, up to 23 datasets).
     - No known metric name: one card "N measures" listing the numeric columns.
+    - A tidy table (a `measure` column beside a `value` column): the measure names are that column's values. When a
+      step has such a table, those names are its measures, and other tables' unnamed number columns are not added.
+    - A compressed table up to 12 MB on disk is read as a stream, up to 96 MB of text; beyond that the step panel
+      says it was read in part.
     - A metric named in a hypothesis's statement or test is marked "named in H2, H3".
     - Each step also lists the Setup sheets (result files) under its deliverables.
 - **Web: the board is the first thing on Setup** (`bdBoard` in `web/research.js`, styles in `app.css`).
@@ -62,22 +66,25 @@ No new extension version. Checked at 760 px and 420 px in a browser; not checked
   confirmed there.**
   - Step C: 3,294 runs = 18 methods × 61 datasets × 3 seeds, 40 marked failed (matches `results/C_cells.csv`).
   - Step D: 1,620 runs, 18 failed, conditions blockorder, global, within (matches `results/D_cells.csv`).
-  - Step A: 62 sources in three suites (22, 17, 23), 103 measures, no named metric.
-  - Step B: nothing read. Its only deliverable is `B_drift.csv.gz`, and compressed tables are not read.
+  - Step A: 62 sources in three suites (22, 17, 23), 42 measures (the `measure` column of `A_dependence.csv.gz`).
+  - Step B: 62 sources in the same three suites, 16 measures, read from `B_drift.csv.gz` (decided by Juhyeong,
+    18:22 KST: compressed step tables are read).
+  - Reading the two compressed tables (47 MB and 9 MB of text) adds about 1 s, once per scan.
 - The mapped synthetic project of `test_map.py` (paper project, 3 claims, 4 experiments, 10 items) and the sample
   project (one claim with no experiment, one experiment with no claim: both dashed).
 - Tests: `test_map.MapTest.test_board`, `test_hypo.HypoTest.test_board_from_the_steps_tables`. Full suite: 195 OK
-  (2 skipped). No console errors at 1280, 760 and 420 px.
+  (2 skipped), also after the compressed-table change. No console errors at 1280, 760 and 420 px.
 
 ## Screenshots
 - [Hypothesis-first project, nothing selected](screenshots/board-hypothesis-first.png)
 - [A step selected](screenshots/board-step-selected.png) · [a metric selected](screenshots/board-metric-selected.png)
+  · [Step B, read from a compressed table](screenshots/board-step-b-compressed.png)
 - [Paper project, a dataset selected](screenshots/board-paper-dataset-selected.png)
 - [760 px](screenshots/board-vscode-medium.png) · [420 px, stacked](screenshots/board-vscode-narrow.png)
 
 ## Not built
 - Drag and drop. The cards are read from the files; moving one would have to change a claim–experiment link.
-- Reading `.gz`, `.json` or `.parquet` step tables.
+- Reading `.json` or `.parquet` step tables.
 - The board in the MCP `setup` tool (it still lists the per-file items).
 - In a hypothesis-first project, an item's paper and code lines (the item panel shows its use per step only).
 
@@ -88,6 +95,5 @@ No new extension version. Checked at 760 px and 420 px in a browser; not checked
 - Check the S18 contrast of the dimmed cards (opacity 0.4).
 
 ## Needs Juhyeong's decision
-- Whether the columns should run thesis → used (as built) or used → thesis.
-- Whether a step with only compressed tables should be read (Step B).
+- Decided 2026-11-18 18:22 KST: the columns stay thesis first; compressed step tables are read.
 - Merge to main.

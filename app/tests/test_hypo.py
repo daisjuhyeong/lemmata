@@ -272,6 +272,23 @@ class HypoTest(unittest.TestCase):
         self.assertEqual((I["metric:measuresofstepa"]["name"], I["metric:measuresofstepa"]["names"]), ("1 measure", ["x"]))
         self.assertEqual(sorted(c["id"] for c in B["claims"] if not c["experiments"]), ["H2b", "H8"])      # gaps are kept, and counted
         self.assertEqual((B["counts"]["claims_untested"], B["counts"]["experiments_no_claim"]), (2, 0))
+        # a compressed, tidy table (one row per dataset and measure) is read too: its measure names are the step's measures
+        import gzip
+        tidy = "measure,value,series,group,source\n" + "".join("%s,0.1,s%d,%s,%s\n" % (m, i, g, d) for m in ("acf1", "hurst", "auc_pr") for i, (g, d) in enumerate((("TS", "a0"), ("TS", "a1"), ("Stream", "b0"))))
+        (self.code / "results" / "A_long.csv.gz").write_bytes(gzip.compress(tidy.encode()))
+        git(self.code, "add", "-A")
+        git(self.code, "commit", "-q", "-m", "long table", date="2026-11-17T11:00:00+0900")
+        self.e.scan()
+        from lemmata.engine import hypo
+        doc = hypo.load(self.e.hub)
+        next(x for x in doc["experiments"] if x["id"] == "stepA")["deliverables"].append("results/A_long.csv.gz")
+        self.e.hub.write_json("hypothesis.json", doc)
+        B = self.e.setup()["board"]
+        X = {x["id"]: x for x in B["experiments"]}
+        I = {i["id"]: i for i in B["items"]}
+        self.assertEqual((X["stepA"]["used"]["datasets"], X["stepA"]["used"]["files"], X["stepA"]["used"]["partial"]), (3, 2, 0))
+        self.assertEqual((I["metric:measuresofstepa"]["name"], I["metric:measuresofstepa"]["names"]), ("2 measures", ["acf1", "hurst"]))      # not "x": the tidy names are the list
+        self.assertEqual(I["metric:aucpr"]["experiments"], ["stepA", "stepC"])
         # an archived hypothesis leaves the board; a step that then tests nothing is a gap
         self.e.hypothesis_act("delete", "H2")
         B = self.e.setup()["board"]
