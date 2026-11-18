@@ -40,6 +40,7 @@ last_reviewed: 2026-11-02
   - S25 Setup protocol sheet, calendar on Home, venue deadlines, calendar link: [handoff note S25-01](sprints/S25/S25-01-handoff.md) — on `s24-topdown-evidence`, awaiting QA
   - S26 a day as work sessions (who, where, what, why, how, when, result), agent-drafted summaries, six questions on Setup, FAQ page: [handoff note S26-01](sprints/S26/S26-01-handoff.md) · [screenshots](sprints/S26/screenshots/) — on `s24-topdown-evidence`, awaiting QA
   - S27 hypothesis-first mode (problem → hypotheses → test table), jobs for the researcher's own LLM, Confirm/Fix/Delete/Combine/Tell, tracked branch: [handoff note S27-01](sprints/S27/S27-01-handoff.md) · [spec](design/screens/S27-hypothesis-first.md) · [screenshots](sprints/S27/screenshots/) — on `s27-hypothesis-first`, awaiting QA
+  - S28 board at the top of Setup (thesis ← claims ← experiments ← what was used; hypothesis-first: problem ← hypotheses ← steps ← the steps' own tables): [handoff note S28-01](sprints/S28/S28-01-handoff.md) · [screenshots](sprints/S28/screenshots/) — on `s28-setup-board`, awaiting QA
 - [Product](product/README.md) — [Demo spec S02](product/demo-spec.md)
 - Code: [app/ (localhost demo)](../app/README.md) — working name "Lemmata" / `lemmata`
 - [Research: problem evidence](research/problem-evidence/README.md) · [interviews](research/interviews/README.md) — [interview template](research/interviews/interview-template.md) · [market](research/market/README.md) — [naming screen 2026-11-04](research/market/naming-screen-2026-11-04.md) (draft, rounds 1-2)

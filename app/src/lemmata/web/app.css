@@ -1044,3 +1044,24 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .hf-jobs .hf-row .linkbtn { white-space:nowrap; }
 .hf-h2 { font-size:20px; margin:var(--s-5) 0 var(--s-2); padding-bottom:6px; border-bottom:1px solid var(--border); }
 .hf-rep { max-height:50vh; overflow:auto; font-size:13px; }
+/* S28: the board at the top of Setup (thesis <- claims <- experiments <- what was used) */
+.bd { margin:var(--s-3) 0 var(--s-5); }
+.bd-h { display:flex; gap:var(--s-3); align-items:baseline; flex-wrap:wrap; margin-bottom:var(--s-2); } .bd-t { font:700 var(--fs-16) var(--font-serif); margin:0; } .bd-gap { font-size:var(--fs-13); }
+.bd-b { position:relative; display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1.2fr) minmax(0,1fr); gap:0 48px; align-items:start; padding:var(--s-3); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); }
+.bd-w { position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }
+.bd-e { fill:none; stroke:var(--border-strong); stroke-width:1; } .bd-e.lit { stroke:var(--accent-dark); stroke-width:1.5; }
+.bd-col { position:relative; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.bd-ch { display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; padding-bottom:4px; margin-bottom:2px; border-bottom:2px solid var(--text); font-size:var(--fs-13); line-height:1.4; }
+.bd-cn { font-weight:700; } .bd-cc { color:var(--muted); font-size:var(--fs-12); font-weight:400; } .bd-cs { color:var(--muted); font-size:var(--fs-12); margin-left:auto; }
+.bd-c { display:flex; flex-direction:column; gap:1px; width:100%; min-width:0; text-align:left; background:var(--bg); border:1px solid var(--border); border-radius:var(--r-sm); padding:6px 10px; font:inherit; font-size:var(--fs-13); line-height:1.4; color:var(--text); cursor:pointer; transition:opacity var(--motion); }
+.bd-c:hover { border-color:var(--text-secondary); } .bd-c:focus-visible { outline:2px solid var(--text); outline-offset:1px; }
+.bd-c.on { border-color:var(--text); box-shadow:0 0 0 1px var(--text); } .bd-c.lit { border-color:var(--accent-dark); } .bd-c.on.lit { border-color:var(--text); } .bd-c.dim { opacity:.4; } .bd-c.gap { border-style:dashed; border-color:var(--border-strong); }
+.bd-r { display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; } .bd-tx { display:block; overflow-wrap:anywhere; } .bd-c.th .bd-tx { font-size:var(--fs-14); line-height:1.5; }
+.bd-s { display:block; font-size:var(--fs-12); color:var(--muted); } .bd-r .bd-s { display:inline; } .bd-s.warn { color:var(--text-secondary); font-weight:600; }
+.bd-k + .bd-k { margin-top:4px; } .bd-kh { font:500 var(--fs-12) var(--font-sans); color:var(--muted); margin-bottom:3px; } .bd-its { display:flex; flex-direction:column; gap:3px; }
+.bd-c.it { flex-direction:row; gap:6px; align-items:baseline; padding:2px 10px 2px 8px; border-left-width:3px; } .bd-c.it .bd-in { flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:2.5em; } .bd-c.it .bd-s { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .bd-c.it .bd-s.warn { flex:none; margin-left:auto; }
+.bd-c.it.k-metric { border-left-color:var(--accent-dark); } .bd-c.it.k-dataset { border-left-color:var(--warning); } .bd-c.it.k-method { border-left-color:var(--accent-light); } .bd-c.it.k-condition { border-left-color:var(--border-strong); }
+.bd-more { align-self:flex-start; margin-top:2px; } .bd-none { margin:0; }
+.bd-tr { margin:var(--s-2) 0 0; font-size:var(--fs-14); } .bd-tr.muted { font-size:var(--fs-13); } .bd .su-detail { margin-top:var(--s-2); } .bd-names { margin:var(--s-2) 0 0; overflow-wrap:anywhere; } .bd-ut .chip-btn { white-space:nowrap; } .bd-flt { margin:var(--s-3) 0 0; }
+@container app (max-width: 980px) { .bd-b { gap:0 28px; padding:var(--s-2); } .bd-cs { display:none; } .bd-c { padding:5px 8px; } }
+@container app (max-width: 640px) { .bd-b { grid-template-columns:minmax(0,1fr); gap:var(--s-3) 0; } .bd-w { display:none; } .bd-its { flex-direction:row; flex-wrap:wrap; } .bd-c.it { width:auto; max-width:100%; } }

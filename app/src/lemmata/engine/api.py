@@ -24,6 +24,7 @@ from . import plans as plansmod
 from . import runs as runsmod
 from . import sessions as sessionsmod
 from . import setup as setupmod
+from . import board as boardmod
 from . import todo as todomod
 from . import trail as trailmod
 from . import venues as venuesmod
@@ -692,7 +693,21 @@ class Engine:
         E = self.experiments()
         doc = setupmod.build(E, s["G"], s["trees"])
         self._setup_context(doc, E, s)
+        doc["board"] = self._board(doc, E)
         return doc
+
+    def _board(self, doc, E):
+        """S28: thesis <- claims <- experiments <- what was used, as one board at the top of Setup (rules only)."""
+        H = self.hypothesis()
+        hf = H["mode"] == "hypothesis_first"
+        if hf and (H["experiments"] or any(not h.get("archived") for h in H["hypotheses"])):
+            s, files, src, has_paper = self._hf_ctx()
+            key = (id(s["G"]), s["scanned_at"], tuple((x["id"], tuple(x.get("deliverables") or ())) for x in H["experiments"]))
+            c = getattr(self, "_bd_used", None)
+            if c is None or c[0] != key:      # reading the steps' result tables is the slow part: once per scan
+                c = self._bd_used = (key, {x["id"]: boardmod.read_step(files, x.get("deliverables")) for x in H["experiments"]})
+            return boardmod.from_hypothesis(H, files, doc, c[1])
+        return boardmod.from_setup(doc, E.get("thesis"), waiting=hf)
 
     def _setup_context(self, doc, E, s):
         """S26: for each experiment the where, how, when and who behind it (the why and what are its claim and protocol)."""

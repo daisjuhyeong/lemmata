@@ -19,7 +19,7 @@ function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = n
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
 function rxGoto(view, sel) {
   if (view === 'experiments' && /^[qx]:/.test(sel || '')) { RX.exView = 'map'; RX.mapSel = sel; RX.exOpen = null; }
-  if (view === 'setup' && /^[ixc]:/.test(sel || '')) RX.suSel = sel.startsWith('i:') ? sel : null;
+  if (view === 'setup' && /^[ixc]:/.test(sel || '')) { RX.suSel = sel.startsWith('i:') ? sel : null; RX.bdSel = sel; }
   openTab(view);
 }
 /* Website only: a link that opens this page in VS Code's Lemmata tab (vscode/src/core/link.ts reads it). */
@@ -88,7 +88,7 @@ async function rxShowLines(repo, loc) {
   let body;
   try { const r = await apiGet('/api/file?repo=' + encodeURIComponent(repo) + '&path=' + encodeURIComponent(loc.path) + '&start=' + a + '&end=' + Math.min(b, a + 60)); const hl = []; for (let i = loc.line || 1; i <= (loc.end_line || loc.line || 1); i++) hl.push(i); body = codeBlock(r.lines, r.start, hl); }
   catch (e) { body = h('p', { class: 'muted' }, 'Could not read those lines: ' + e.message); }
-  modal(loc.path + ':' + loc.line, body, [{ label: 'Close', primary: true }]);
+  modal(loc.path + (loc.line ? ':' + loc.line : ''), body, [{ label: 'Close', primary: true }]);
 }
 function rxNotReady(title) {
   if (!RX.loaded) return doc(h('h1', { class: 'ptitle' }, title), h('p', { class: 'muted' }, 'Reading your project…'));
@@ -1411,6 +1411,179 @@ function suSheet(x, claim, D, hl) {
   card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check. ' + c.why : c.why)); })));
   return card;
 }
+/* ---------- Setup board (S28): thesis <- claims <- experiments <- what was used ----------
+   Four columns of cards at the top of Setup (founder, chat 2026-11-18 17:06 KST: a flowchart at the top of the page to see how
+   the setup connects to the thesis, "think of a kanban system"). Click a card: its path to the thesis stays lit, the rest dims,
+   and one sentence says the path in words. Lines join the lit path only, so the board does not turn into the curve map S25 removed. */
+const BD_KIND = { metric: ['Metrics', 'metric'], dataset: ['Datasets', 'dataset'], method: ['Methods', 'method'], condition: ['Conditions', 'condition'] };
+const BD_CAP = 6, BD_XCAP = 8;
+RX.bdMore = RX.bdMore || {};
+function bdSelNow(B) {
+  if (B.mode === 'paper') { const i = RX.suSel && RX.suSel.startsWith('i:') ? RX.suSel : null; if (i) RX.bdSel = i; else if ((RX.bdSel || '').startsWith('i:')) RX.bdSel = null; }
+  const s = RX.bdSel; if (!s) return null;
+  if (s === 't') return s;
+  const id = s.slice(2), list = s[0] === 'c' ? B.claims : s[0] === 'x' ? B.experiments : s[0] === 'i' ? B.items : [];
+  return list.some(o => o.id === id) ? s : (RX.bdSel = null);
+}
+function bdPick(B, key, keep) {
+  RX.bdSel = RX.bdSel === key && !keep ? null : key;
+  if (B.mode === 'paper') RX.suSel = RX.bdSel && RX.bdSel.startsWith('i:') ? RX.bdSel : null;
+  RX.suAll = false; renderPage(true);
+}
+function bdLit(B, sel) {      // what stays lit for a selection: the cards on its path to the thesis
+  if (!sel) return null;
+  const L = { t: false, c: new Set(), x: new Set(), i: new Set() }, id = sel.slice(2), known = new Set(B.claims.map(c => c.id));
+  const whole = x => { L.x.add(x.id); x.items.forEach(i => L.i.add(i)); };
+  if (sel === 't') { known.forEach(c => L.c.add(c)); B.experiments.forEach(x => { if (x.claims.some(c => known.has(c))) whole(x); }); }
+  else if (sel[0] === 'c') { L.c.add(id); B.experiments.forEach(x => { if (x.claims.includes(id)) whole(x); }); }
+  else if (sel[0] === 'x') { const x = B.experiments.find(e => e.id === id); whole(x); x.claims.forEach(c => { if (known.has(c)) L.c.add(c); }); }
+  else { L.i.add(id); B.experiments.forEach(x => { if (x.items.includes(id)) { L.x.add(x.id); x.claims.forEach(c => { if (known.has(c)) L.c.add(c); }); } }); }
+  L.t = sel === 't' || L.c.size > 0;
+  return L;
+}
+function bdAnd(a, n) { a = [...a]; n = n || 4; if (a.length > n) return a.slice(0, n).join(', ') + ' and ' + (a.length - n) + ' more'; return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+function bdXName(B, x) { return B.mode === 'paper' ? x.name : x.id; }
+function bdKinds(B, ids) {
+  const its = B.items.filter(it => ids.has ? ids.has(it.id) : ids.includes(it.id));
+  return Object.keys(BD_KIND).map(k => { const a = its.filter(it => it.kind === k); if (!a.length) return null;
+    if (a.every(it => it.summary)) return a.map(it => it.name).join(', ');
+    return a.some(it => it.group) ? plural(a.length, 'dataset group') : plural(a.length, BD_KIND[k][1]); }).filter(Boolean);
+}
+function bdTrace(B, sel, L) {
+  const word = B.thesis.kind === 'problem' ? 'problem' : 'thesis', id = sel.slice(2);
+  const xs = B.experiments.filter(x => L.x.has(x.id)), cs = B.claims.filter(c => L.c.has(c.id)).map(c => c.label || 'a claim');
+  const used = bdKinds(B, L.i), on = used.length ? ' It is built on ' + bdAnd(used, 5) + '.' : '';
+  if (sel === 't') { const N = B.experiments.length, C = B.counts;
+    return (N ? xs.length + ' of ' + plural(N, B.mode === 'paper' ? 'experiment' : 'step') + ' reach the ' + word + ' through ' + plural(B.claims.length, B.mode === 'paper' ? 'claim' : 'hypothesis', 'hypotheses') + '.' : 'No experiment yet.')
+      + (C.experiments_no_claim ? ' ' + C.experiments_no_claim + ' test no claim, so what they use does not count for it.' : '') + (C.claims_untested ? ' ' + plural(C.claims_untested, 'claim') + ' ' + (C.claims_untested === 1 ? 'has' : 'have') + ' no experiment.' : ''); }
+  if (sel[0] === 'c') { const c = B.claims.find(q => q.id === id);
+    return xs.length ? (c.label || 'This claim') + ' is tested by ' + bdAnd(xs.map(x => bdXName(B, x))) + '.' + on.replace('It is', xs.length === 1 ? 'It is' : 'They are') : 'Nothing tests ' + (c.label || 'this claim') + ' yet, so nothing that was used backs it.'; }
+  if (sel[0] === 'x') { const x = xs[0];
+    return bdXName(B, x) + (cs.length ? ' tests ' + bdAnd(cs) + '.' : ' tests no claim, so what it uses does not reach the ' + word + ' yet.') + on; }
+  const it = B.items.find(q => q.id === id), v = xs.length === 1;
+  return it.name + ' is used in ' + bdAnd(xs.map(x => bdXName(B, x))) + (cs.length ? ', which ' + (v ? 'tests ' : 'test ') + bdAnd(cs) + '.' : ', which ' + (v ? 'tests' : 'test') + ' no claim. It does not reach the ' + word + ' yet.');
+}
+function bdItemSub(it) {
+  if (it.group) { const n = (it.uses || []).map(u => u.datasets).filter(Boolean), a = Math.min(...n), b = Math.max(...n); return n.length ? (a === b ? '' : 'up to ') + plural(b, 'dataset') : null; }
+  if (it.summary) return null;
+  if (it.role && it.role !== 'baseline') return SU_ROLE[it.role] ? SU_ROLE[it.role].toLowerCase() : it.role;
+  if ((it.named_by || []).length) return 'named in ' + it.named_by.join(', ');
+  return null;
+}
+function bdGo(B, key, label, title) { return h('button', { class: 'chip-btn', title: title || null, onclick: () => bdPick(B, key, true) }, label); }
+function bdDetail(B, sel) {      // what the selected card is, in rows (an item of a paper project opens its own page section instead)
+  const id = sel.slice(2), hf = B.mode === 'hypothesis_first';
+  const row = (k, ...v) => h('div', { class: 'su-pr' }, h('span', { class: 'su-pk' }, k), h('div', { class: 'su-pv' }, v));
+  const close = h('button', { class: 'linkbtn small', onclick: () => bdPick(B, sel) }, 'Close');
+  const head = (tag, name, ...more) => h('div', { class: 'rx-x-h' }, h('span', { class: 'tag' }, tag), h('b', { class: 'su-dn' }, name), more, h('span', { class: 'grow' }), close);
+  const xBtn = x => bdGo(B, 'x:' + x.id, bdXName(B, x), x.name), cBtn = c => bdGo(B, 'c:' + c.id, c.label || trunc(c.text, 30), c.text);
+  const byKind = ids => Object.keys(BD_KIND).map(k => { const a = B.items.filter(it => ids.includes(it.id) && it.kind === k); return a.length ? row(BD_KIND[k][0], a.map(it => bdGo(B, 'i:' + it.id, it.name + (it.checks ? ' !' : '')))) : null; });
+  if (sel === 't') { const T = B.thesis;
+    return h('section', { class: 'rx-x-sec su-detail' }, head(T.kind === 'problem' ? 'Problem' : 'Thesis', ''), h('div', { class: 'su-body' },
+      T.text ? h('p', { class: 'serif su-ct' }, rxMath(T.text)) : h('p', { class: 'muted' }, T.missing), T.approach ? row('Approach', h('span', null, T.approach)) : null,
+      h('div', { class: 'su-p' }, row(hf ? 'Hypotheses' : 'Claims', B.claims.length ? B.claims.map(cBtn) : h('span', { class: 'muted small' }, 'none yet')), row('', h('button', { class: 'btn sm', onclick: () => openTab('experiments') }, 'Open Thesis'))))); }
+  if (sel[0] === 'c') { const c = B.claims.find(q => q.id === id), xs = B.experiments.filter(x => x.claims.includes(id));
+    return h('section', { class: 'rx-x-sec su-detail' + (c.stage ? rxSt(c.stage) : '') }, head(hf ? 'Hypothesis' : 'Claim', c.label || '', c.stage ? rxStageChip(c) : null, c.tier && c.tier !== 'confirmatory' ? h('span', { class: 'tag' }, c.tier) : null),
+      h('div', { class: 'su-body' }, h('p', { class: 'serif su-ct' }, rxMath(c.text)), h('div', { class: 'su-p' },
+        c.stage_why ? row('Stands at', h('span', null, c.stage_why)) : null,
+        row('Tested by', xs.length ? xs.map(xBtn) : h('span', { class: 'rx-warn' }, '! Nothing tests it yet.')),
+        byKind([...new Set(xs.flatMap(x => x.items))]),
+        row('', h('button', { class: 'btn sm', onclick: () => { if (hf) { RX.hfOpen = c.id; openTab('experiments'); } else suGotoClaim(c.id); } }, hf ? 'Open in Thesis' : 'Open in Claims'))))); }
+  if (sel[0] === 'x') { const x = B.experiments.find(q => q.id === id), U = x.used, cs = B.claims.filter(c => x.claims.includes(c.id));
+    const dims = U ? [U.methods ? plural(U.methods, 'method') : null, U.datasets ? plural(U.datasets, 'dataset') : null, U.conditions.length > 1 ? plural(U.conditions.length, 'condition') : null, U.seeds ? plural(U.seeds, 'seed') : null].filter(Boolean) : [];
+    return h('section', { class: 'rx-x-sec su-detail' }, head(hf ? 'Step' : 'Experiment', bdXName(B, x), hf ? h('span', { class: 'tag' }, x.status) : SU_XTYPE[x.type] ? h('span', { class: 'tag' }, SU_XTYPE[x.type]) : null),
+      h('div', { class: 'su-body' }, hf ? h('p', { class: 'su-ct' }, x.name) : null, h('div', { class: 'su-p' },
+        row('Tests', cs.length ? cs.map(cBtn) : h('span', { class: 'rx-warn' }, '! No claim. What it uses does not reach the thesis yet.')),
+        U && U.rows ? row('Runs', h('span', null, plural(U.rows, dims.length ? 'run' : 'row') + (dims.length ? ': ' + dims.join(' × ') : '')), U.failed ? h('span', { class: 'rx-warn' }, '! ' + U.failed + ' marked failed in the result files') : null) : null,
+        byKind(x.items),
+        hf ? row('Writes', x.deliverables.length ? x.deliverables.map(d => /\.[a-z0-9]+$/i.test(d) && !/\.gz$/i.test(d) ? rxWhere({ path: d }, 'code') : h('span', { class: 'mono small' }, d)) : h('span', { class: 'muted small' }, 'nothing named yet')) : null,
+        hf && x.depends_on.length ? row('Needs', x.depends_on.map(d => { const o = B.experiments.find(q => q.id === d); return o ? xBtn(o) : h('span', { class: 'mono small' }, d); })) : null,
+        hf && !x.items.length ? row('Used', h('span', { class: 'muted small' }, U && U.files ? 'Its tables name no method, dataset or metric column.' : 'No readable table among its result files (csv or tsv), so what it used is unknown.')) : null,
+        hf && U && U.skipped ? row('', h('span', { class: 'muted small' }, plural(U.skipped, 'file') + ' too large to read.')) : null,
+        x.sheets.length ? row('Sheets', h('span', { class: 'muted small' }, plural(x.sheets.length, 'result-file sheet') + ' below ↓')) : null,
+        hf ? null : row('', h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open the experiment'))))); }
+  const it = B.items.find(q => q.id === id), kind = BD_KIND[it.kind] || ['Items', 'item'], byX = new Map(B.experiments.map(x => [x.id, x]));
+  const cols = it.kind === 'method' ? [['datasets', 'Datasets'], ['seeds', 'Seeds'], ['rows', 'Runs'], ['failed', 'Failed']] : it.group ? [['datasets', 'Datasets'], ['methods', 'Methods']] : it.kind === 'dataset' ? [['methods', 'Methods'], ['rows', 'Runs']] : it.kind === 'condition' ? [['rows', 'Runs']] : [['files', 'Result files']];
+  return h('section', { class: 'rx-x-sec su-detail' }, head(kind[1][0].toUpperCase() + kind[1].slice(1) + (it.group ? ' group' : ''), it.name),
+    h('div', { class: 'su-body' },
+      (it.named_by || []).length ? h('p', { class: 'su-ct' }, 'Named in ' + bdAnd(it.named_by) + '.') : null,
+      h('div', { class: 'su-tw' }, h('table', { class: 'tbl su-t bd-ut' }, h('thead', null, h('tr', null, h('th', null, 'Step'), cols.map(c => h('th', { class: 'num' }, c[1])), h('th', null, 'Tests'))),
+        h('tbody', null, (it.uses || []).map(u => { const x = byX.get(u.x); return h('tr', null, h('td', null, x ? xBtn(x) : u.x), cols.map(c => h('td', { class: 'num mono' + (c[0] === 'failed' && u.failed ? ' bad' : '') }, u[c[0]] == null ? '—' : u[c[0]])),
+          h('td', null, x && x.claims.length ? x.claims.join(', ') : h('span', { class: 'muted' }, 'no claim'))); })))),
+      it.group ? (it.uses || []).map(u => u.names && u.names.length ? h('p', { class: 'small bd-names' }, h('b', null, u.x + ' '), h('span', { class: 'muted' }, u.names.join(', ') + (u.datasets > u.names.length ? ' and ' + (u.datasets - u.names.length) + ' more' : ''))) : null) : null,
+      it.summary ? h('p', { class: 'su-ct' }, 'Its tables hold these columns of numbers; none has the name of a known metric.') : null,
+      it.summary && it.names ? h('p', { class: 'small mono muted bd-names' }, it.names.join(', ') + (it.n > it.names.length ? ' and ' + (it.n - it.names.length) + ' more' : '')) : null));
+}
+function bdWire(el, B, L) {      // lines between the cards of one path, measured after layout
+  const svg = el.querySelector('.bd-w'), body = el.querySelector('.bd-b'); if (!svg || !body || !el.isConnected) return;
+  clear(svg);
+  const cols = [...body.querySelectorAll('.bd-col')], r0 = body.getBoundingClientRect();
+  if (cols.length < 4 || cols[1].getBoundingClientRect().left - cols[0].getBoundingClientRect().left < 40) return;      // stacked columns: no lines
+  svg.setAttribute('width', r0.width); svg.setAttribute('height', r0.height); svg.setAttribute('viewBox', '0 0 ' + r0.width + ' ' + r0.height);
+  const cards = new Map([...body.querySelectorAll('.bd-c')].map(c => [c.dataset.k, c.getBoundingClientRect()])), E = [];
+  const edge = (a, b) => { const A = cards.get(a), Z = cards.get(b); if (A && Z) E.push([A.right - r0.left, A.top + A.height / 2 - r0.top, Z.left - r0.left, Z.top + Z.height / 2 - r0.top]); };
+  const known = new Set(B.claims.map(c => c.id)), tc = [], cx = [], xi = [];
+  B.claims.forEach(c => { if (!L || (L.t && L.c.has(c.id))) tc.push(['t', 'c:' + c.id]); });
+  B.experiments.forEach(x => { if (L && !L.x.has(x.id)) return;
+    x.claims.forEach(c => { if (known.has(c) && (!L || L.c.has(c))) cx.push(['c:' + c, 'x:' + x.id]); });
+    x.items.forEach(i => { if ((!L || L.i.has(i)) && cards.has('i:' + i) && cards.has('x:' + x.id)) xi.push(['x:' + x.id, 'i:' + i]); }); });
+  tc.concat(cx, L || xi.length <= 24 ? xi : []).forEach(e => edge(e[0], e[1]));
+  E.forEach(([x1, y1, x2, y2]) => { const m = (x1 + x2) / 2; svg.append(sv('path', { class: 'bd-e' + (L ? ' lit' : ''), d: 'M' + x1 + ',' + y1 + ' C' + m + ',' + y1 + ' ' + m + ',' + y2 + ' ' + x2 + ',' + y2 })); });
+}
+function bdBoard(B) {
+  const sel = bdSelNow(B), L = bdLit(B, sel), C = B.counts, hf = B.mode === 'hypothesis_first', T = B.thesis;
+  const cw = hf ? ['Hypotheses', 'hypothesis', 'hypotheses'] : ['Claims', 'claim', 'claims'], xw = hf ? ['Steps', 'step'] : ['Experiments', 'experiment'];
+  const lit = key => !L || (key === 't' ? L.t : L[key[0]].has(key.slice(2)));
+  const card = (key, cls, kids, title) => h('button', { class: 'bd-c ' + cls + (sel === key ? ' on' : '') + (L ? (lit(key) ? ' lit' : ' dim') : ''), 'data-k': key, 'aria-pressed': String(sel === key), title: title || null, onclick: () => bdPick(B, key) }, kids);
+  const col = (name, n, sub, kids) => h('div', { class: 'bd-col' }, h('div', { class: 'bd-ch' }, h('span', { class: 'bd-cn' }, name), n != null ? h('span', { class: 'bd-cc' }, n) : null, h('span', { class: 'bd-cs' }, sub)), kids);
+  const more = (k, hidden, word) => hidden > 0 || RX.bdMore[k] ? h('button', { class: 'linkbtn small bd-more', onclick: () => { RX.bdMore[k] = !RX.bdMore[k]; renderPage(true); } }, RX.bdMore[k] ? 'Show fewer' : '+ ' + hidden + ' more ' + word) : null;
+  const first = (list, key, cap) => L && list.length > cap ? list.filter(o => lit(key(o))).concat(list.filter(o => !lit(key(o)))) : list;      // over the cap, the lit cards first, so the cap never hides the path
+  const reach = new Set(B.claims.map(c => c.id));
+  // 1. thesis
+  const tcol = col(T.kind === 'problem' ? 'Problem' : 'Thesis', null, hf ? 'what the research solves' : 'what the paper says',
+    card('t', 'th' + (T.text ? '' : ' gap'), [T.text ? h('span', { class: 'bd-tx serif' }, rxMath(trunc(T.text, 230))) : h('span', { class: 'bd-tx muted' }, T.missing),
+      T.approach ? h('span', { class: 'bd-s' }, trunc(T.approach, 150)) : null, T.state === 'unreviewed' ? h('span', { class: 'bd-s' }, '[confirm] not confirmed by you yet') : null]));
+  // 2. claims
+  const ccol = col(cw[0], B.claims.length, hf ? 'answer it' : 'back it', B.claims.length ? B.claims.map(c => card('c:' + c.id, 'cl' + (c.experiments.length ? '' : ' gap'), [
+    h('span', { class: 'bd-r' }, h('b', null, c.label || 'Claim'), c.stage ? rxStageChip(c) : null, c.tier && c.tier !== 'confirmatory' ? h('span', { class: 'bd-s' }, c.tier) : null),
+    h('span', { class: 'bd-tx serif' }, rxMath(trunc(c.text, 96))), c.experiments.length ? null : h('span', { class: 'bd-s warn' }, '! nothing tests it yet'), c.confirmed === false ? h('span', { class: 'bd-s' }, '[confirm]') : null], c.text))
+    : h('p', { class: 'muted small bd-none' }, hf ? 'No hypothesis yet.' : 'No claim yet.'));
+  // 3. experiments
+  const xsAll = first(B.experiments.filter(x => x.claims.some(c => reach.has(c))).concat(B.experiments.filter(x => !x.claims.some(c => reach.has(c)))), x => 'x:' + x.id, BD_XCAP);
+  const xs = RX.bdMore.x ? xsAll : xsAll.slice(0, BD_XCAP);
+  const xcol = col(xw[0], B.experiments.length, 'test them', B.experiments.length ? [xs.map(x => { const U = x.used, on = x.claims.filter(c => reach.has(c));
+    const dims = U ? [U.methods ? plural(U.methods, 'method') : null, U.datasets ? plural(U.datasets, 'dataset') : null, U.seeds ? plural(U.seeds, 'seed') : null].filter(Boolean) : [];
+    return card('x:' + x.id, 'ex' + (on.length ? '' : ' gap'), [
+      h('span', { class: 'bd-r' }, h('b', null, bdXName(B, x)), hf ? h('span', { class: 'bd-s' }, '[' + x.status + ']') : SU_XTYPE[x.type] ? h('span', { class: 'bd-s' }, SU_XTYPE[x.type].toLowerCase()) : null),
+      hf ? h('span', { class: 'bd-tx' }, trunc(x.name, 80)) : null, dims.length ? h('span', { class: 'bd-s' }, dims.join(' × ')) : null,
+      U && U.failed ? h('span', { class: 'bd-s warn' }, '! ' + U.failed + ' of ' + U.rows + ' runs failed') : null, on.length ? null : h('span', { class: 'bd-s warn' }, '! tests no claim')], x.name); }),
+    more('x', xsAll.length - BD_XCAP, xw[1] + 's')] : h('p', { class: 'muted small bd-none' }, 'No ' + xw[1] + ' yet.'));
+  // 4. what was used, by kind
+  const icol = col('What was used', B.items.length, 'in them', B.items.length ? Object.keys(BD_KIND).map(k => { const all = first(B.items.filter(it => it.kind === k), it => 'i:' + it.id, BD_CAP); if (!all.length) return null;
+    const show = RX.bdMore[k] ? all : all.slice(0, BD_CAP);
+    return h('div', { class: 'bd-k' }, h('div', { class: 'bd-kh' }, BD_KIND[k][0], h('span', { class: 'bd-cc' }, ' ' + all.length)),
+      h('div', { class: 'bd-its' }, show.map(it => { const sub = bdItemSub(it); return card('i:' + it.id, 'it k-' + k, [h('span', { class: 'bd-in' }, it.name), sub ? h('span', { class: 'bd-s' }, sub) : null, it.failed ? h('span', { class: 'bd-s warn', title: it.failed + ' of its runs are marked failed in the result files' }, '! ' + it.failed + ' failed') : it.checks ? h('span', { class: 'bd-s warn', title: plural(it.checks, 'thing') + ' to check' }, '!') : null], it.name + (sub ? ' · ' + sub : '')); })),
+      more(k, all.length - BD_CAP, BD_KIND[k][0].toLowerCase())); })
+    : h('p', { class: 'muted small bd-none' }, hf ? 'The steps’ result tables name no method, dataset or metric yet.' : 'Nothing read from the result files yet.'));
+  const gaps = [C.experiments_no_claim ? plural(C.experiments_no_claim, xw[1]) + ' with no claim' : null, C.claims_untested ? plural(C.claims_untested, cw[1], cw[2]) + ' with no ' + xw[1] : null].filter(Boolean);
+  const el = h('section', { class: 'bd' + (L ? ' has-sel' : ''), 'aria-label': 'How the setup connects to the thesis' },
+    h('div', { class: 'bd-h' }, h('h2', { class: 'bd-t' }, 'How the setup connects to the ' + (T.kind === 'problem' ? 'problem' : 'thesis')),
+      gaps.length ? h('span', { class: 'rx-warn bd-gap' }, '! ' + gaps.join(' · ')) : null, h('span', { class: 'grow' }),
+      sel ? h('button', { class: 'linkbtn small', onclick: () => bdPick(B, sel) }, 'Clear') : null),
+    B.waiting ? h('p', { class: 'muted small' }, 'The hypotheses are not drafted yet, so this board is made from the result files. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Open Thesis'), '.') : null,
+    h('div', { class: 'bd-b' }, sv('svg', { class: 'bd-w', 'aria-hidden': 'true' }), tcol, ccol, xcol, icol),
+    h('p', { class: 'bd-tr' + (sel ? '' : ' muted') }, sel ? bdTrace(B, sel, L) : 'Click a card to light its path to the ' + (T.kind === 'problem' ? 'problem' : 'thesis') + '. A dashed card is not connected yet.'),
+    sel && !(B.mode === 'paper' && sel[0] === 'i') ? bdDetail(B, sel) : null);
+  const draw = () => bdWire(el, B, L);
+  requestAnimationFrame(() => { draw(); if (!el.isConnected || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => { if (!el.isConnected) return ro.disconnect(); draw(); }); ro.observe(el.querySelector('.bd-b')); });
+  return el;
+}
+function bdSheets(B) {      // the result-file sheets a board selection narrows the page to (null: all of them)
+  const sel = B && bdSelNow(B); if (!sel || sel === 't' || sel[0] === 'i') return null;
+  const id = sel.slice(2), xs = sel[0] === 'x' ? B.experiments.filter(x => x.id === id) : B.experiments.filter(x => x.claims.includes(id));
+  return new Set(xs.flatMap(x => x.sheets));
+}
 function pageSetup() {
   const nr = rxNotReady('Setup'); if (nr) return nr;
   S.outline = [];
@@ -1420,18 +1593,25 @@ function pageSetup() {
     if (RX.setupErr) return root.append(h('h1', { class: 'ptitle' }, 'Setup'), emptyState('!', 'Not available', RX.setupErr, [h('button', { class: 'btn', onclick: () => { RX.setupErr = null; suLoad(); } }, 'Try again')])), root;
     suLoad(); return root.append(h('h1', { class: 'ptitle' }, 'Setup'), h('p', { class: 'muted' }, 'Reading the experiments…')), root;
   }
-  const c = D.counts;
+  const c = D.counts, hfB = D.board && D.board.mode === 'hypothesis_first' && (D.board.experiments.length || D.board.claims.length);
   root.classList.add('wide');
-  root.append(h('h1', { class: 'ptitle' }, 'Setup'),
+  root.append(h('h1', { class: 'ptitle' }, 'Setup'), hfB ? null :
     h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
       c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
-  if (!D.mapped) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
-  if (!D.experiments.some(x => x.protocol)) return root.append(emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;
+  const B = D.board && (D.board.experiments.length || D.board.claims.length) ? D.board : null, hf = B && B.mode === 'hypothesis_first';
+  if (!D.mapped && !hf) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
+  if (B) root.append(bdBoard(B));
+  if (!D.experiments.some(x => x.protocol)) return root.append(B ? h('p', { class: 'muted' }, 'No result file could be read as a table of methods and numbers, so there are no sheets below.') : emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;
   let sel = RX.suSel || null;
   const hl = sel && sel.startsWith('i:') && D.items.some(it => it.id === sel.slice(2)) ? sel.slice(2) : null;
   if (hl) root.append(suItemDetail(D.items.find(it => it.id === hl), D));
-  const byX = new Map(D.experiments.map(x => [x.id, x])), seen = new Set();
-  const uses = x => !hl || x.items.includes(hl);
+  const byX = new Map(D.experiments.map(x => [x.id, x])), seen = new Set(), only = bdSheets(B);
+  const uses = x => (!hl || x.items.includes(hl)) && (!only || only.has(x.id));
+  const sheetsN = D.experiments.filter(x => x.protocol).length;
+  if (hf && !hl && !only && !RX.suAll && sheetsN > 12)      // top-down: the steps first, a step's result files on request
+    return root.append(h('div', { class: 'su-cl-h' }, h('span', { class: 'rx-x-q static' }, 'Result files'), h('span', { class: 'rx-x-qt muted' }, sheetsN + ' result files have a sheet. Click a step above to see its files, or '),
+      h('button', { class: 'linkbtn', onclick: () => { RX.suAll = true; renderPage(true); } }, 'show all ' + sheetsN))), root;
+  if (only) root.append(h('p', { class: 'muted small bd-flt' }, only.size ? 'Showing the ' + plural(only.size, 'sheet') + ' of the selected card. ' : 'The selected card has no sheet. ', h('button', { class: 'linkbtn', onclick: () => bdPick(B, RX.bdSel) }, 'Show all')));
   D.claims.forEach(cl => {
     const xs = cl.experiments.map(id => byX.get(id)).filter(x => x && uses(x)); if (!xs.length) return;
     root.append(h('div', { class: 'su-cl-h' + (cl.stage ? rxSt(cl.stage) : '') }, h('button', { class: 'rx-x-q', title: 'Open in Thesis', onclick: () => suGotoClaim(cl.id) }, cl.label), cl.stage ? rxStageChip(cl) : null, h('span', { class: 'rx-x-qt serif' }, rxMath(trunc(cl.text, 160)))));
@@ -1677,6 +1857,7 @@ const FAQ = [
     ['Where can I check the experiments done so far?', 'Thesis lists every experiment under the claim it tests, with one word for what it shows: supports, contradicts, inconclusive or not run. Setup shows how each one was run: metric, datasets, methods and the numbers. Trail shows when each was run, day by day.', [['Thesis', 'experiments'], ['Setup', 'setup'], ['Trail', 'history']]],
     ['Which experiment backs which claim?', 'On Thesis, each claim has its experiments under it. The bar at the top counts how many support, contradict or are inconclusive. Experiments that test no claim, and claims with no experiment, are listed as gaps.', [['Thesis', 'experiments']]],
     ['Where does a number in my paper come from?', 'On Setup, click the number in the experiment’s table. The trace shows what the paper says, the result files behind it, the script and settings, who ran it and when it was last written.', [['Setup', 'setup']]],
+    ['How does what I used connect to the thesis?', 'The board at the top of Setup: thesis (or problem), claims, experiments, and what was used, as four columns of cards. Click a card and its path to the thesis stays lit, with one sentence saying the path. A dashed card is not connected yet, such as an experiment that tests no claim.', [['Setup', 'setup']]],
     ['Which datasets, metrics and baselines do I use, and where?', 'Each Setup sheet names them. Click a name to see every experiment that uses it and where the paper and the code mention it. A “!” marks something to check, such as a baseline missing on one dataset.', [['Setup', 'setup']]],
     ['What did I, or my coding agent, do on a given day?', 'Click the day in the calendar on Home. The day is shown as work sessions: what was done, for which claim, by whom, on which server and folder, with which script, and what came out. The raw commands are behind “Show the records”.', [['Home', 'digest'], ['Trail', 'history']]],
     ['What should I do next?', '“Next to do” on Home is made by rules: feedback someone is waiting on, things waiting for you to confirm, places where the paper disagrees with the results, results that are out of date, and gaps. Each item opens the thing it is about.', [['Home', 'digest']]],

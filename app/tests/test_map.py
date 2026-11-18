@@ -481,6 +481,29 @@ class MapTest(unittest.TestCase):
         self.assertEqual([c["id"] for c in T["untested"]], ["mine:3"])
         self.assertEqual(T["links_n"], sum(len(sec["experiments"]) for sec in E["sections"] if sec.get("kind") != "other"))
 
+    def test_board(self):
+        """S28: thesis <- claims <- experiments <- what was used, from the Setup document; a gap is kept and counted."""
+        B = self.e.setup()["board"]                      # no map yet: one experiment per result file, no claim
+        self.assertEqual((B["mode"], B["rough"]), ("paper", True))
+        self.assertTrue(B["counts"]["experiments_no_claim"] and B["counts"]["experiments_no_claim"] == B["counts"]["experiments"] - sum(1 for x in B["experiments"] if x["claims"]))
+        self.e.propose_map(agent)
+        self.e.confirm_map()
+        S = self.e.setup()
+        B = S["board"]
+        self.assertEqual((B["mode"], B["rough"], B["thesis"]["kind"]), ("paper", False, "thesis"))
+        self.assertEqual([c["label"] for c in B["claims"]], ["C1", "C2", "C3"])
+        X = {x["name"]: x for x in B["experiments"]}
+        c1 = B["claims"][0]
+        self.assertEqual(sorted(c1["experiments"]), sorted([X["Main comparison"]["id"], X["Learning rate and dropout search"]["id"]]))
+        self.assertEqual(c1["links"][X["Main comparison"]["id"]], "supports")
+        self.assertEqual(X["Adaptive threshold ablation"]["claims"], [B["claims"][1]["id"]])
+        self.assertIn("dataset:electricity", X["Adaptive threshold ablation"]["items"])
+        self.assertEqual(X["Main comparison"]["sheets"], [X["Main comparison"]["id"]])
+        I = {i["id"]: i for i in B["items"]}
+        self.assertEqual(len(I["dataset:electricity"]["experiments"]), 4)
+        self.assertEqual({i["id"] for i in B["items"]}, {i["id"] for i in S["items"] if i["experiments"]})
+        self.assertEqual((B["counts"]["experiments_no_claim"], B["counts"]["claims_untested"], B["counts"]["items_unreached"]), (0, 0, 0))
+
     def test_link_rules(self):
         """Rules L1-L4, each from a minimal experiment."""
         L = lambda x: Engine._link(x, False, "the best other method")

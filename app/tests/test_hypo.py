@@ -235,6 +235,49 @@ class HypoTest(unittest.TestCase):
         self.assertIn("H4", {h["id"] for h in d["hypotheses"]})
         self.assertIn("Proposed protocol change", self.e.hypothesis_proposal(d["change_sets"] and d["change_sets"][-1]["id"] or "cs-2"))
 
+    def test_board_from_the_steps_tables(self):
+        """S28: problem <- hypotheses <- steps <- what the steps' own result tables name (rules only)."""
+        rows = ["model,group,dataset,variant,seed,status,auc_pr,runtime_s"]
+        for m in ("ARCUS", "LSTM"):
+            for g, ds in (("TS", ["a%d" % i for i in range(6)]), ("Stream", ["b%d" % i for i in range(4)])):
+                for d in ds:
+                    for sd in (0, 1):
+                        bad = m == "LSTM" and d == "a0" and sd == 1
+                        rows.append("%s,%s,%s,original,%d,%s,%s,1.0" % (m, g, d, sd, "error" if bad else "ok", "" if bad else "0.5"))
+        (self.code / "results" / "C" / "cells.csv").write_text("\n".join(rows) + "\n")
+        # a failed attempt that a part file repeats with success is not a failed run; the same run in two files counts once
+        (self.code / "results" / "C" / "part.csv").write_text(rows[0] + "\nARCUS,TS,a0,original,0,error,,\nARCUS,TS,a0,original,0,ok,0.5,1.0\n")
+        git(self.code, "add", "-A")
+        git(self.code, "commit", "-q", "-m", "cells", date="2026-11-17T10:00:00+0900")
+        self.e.scan()
+        self.assertEqual(self.e.setup()["board"]["mode"], "paper")      # nothing drafted yet: the board is made from the result files
+        self.assertTrue(self.e.setup()["board"]["waiting"])
+        self.ready()
+        B = self.e.setup()["board"]
+        self.assertEqual((B["mode"], B["thesis"]["kind"]), ("hypothesis_first", "problem"))
+        self.assertIn("temporal characteristics", B["thesis"]["text"])
+        by = {c["id"]: c for c in B["claims"]}
+        self.assertEqual((by["H1"]["experiments"], by["H2"]["experiments"], by["H2b"]["experiments"]), (["stepA"], ["stepC"], []))
+        self.assertEqual((by["H1"]["stage"], by["H2"]["stage"]), ("finding", "refuted"))
+        X = {x["id"]: x for x in B["experiments"]}
+        U = X["stepC"]["used"]
+        self.assertEqual((U["methods"], U["datasets"], U["seeds"], U["rows"], U["failed"]), (2, 10, 2, 40, 1))
+        self.assertEqual(X["stepC"]["claims"], ["H2"])
+        I = {i["id"]: i for i in B["items"]}
+        self.assertEqual(I["metric:aucpr"]["experiments"], ["stepC"])
+        self.assertNotIn("metric:runtimes", I)                                          # not the name of a metric
+        self.assertEqual((I["dataset:ts"]["group"], I["dataset:ts"]["uses"][0]["datasets"], I["dataset:stream"]["uses"][0]["datasets"]), (True, 6, 4))   # ten datasets, shown by suite
+        self.assertEqual((I["method:lstm"]["failed"], I["method:lstm"]["uses"][0]["rows"], I["method:arcus"].get("failed")), (1, 20, None))
+        self.assertEqual(X["stepA"]["items"], ["metric:measuresofstepa"])                # no known metric name: its columns of numbers, as one card
+        self.assertEqual((I["metric:measuresofstepa"]["name"], I["metric:measuresofstepa"]["names"]), ("1 measure", ["x"]))
+        self.assertEqual(sorted(c["id"] for c in B["claims"] if not c["experiments"]), ["H2b", "H8"])      # gaps are kept, and counted
+        self.assertEqual((B["counts"]["claims_untested"], B["counts"]["experiments_no_claim"]), (2, 0))
+        # an archived hypothesis leaves the board; a step that then tests nothing is a gap
+        self.e.hypothesis_act("delete", "H2")
+        B = self.e.setup()["board"]
+        self.assertNotIn("H2", [c["id"] for c in B["claims"]])
+        self.assertEqual(B["counts"]["experiments_no_claim"], 1)
+
     def test_problem_delete_needs_a_new_input(self):
         self.ready()
         with self.assertRaises(BadRequest):
