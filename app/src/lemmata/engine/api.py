@@ -12,6 +12,7 @@ from . import claims as claimsmod
 from . import experiments as expmod
 from . import notation as notationmod
 from . import numbers as numbersmod
+from . import baselines as baselinesmod
 from . import process as processmod
 from . import graph as graphmod
 from . import history as historymod
@@ -634,6 +635,71 @@ class Engine:
             raise BadRequest("action must be confirm, discard or remove")
         self.hub.write_json("numbers.json", st)
         return self.numbers()
+
+    # ------------------------------------------------------------------ baselines (S30)
+    def _baselines_setup(self):
+        s = self._ensure()
+        E = self.experiments()
+        doc = setupmod.build(E, s["G"], s["trees"])
+        self._setup_context(doc, E, s)
+        return doc
+
+    def baselines(self):
+        """Every method the work is compared with: its paper, PDF, code, idea and published numbers, beside the project's own numbers."""
+        return baselinesmod.build(baselinesmod.load(self.hub), self._baselines_setup())
+
+    def baselines_brief(self):
+        """What an agent needs to fill the baseline cards in: the format, the baselines, and what each still lacks."""
+        return baselinesmod.brief(self.baselines())
+
+    def propose_baselines(self, doc, by=None):
+        """Cards written by an agent. Checked by rules, stored as a proposal; nothing counts until the researcher confirms."""
+        setup = self._baselines_setup()
+        st = baselinesmod.load(self.hub)
+        known = baselinesmod.known_names(setup)
+        for k, e in st["entries"].items():
+            known.setdefault(expmod.norm(e["name"]), k)
+        clean, report = baselinesmod.verify(doc, known, (by or "agent")[:60])
+        st.update(proposed=clean or None, report=report, proposed_at=now_iso(), proposed_by=(by or "agent")[:60])
+        self.hub.write_json("baselines.json", st)
+        return baselinesmod.build(st, setup)
+
+    def _baseline_key(self, name, setup, st, create=False):
+        n = expmod.norm(name or "")
+        if not n:
+            raise BadRequest("name is missing")
+        key = baselinesmod.known_names(setup).get(n)
+        if key is None:
+            key = next((k for k, e in list(st["entries"].items()) + list((st.get("proposed") or {}).items()) if k == n or expmod.norm(e["name"]) == n), None)
+        if key is None:
+            if not create:
+                raise NotFound("unknown baseline %r" % name)
+            key = n
+        return key
+
+    def save_baseline(self, name, fields):
+        """The researcher's own edit of one card (it counts at once), or a new baseline to track that is not in the result files yet."""
+        setup = self._baselines_setup()
+        st = baselinesmod.load(self.hub)
+        if len(st["entries"]) >= baselinesmod.MAX_ENTRIES:
+            raise BadRequest("too many baselines (%d at most)" % baselinesmod.MAX_ENTRIES)
+        key = self._baseline_key(name, setup, st, create=True)
+        st, notes = baselinesmod.save(st, key, " ".join(str(name).split())[:80], fields or {})
+        self.hub.write_json("baselines.json", st)
+        out = baselinesmod.build(st, setup)
+        out["notes"] = notes
+        return out
+
+    def decide_baselines(self, action, name=None):
+        """confirm or discard what the agent proposed (all of it, or one baseline); remove one card."""
+        setup = self._baselines_setup()
+        st = baselinesmod.load(self.hub)
+        key = self._baseline_key(name, setup, st) if name else None
+        if action == "remove" and key is None:
+            raise BadRequest("name is missing")
+        st = baselinesmod.decide(st, action, key)
+        self.hub.write_json("baselines.json", st)
+        return baselinesmod.build(st, setup)
 
     # ------------------------------------------------------------------ the kind of study (S29, ADR-009)
     def study(self):

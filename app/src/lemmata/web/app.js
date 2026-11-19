@@ -1954,7 +1954,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'baselines'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (!S.tabs.length) { S.tabs = [{ k: 'digest' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
@@ -1968,7 +1968,7 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
-    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': return RX_TABS[t.k][1];
+    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': case 'baselines': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
@@ -2013,7 +2013,7 @@ function navGo(d) {
 /* ---------- shell DOM (S18): band, one column, footer ---------- */
 /* The four top-level pages. Every other page belongs to one of them (shown as active) and is reached from a link on that page or from the footer. */
 const NAV = [['digest', 'Home'], ['experiments', 'Thesis'], ['setup', 'Setup'], ['review', 'Review'], ['history', 'Trail']];
-const NAV_OF = { claims: 'experiments', timeline: 'experiments', notation: 'experiments', graph: 'experiments', item: 'experiments', node: 'experiments', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'history', trail: 'history', ask: 'digest', review: 'review', changes: 'review', checks: 'review', numbers: 'review' };
+const NAV_OF = { claims: 'experiments', timeline: 'experiments', notation: 'experiments', graph: 'experiments', item: 'experiments', node: 'experiments', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'history', trail: 'history', ask: 'digest', review: 'review', changes: 'review', checks: 'review', numbers: 'review', baselines: 'setup' };
 const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
@@ -2051,7 +2051,7 @@ function usedByText(nid) {
 /* S24 (founder, chat 2026-11-16 11:34 KST): the secondary pages (History, Graph, ...) sit in a left sidebar on the website,
    not at the bottom of the page. The five main tabs stay in the band. The VS Code tab and narrow windows keep them in the footer. */
 const SIDE = [
-  ['Explore', [['numbers', 'Key numbers'], ['graph', 'Graph'], ['notation', 'Notation'], ['timeline', 'Growth'], ['checks', 'Checks'], ['changes', 'Changes']]],
+  ['Explore', [['baselines', 'Baselines'], ['numbers', 'Key numbers'], ['graph', 'Graph'], ['notation', 'Notation'], ['timeline', 'Growth'], ['checks', 'Checks'], ['changes', 'Changes']]],
   ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
   ['Help', [['faq', 'FAQ']]],
 ];
@@ -2062,7 +2062,7 @@ function renderLeft() {
   if (!S.project) return;
   const t = S.tabs[S.active], cur = t ? t.k : null;
   const nb = RX.numbers && RX.numbers.counts ? RX.numbers.counts : null;
-  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0 };
+  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0 };
   const go = k => k === 'search' ? quickSwitcher() : openTab(k);
   const top = NAV_OF[cur] || null;
   side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' }, b) : null); })));
@@ -2091,7 +2091,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' || t.k === 'baselines' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
@@ -2170,7 +2170,7 @@ function renderStatus() {
   const nChecks = ((S.findings && S.findings.findings) || []).length;
   const embed = !!window.LEMMATA_EMBED;
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
-  const more = [link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
+  const more = [link('Baselines', () => openTab('baselines')), link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('FAQ', () => openTab('faq')), link('Search', () => quickSwitcher())];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
@@ -2227,7 +2227,7 @@ function currentItemCmd(state) {
 function palette() {
   const it = S.tabs[S.active] && S.tabs[S.active].k === 'item' ? M.byId.get(S.tabs[S.active].id) : null;
   const cmds = [
-    { label: 'Go to Review', run: () => openTab('review') }, { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Notation', run: () => openTab('notation') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Setup (metrics, datasets, baselines)', run: () => openTab('setup') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
+    { label: 'Go to Review', run: () => openTab('review') }, { label: 'Go to Claims', run: () => openTab('claims') }, { label: 'Go to Notation', run: () => openTab('notation') }, { label: 'Go to Timeline', run: () => openTab('timeline') }, { label: 'Go to Experiments', run: () => openTab('experiments') }, { label: 'Go to Setup (metrics, datasets, baselines)', run: () => openTab('setup') }, { label: 'Go to Baselines (paper, code, idea, published numbers)', run: () => openTab('baselines') }, { label: 'Go to Tasks', run: () => openTab('tasks') }, { label: 'Ask about this project', run: () => openTab('ask') },
     { label: 'Go to Changes', run: () => openTab('changes') }, { label: 'Go to Graph', run: () => openTab('graph') }, { label: 'Go to Checks', run: () => openTab('checks') }, { label: 'Go to History', run: () => openTab('history') },
     { label: 'Open item…', hint: 'Ctrl+O', run: () => quickSwitcher() },
     { label: 'Mark everything as looked at', run: () => markAllDialog(), disabled: READONLY, reason: 'Read-only snapshot' },

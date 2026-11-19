@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'], baselines: ['≡', 'Baselines'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -75,9 +75,10 @@ async function rxLoad() {
     let study = null, numbers = null;      // S29: the kind of study, and the numbers it rests on (older hubs and snapshots have neither)
     try { study = await apiGet('/api/study'); } catch (e) { /* a method paper, as before */ }
     try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
+    let baselines = null; try { baselines = await apiGet('/api/baselines'); } catch (e) { /* S30: older hubs and snapshots have no Baselines page */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -2242,7 +2243,142 @@ function pageNumbers() {
   if (RX.nbSel) setTimeout(() => { const el = document.getElementById('nb-' + RX.nbSel.replace(/[^\w]/g, '_')); if (el) el.scrollIntoView({ block: 'center' }); RX.nbSel = null; }, 0);
   return root;
 }
-const RX_PAGES = { numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
+/* ---------- Baselines (S30): one row per compared method, with where to check it ----------
+   Founder (chat 2026-11-19 17:59 KST): a separate page to organise the baselines in a table, with the paper's PDF, the GitHub code,
+   the intuition and the published performance, to track them against our own method. */
+const BL_PROMPT = (name, one) => 'Use Lemmata for the project "' + name + '": call baselines with brief=true, then fill in ' + (one ? 'the card of ' + one : 'every baseline that is missing something') +
+  '. Read the paper that introduced each baseline and its repository yourself. Give the paper\'s title, authors, year, venue, link and PDF link; the code link; the idea in one or two sentences of your own; where it falls short; and the numbers the paper reports on this project\'s datasets, with the table they are printed in. Leave out what you cannot find. Then call propose_baselines.';
+const BL_PART = { paper: 'paper', pdf: 'PDF', code: 'code', intuition: 'idea', published: 'published numbers' };
+const BL_FIELD = { 'paper.title': 'Title', 'paper.authors': 'Authors', 'paper.year': 'Year', 'paper.venue': 'Venue', 'paper.url': 'Paper link', 'paper.pdf': 'PDF link', code: 'Code', intuition: 'Idea', limit: 'Falls short', differs: 'Ours differs', notes: 'Notes', published: 'Published numbers' };
+const BL_ROLE = { base: 'the method being extended', baseline: 'baseline', compared: 'compared method' };
+function blExt(href, label) { return h('a', { class: 'ghl bl-ext', href, target: '_blank', rel: 'noopener noreferrer', title: href, onclick: ev => ev.stopPropagation() }, label + ' ↗'); }
+function blPaperLine(p) { return [p.authors ? trunc(p.authors, 60) : null, p.venue, p.year].filter(Boolean).join(' · '); }
+function blNumbers(r, B) {      // published numbers beside what the project measured; then what was measured with nothing published beside it
+  const bench = B.study === 'benchmark';
+  const seen = new Set(r.compare.filter(x => x.mine != null).map(x => x.x + '|' + x.dataset.toLowerCase() + '|' + x.metric.toLowerCase()));
+  const rest = r.mine.filter(m => !seen.has(m.x + '|' + (m.dataset || '').toLowerCase() + '|' + m.metric.toLowerCase()));
+  if (!r.compare.length && !rest.length) return h('p', { class: 'muted small' }, 'No published number yet, and none measured in this project.');
+  const dir = x => x.lower == null ? '' : x.lower ? ' ↓' : ' ↑';
+  return h('div', { class: 'su-tw' }, h('table', { class: 'nb-t bl-n' }, h('thead', null, h('tr', null, h('th', null, 'Dataset'), h('th', null, 'Measure'), h('th', { class: 'num' }, 'Published'), h('th', null, 'Printed in'),
+    h('th', { class: 'num' }, 'Measured here'), bench ? null : h('th', { class: 'num' }, B.ours || 'Ours'), h('th', { class: 'num', title: 'Measured here minus published. Lemmata gives no verdict on it.' }, 'Difference'))),
+    h('tbody', null, r.compare.map(x => h('tr', null, h('td', null, x.dataset), h('td', null, x.metric + dir(x)),
+      h('td', { class: 'num mono' }, x.text || rxFmt(x.published), x.scaled ? h('div', { class: 'muted small', title: 'The paper and your result file use different scales.' }, 'read as ' + rxFmt(x.published_scaled)) : null),
+      h('td', { class: 'small' }, x.url ? blExt(x.url, x.where || 'source') : (x.where || h('span', { class: 'muted' }, '—')), x.note ? h('div', { class: 'muted small' }, x.note) : null),
+      h('td', { class: 'num mono' }, x.mine == null ? h('span', { class: 'muted', title: 'This project has no result for this method on this dataset and measure.' }, 'not run') : h('button', { class: 'linkbtn mono', title: 'Open the experiment', onclick: () => rxOpenExp(x.x) }, rxFmt(x.mine))),
+      bench ? null : h('td', { class: 'num mono' }, x.ours == null ? '—' : rxFmt(x.ours)),
+      h('td', { class: 'num mono' }, x.diff == null ? '—' : (x.diff > 0 ? '+' : '') + rxFmt(x.diff)))),
+    rest.map(m => h('tr', { class: 'bl-rest' }, h('td', null, m.dataset || m.column), h('td', null, m.metric + dir(m)), h('td', { class: 'num muted' }, '—'), h('td', { class: 'small muted' }, 'no published number'),
+      h('td', { class: 'num mono' }, h('button', { class: 'linkbtn mono', title: 'Open the experiment', onclick: () => rxOpenExp(m.x) }, rxFmt(m.value))),
+      bench ? null : h('td', { class: 'num mono' }, m.ours == null ? '—' : rxFmt(m.ours)), h('td', { class: 'num muted' }, '—'))))));
+}
+function blForm(r, B, act) {
+  const e = r.entry, p = e.paper || {}, f = {}, bench = B.study === 'benchmark';
+  const inp = (key, val, ph) => { const i = h('input', { type: 'text', value: val == null ? '' : String(val), placeholder: ph || '', 'aria-label': BL_FIELD[key] || key, class: 'bl-in' }); f[key] = i; return [h('label', null, BL_FIELD[key]), i]; };
+  const ta = (key, val, ph) => { const t = h('textarea', { rows: '2', class: 'rx-ta', placeholder: ph, 'aria-label': BL_FIELD[key] }); t.value = val || ''; f[key] = t; return [h('label', null, BL_FIELD[key]), t]; };
+  const body = h('tbody');
+  const cell = (val, ph, list) => h('input', { type: 'text', value: val == null ? '' : String(val), placeholder: ph, 'aria-label': ph, list: list || null });
+  const pubRow = q => { const c = [cell(q.dataset, 'Dataset', 'bl-ds'), cell(q.metric, 'Measure', 'bl-mt'), cell(q.text != null ? q.text : q.value, 'Number'), cell(q.where, 'Table 2'), cell(q.url, 'https://… (if not this paper)'), cell(q.note, 'Protocol note')];
+    const tr = h('tr', null, c.map(i => h('td', null, i)), h('td', null, h('button', { class: 'linkbtn small', title: 'Remove this number', onclick: () => tr.remove() }, '✕')));
+    tr._get = () => ({ dataset: c[0].value.trim(), metric: c[1].value.trim(), value: c[2].value.trim(), where: c[3].value.trim() || null, url: c[4].value.trim() || null, note: c[5].value.trim() || null });
+    body.append(tr); };
+  (e.published || []).forEach(pubRow);
+  const save = async () => {
+    const pubs = [...body.children].map(tr => tr._get()).filter(q => q.dataset || q.metric || q.value);
+    const fields = { paper: { title: f['paper.title'].value, authors: f['paper.authors'].value, year: f['paper.year'].value, venue: f['paper.venue'].value, url: f['paper.url'].value, pdf: f['paper.pdf'].value },
+      code: f.code.value, intuition: f.intuition.value, limit: f.limit.value, notes: f.notes.value, published: pubs };
+    if (f.differs) fields.differs = f.differs.value;
+    const d = await act({ action: 'save', name: r.name, fields }, 'Saved.');
+    if (d) { RX.blEdit = null; (d.notes || []).forEach(n => toast(n.why)); renderPage(true); }
+  };
+  return h('div', { class: 'bl-edit' }, h('div', { class: 'bl-form' },
+    inp('paper.title', p.title, 'The paper that introduced it'), inp('paper.authors', p.authors, 'Family names'), inp('paper.year', p.year, '2021'), inp('paper.venue', p.venue, 'ICLR'),
+    inp('paper.url', p.url, 'https://… the paper\'s page'), inp('paper.pdf', p.pdf_derived ? '' : p.pdf, p.pdf_derived ? p.pdf + ' (from the arXiv page)' : 'https://… .pdf'), inp('code', e.code, 'https://github.com/…'),
+    ta('intuition', e.intuition, 'The idea in one or two sentences, in your words'), ta('limit', e.limit, 'Where it falls short'),
+    bench ? null : ta('differs', e.differs, 'How ' + (B.ours || 'your method') + ' differs from it'), ta('notes', e.notes, 'Anything to remember when you run or cite it')),
+    h('div', { class: 'bl-ph' }, 'Published numbers'),
+    h('datalist', { id: 'bl-ds' }, B.datasets.map(d => h('option', { value: d }))), h('datalist', { id: 'bl-mt' }, B.metrics.map(d => h('option', { value: d }))),
+    h('div', { class: 'su-tw' }, h('table', { class: 'nb-t bl-pub' }, h('thead', null, h('tr', null, ['Dataset', 'Measure', 'Number', 'Printed in', 'Link', 'Note', ''].map(t => h('th', null, t)))), body)),
+    h('div', { class: 'bl-acts' }, h('button', { class: 'linkbtn small', onclick: () => pubRow({}) }, '+ Add a number'), h('span', { class: 'grow' }),
+      h('button', { class: 'btn sm', onclick: () => { RX.blEdit = null; renderPage(true); } }, 'Cancel'), h('button', { class: 'btn sm primary', onclick: save }, 'Save')));
+}
+function blDetail(r, B, act, name) {
+  const e = r.entry, p = e.paper || {}, bench = B.study === 'benchmark';
+  const none = t => h('span', { class: 'muted' }, t || 'not filled in');
+  const kids = [];
+  if (r.proposal) kids.push(h('div', { class: 'flag bl-prop' }, h('b', null, 'Proposed by ' + (r.proposal.by || 'your agent') + '. '), 'Open each link before you confirm.',
+    h('div', { class: 'bl-chg' }, r.changes.map(ch => h('div', { class: 'hf-row small' }, h('span', { class: 'hf-tag' }, '[' + (BL_FIELD[ch.field] || ch.field) + ']'),
+      ch.field === 'published' ? h('span', { class: 'grow' }, ch.numbers.map(q => h('div', null, q.metric + ' on ' + q.dataset + ': ', h('b', { class: 'mono' }, q.text || q.value), q.where ? ' (' + q.where + ')' : '', q.note ? h('span', { class: 'muted' }, ' · ' + q.note) : null)))
+        : h('span', { class: 'grow' }, ch.before ? [h('s', { class: 'muted' }, trunc(String(ch.before), 120)), ' → '] : null, /^https:/.test(String(ch.after)) ? blExt(ch.after, trunc(String(ch.after), 70)) : String(ch.after))))),
+    READONLY ? null : h('div', { class: 'bl-acts' }, h('button', { class: 'btn sm primary', onclick: () => act({ action: 'confirm', name: r.name }, 'Confirmed.') }, 'Confirm'), h('button', { class: 'btn sm', onclick: () => act({ action: 'discard', name: r.name }, 'Discarded.') }, 'Discard'))));
+  if (RX.blEdit === r.key && !READONLY) { kids.push(blForm(r, B, act)); return h('div', { class: 'bl-det' }, kids); }
+  kids.push(h('dl', { class: 'bl-card' },
+    h('dt', null, 'Paper'), h('dd', null, p.title ? h('b', null, p.title) : none(), blPaperLine(p) ? h('div', { class: 'muted small' }, blPaperLine(p)) : null,
+      h('div', null, p.url ? blExt(p.url, 'Paper') : null, p.pdf ? blExt(p.pdf, 'PDF') : none('no PDF link'))),
+    h('dt', null, 'Code'), h('dd', null, e.code ? blExt(e.code, trunc(e.code.replace(/^https:\/\//, ''), 70)) : none()),
+    h('dt', null, 'Idea'), h('dd', null, e.intuition || none()),
+    h('dt', null, 'Falls short'), h('dd', null, e.limit || none()),
+    bench ? null : [h('dt', null, (B.ours || 'Ours') + ' differs'), h('dd', null, e.differs || none())],
+    e.notes ? [h('dt', null, 'Notes'), h('dd', null, e.notes)] : null,
+    h('dt', null, 'In your paper'), h('dd', { class: 'small' }, r.cited.length ? ['cited as ', r.cited.map((ci, i) => [i ? ', ' : '', h('span', { class: 'mono' }, ci.key), ci.title ? ' (' + trunc(ci.title, 60) + (ci.year ? ', ' + ci.year : '') + ')' : ''])]
+      : r.named ? 'named on ' + plural(r.named, 'line') + ', not cited there' : r.in_results ? none('not named') : none('not in your result files yet'))));
+  kids.push(h('div', { class: 'bl-ph' }, 'Published and measured'), blNumbers(r, B));
+  kids.push(h('div', { class: 'bl-acts' },
+    READONLY ? null : h('button', { class: 'btn sm primary', onclick: () => { RX.blEdit = r.key; renderPage(true); } }, r.has_entry ? 'Edit' : 'Fill in'),
+    READONLY ? null : h('button', { class: 'btn sm', title: BL_PROMPT(name, r.name), onclick: () => copyText(BL_PROMPT(name, r.name)) }, 'Copy prompt for Claude Code'),
+    r.item ? h('button', { class: 'linkbtn small', title: 'Where the paper and the code name it', onclick: () => { RX.suSel = 'i:' + r.item; RX.bdSel = 'i:' + r.item; openTab('setup'); } }, 'Open in Setup') : null,
+    r.experiments.map(x => h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, x.name)), h('span', { class: 'grow' }),
+    e.at ? h('span', { class: 'muted small' }, 'card by ' + (e.by || 'you') + ', ' + dmon(e.at)) : null,
+    r.has_entry && !READONLY ? h('button', { class: 'linkbtn small', title: r.in_results ? 'Empty this card. The baseline stays, because it is in your result files.' : 'Stop tracking this baseline', onclick: () => act({ action: 'remove', name: r.name }, r.in_results ? 'Card emptied.' : 'Removed.') }, r.in_results ? 'Empty the card' : 'Remove') : null));
+  return h('div', { class: 'bl-det' }, kids);
+}
+function pageBaselines() {
+  const nr = rxNotReady('Baselines'); if (nr) return nr;
+  S.outline = [];
+  const B = RX.baselines, name = S.project ? S.project.name : 'this project';
+  const root = doc(h('h1', { class: 'ptitle' }, 'Baselines'));
+  root.classList.add('wide');
+  if (!B) return root.append(h('p', { class: 'muted' }, 'This hub has no Baselines page yet. It appears after the hub updates.')), root;
+  const bench = B.study === 'benchmark', c = B.counts;
+  const act = async (body, msg) => { const r = await rxPost('/api/baselines', body, msg); if (r) { RX.baselines = r; renderAll(); } return r; };
+  root.append(h('p', { class: 'lede muted' }, 'Each method ' + (bench ? 'the study compares' : 'you compare with') + ': where to read it, where its code is, what its idea is, and what its paper reported beside what you measured.'), rxBehindNote());
+  if (c.total) root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.total), c.total === 1 ? ' baseline' : ' baselines'), h('span', null, h('b', null, c.pdf), ' with a PDF'), h('span', null, h('b', null, c.code), ' with code'),
+    h('span', null, h('b', null, c.intuition), ' with the idea'), h('span', null, h('b', null, c.numbers), ' published numbers'), h('span', null, h('b', null, c.reproduced), ' beside one of yours')));
+  if (c.proposed) root.append(h('div', { class: 'flag nb-prop' }, h('b', null, plural(c.proposed, 'card') + ' proposed'), ' by ' + (B.proposed_by || 'agent') + '. Nothing counts until you confirm. Open a row to see what would change. ',
+    READONLY ? null : [h('button', { class: 'btn sm primary', onclick: () => act({ action: 'confirm' }, 'Confirmed.') }, 'Confirm all'), ' ', h('button', { class: 'btn sm', onclick: () => act({ action: 'discard' }, 'Proposal discarded.') }, 'Discard all')]));
+  const dropped = (B.report || []).filter(r => r.level === 'dropped'), notes = (B.report || []).filter(r => r.level !== 'dropped');
+  if (dropped.length || notes.length) root.append(h('details', { class: 'details', open: dropped.length && c.proposed ? '' : null }, h('summary', null, 'What the checker said (' + dropped.length + ' dropped, ' + notes.length + ' notes)'),
+    dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why)), notes.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))));
+  if (!c.total) root.append(emptyState('≡', 'No baseline yet', B.mapped ? 'The result files name no method other than your own. Add one below to start tracking it before you run it.' : 'Lemmata lists a baseline as soon as the result files name one. Until the project map is confirmed the list can be rough. You can also add one below.', []));
+  else {
+    const tb = h('tbody');
+    for (const r of B.rows) {
+      const e = r.entry, p = e.paper || {}, on = RX.blOpen === r.key;
+      const toggle = () => { RX.blOpen = on ? null : r.key; if (on) RX.blEdit = null; renderPage(true); };
+      const miss = r.missing.map(m => BL_PART[m]);
+      tb.append(h('tr', { class: 'bl-r' + (on ? ' on' : '') + (r.proposal ? ' prop' : ''), id: 'bl-' + r.key, onclick: toggle },
+        h('td', null, h('button', { class: 'bl-name', 'aria-expanded': String(on), onclick: ev => { ev.stopPropagation(); toggle(); } }, r.name),
+          h('span', { class: 'bl-sub' }, r.in_results ? (BL_ROLE[r.role] || 'baseline') : 'not in your results yet'),
+          r.proposal ? h('span', { class: 'hf-tag' }, '[confirm]') : miss.length ? h('span', { class: 'hf-tag', title: 'Still missing: ' + miss.join(', ') }, miss.length === 5 ? '[empty]' : '[no ' + miss.slice(0, 2).join(', ') + (miss.length > 2 ? ', +' + (miss.length - 2) : '') + ']') : null),
+        h('td', null, p.title ? h('span', { title: p.title }, trunc(p.title, 64)) : h('span', { class: 'muted' }, '—'), blPaperLine(p) ? h('span', { class: 'bl-sub' }, blPaperLine(p)) : null,
+          h('div', null, p.url ? blExt(p.url, 'Paper') : null, p.pdf ? blExt(p.pdf, 'PDF') : null)),
+        h('td', null, e.code ? blExt(e.code, r.code_host === 'github.com' ? 'GitHub' : r.code_host) : h('span', { class: 'muted' }, '—')),
+        h('td', { class: 'bl-idea' }, e.intuition ? trunc(e.intuition, 130) : h('span', { class: 'muted' }, '—')),
+        h('td', { class: 'small' }, r.compare.length ? [h('b', null, r.compare.length), ' published', h('span', { class: 'bl-sub' }, r.reproduced + ' beside one of yours')] : r.mine.length ? h('span', { class: 'muted' }, 'measured here, nothing published beside it') : h('span', { class: 'muted' }, '—'))));
+      if (on) tb.append(h('tr', { class: 'bl-d' }, h('td', { colspan: '5' }, blDetail(r, B, act, name))));
+    }
+    root.append(h('div', { class: 'su-tw' }, h('table', { class: 'bl-t' }, h('thead', null, h('tr', null, ['Method', 'Paper', 'Code', 'Idea', 'Numbers'].map(t => h('th', null, t)))), tb)));
+  }
+  if (!READONLY) {
+    const add = h('input', { type: 'text', placeholder: 'A method you plan to compare with', 'aria-label': 'New baseline', maxlength: '80' });
+    const go = async () => { const v = add.value.trim(); if (!v) return; const d = await act({ action: 'save', name: v, fields: {} }, 'Added.'); if (d) { const r = d.rows.find(x => x.name.toLowerCase() === v.toLowerCase()); if (r) { RX.blOpen = r.key; RX.blEdit = r.key; renderPage(true); } } };
+    add.addEventListener('keydown', ev => { if (ev.key === 'Enter') go(); });
+    root.append(h('div', { class: 'bl-add' }, add, h('button', { class: 'btn sm', onclick: go }, 'Add')),
+      c.total ? h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm', title: BL_PROMPT(name), onclick: () => copyText(BL_PROMPT(name)) }, 'Copy prompt for Claude Code'), h('span', { class: 'muted small' }, ' to have your agent fill in what is missing; you confirm')) : null);
+  }
+  if (RX.blSel) setTimeout(() => { const el = document.getElementById('bl-' + RX.blSel); if (el) el.scrollIntoView({ block: 'center' }); RX.blSel = null; }, 0);
+  return root;
+}
+const RX_PAGES = { baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

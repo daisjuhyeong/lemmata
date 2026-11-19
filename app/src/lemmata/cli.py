@@ -273,6 +273,27 @@ def cmd_checkpoint(args):
     return 0
 
 
+def cmd_agents(args):
+    """Copy an agent kit (Claude Code agents and a skill) into a research repository's .claude folder."""
+    from lemmata import agents
+    if args.action == "list" or not args.repo:
+        for k, what in agents.KITS.items():
+            print("%s: %s" % (k, what))
+        print("Install: lemmata agents install <research repository> [--kit paper] [--force]")
+        return 0
+    try:
+        written, kept = agents.install(args.kit, args.repo, force=args.force)
+    except ValueError as e:
+        print("lemmata: %s" % e, file=sys.stderr)
+        return 2
+    for p in written:
+        print("wrote %s" % p)
+    for p in kept:
+        print("kept  %s (it differs from the kit; use --force to replace it)" % p)
+    print("%d written, %d kept. In Claude Code in that repository: /lemmata-%s" % (len(written), len(kept), args.kit))
+    return 0
+
+
 def cmd_mcp_stdio(args):
     from lemmata.mcp import LocalCtx, run_stdio
 
@@ -332,6 +353,13 @@ def build_parser():
     m = sub.add_parser("mcp-stdio", help="serve one local project to an MCP client over stdio (Claude Code)")
     m.add_argument("project_dir")
     m.set_defaults(fn=cmd_mcp_stdio)
+    ag = sub.add_parser("agents", help="install the Lemmata agents for Claude Code into a research repository")
+    ag.add_argument("action", choices=["list", "install"])
+    ag.add_argument("repo", nargs="?", help="the research repository to install into")
+    ag.add_argument("--kit", default="paper", help="which kit (default: paper)")
+    ag.add_argument("--force", action="store_true", help="replace files that differ from the kit")
+    ag.set_defaults(fn=cmd_agents)
+
     from lemmata.hub.cli import add_parser as add_hub
 
     add_hub(sub)

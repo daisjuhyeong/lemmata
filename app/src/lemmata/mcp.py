@@ -37,6 +37,7 @@ INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code 
                 "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map. "
                 "Call study to learn whether the work has a method of its own or is a benchmark study with none. To trace the numbers a "
                 "report quotes to the files that store them, use key_numbers. "
+                "For what each baseline is (its paper, code, idea and published numbers), use baselines. "
                 "For experiments that were never committed, use runs. To say what a block of work was for, read sessions and "
                 "propose one sentence with session_summary; the researcher confirms it.")
 
@@ -967,6 +968,63 @@ def t_propose_numbers(ctx, args):
             "researcher can confirm it, on the Review page of Lemmata. Tell them it is ready."), d, "Nothing to narrow."
 
 
+
+def _baselines_text(d, only=None):
+    c = d["counts"]
+    lines = ["Baselines: %d (%d in the result files). With a paper link %d, a PDF %d, code %d, the idea %d, published numbers %d. "
+             "%d published numbers, %d beside a number measured in this project.%s" % (
+                 c["total"], c["in_results"], c["paper"], c["pdf"], c["code"], c["intuition"], c["published"], c["numbers"], c["reproduced"],
+                 (" %d proposed card(s) wait for the researcher." % c["proposed"]) if c["proposed"] else "")]
+    want = only.lower().replace(" ", "") if only else None
+    for r in d["rows"]:
+        if want and want not in (r["key"], r["name"].lower().replace(" ", "")):
+            continue
+        e, p = r["entry"], r["entry"].get("paper") or {}
+        head = "- %s%s%s" % (r["name"], " (%s)" % r["role"] if r["role"] else " (not in the result files)", " [proposed card waiting]" if r["proposal"] else "")
+        lines.append(head + (": missing " + ", ".join(r["missing"]) if r["missing"] else ": complete"))
+        if p.get("title") or p.get("url"):
+            lines.append("  paper: %s%s%s%s" % (_short(p.get("title") or "", 140), " (%s)" % p["year"] if p.get("year") else "", " " + p["url"] if p.get("url") else "", " pdf " + p["pdf"] if p.get("pdf") else ""))
+        if e.get("code"):
+            lines.append("  code: " + e["code"])
+        for k, lab in (("intuition", "idea"), ("limit", "falls short"), ("differs", "ours differs")):
+            if e.get(k):
+                lines.append("  %s: %s" % (lab, _short(e[k], 300)))
+        for x in r["compare"][:20]:
+            lines.append("  published %s on %s: %s%s%s%s" % (x["metric"], x["dataset"], x["text"] or x["published"], " (%s)" % x["where"] if x["where"] else "",
+                                                         "; measured here %s (difference %+g%s)" % (x["mine"], x["diff"], ", published read on the file's scale" if x["scaled"] else "") if x["mine"] is not None else "; not measured here",
+                                                         "; ours %s" % x["ours"] if x["ours"] is not None else ""))
+        if want and r["mine"]:
+            lines.append("  measured here: " + "; ".join("%s on %s = %s" % (m["metric"], m["dataset"] or m["column"], m["value"]) for m in r["mine"][:24]))
+    for x in d.get("report") or []:
+        lines.append("%s · %s: %s" % (x["level"].upper(), x["where"], _short(x["why"], 220)))
+    return "\n".join(lines)
+
+
+def t_baselines(ctx, args):
+    from lemmata.engine import baselines as bl
+    pid, eng = _project(ctx, args)
+    if args.get("brief") is True:
+        b = eng.baselines_brief()
+        return bl.GUIDE + "\n" + _quote([json.dumps({k: b[k] for k in ("study", "ours", "datasets", "metrics", "baselines")}, ensure_ascii=False, indent=1)]), b, \
+            "Read each baseline's own paper and repository, then call propose_baselines."
+    d = eng.baselines()
+    return _baselines_text(d, _need_str(args, "name", required=False)), d, "Pass name=<baseline> for one baseline with every number measured here, or brief=true for how to propose cards."
+
+
+def t_propose_baselines(ctx, args):
+    pid, eng = _project(ctx, args)
+    if not isinstance(args.get("baselines"), list):
+        raise _Fail("Argument 'baselines' must be a list. Call baselines with brief=true for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.propose_baselines({"baselines": args["baselines"]}, "agent")
+    else:
+        d = eng.propose_baselines({"baselines": args["baselines"]}, "agent")
+    return (_baselines_text(d) + "\nThis is a proposal. Fix what was dropped and propose again if needed; it replaces the previous proposal. Only the "
+            "researcher can confirm it, on the Baselines page of Lemmata. Tell them it is ready, and that every link is theirs to open and check."), d, "Nothing to narrow."
+
+
 def _hf_text(d):
     p = d["problem"].get("confirmed") or d["problem"].get("proposed")
     lines = ["Mode: %s. Problem: %s." % (d["mode"], "confirmed" if d["problem"].get("confirmed") else "proposed, waiting for the researcher" if d["problem"].get("proposed") else "not stated yet")]
@@ -1195,6 +1253,22 @@ TOOLS = [
                     "cannot read, and stores the rest as a proposal for the researcher to confirm. It never edits the repository. Only call "
                     "it when the user asked you to trace or list the project's numbers.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "numbers": {"type": "array", "items": {"type": "object"}, "description": "The key numbers."}}, ["project", "numbers"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "baselines", "fn": t_baselines, "title": "Baselines: paper, code, idea and published numbers", "max_text": 30000,
+     "description": "Every method the project is compared with, as the researcher keeps it: the paper that introduced it and its PDF, the "
+                    "code, the idea in a sentence or two, and the numbers its paper reports, each beside the number this project measured "
+                    "for the same dataset and measure (and the project's own method). Says what each card still lacks. Read it before you "
+                    "describe a baseline or compare with published results. brief=true returns how to fill the cards in.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "name": {"type": "string", "description": "Only this baseline, with every number measured here."},
+                             "brief": {"type": "boolean", "description": "Return the format and the context for proposing baseline cards."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "propose_baselines", "fn": t_propose_baselines, "title": "Propose baseline cards",
+     "description": "Submit cards in the format given by baselines(brief=true): for each baseline its paper (title, authors, year, venue, "
+                    "link, PDF link), code link, the idea in your own words, and the numbers its paper reports with the table they are "
+                    "printed in. Lemmata checks the shape, drops what fails, and stores the rest as a proposal for the researcher to "
+                    "confirm. It opens no link and never edits the repository. Only call it when the user asked you to fill in or update "
+                    "the baselines, and only with what you read in the source yourself.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "baselines": {"type": "array", "items": {"type": "object"}, "description": "The baseline cards."}}, ["project", "baselines"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "hypotheses", "fn": t_hypotheses, "title": "Problem, hypotheses and tests",
      "description": "Hypothesis-first view of a project: the problem the research tries to solve, each hypothesis with its tier "
