@@ -1,3 +1,5 @@
+/* S31: the theme chosen in Settings applies to the hub's own pages too. */
+(function () { try { let v = JSON.parse(localStorage.getItem('lemmata.theme') || '"system"'); if (v !== 'light' && v !== 'dark') v = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.dataset.theme = v; } catch (e) { /* light */ } })();
 /* Lemmata hub pages: landing and tutorial (public site), pair (private hub), sign in with GitHub, projects, new project,
    account. Plain JS, no build, no CDN. Contracts: wiki/sprints/S04/S04-brief.md, wiki/sprints/S07/S07-brief.md. */
 'use strict';

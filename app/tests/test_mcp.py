@@ -100,7 +100,7 @@ class McpTest(unittest.TestCase):
         tools = r["result"]["tools"]
         self.assertEqual({t["name"] for t in tools}, {"list_projects", "project_status", "alarms", "explain", "findings", "node", "search",
                                                        "set_triage", "sync", "claims", "timeline", "experiments", "setup", "todo", "trail", "sessions", "session_summary", "runs", "log_run", "tasks", "add_feedback", "notation", "project_brief", "project_map", "propose_map", "confound_brief", "report_confounds", "experiment_brief", "propose_experiments", "hypotheses", "hypothesis_job", "submit_hypothesis_job",
-                                                       "study", "key_numbers", "propose_numbers", "baselines", "propose_baselines"})
+                                                       "study", "key_numbers", "propose_numbers", "baselines", "propose_baselines", "latex", "submit_latex", "agent_kit"})
         for t in tools:
             self.assertGreater(len(t["description"]), 60)
             s = t["inputSchema"]

@@ -33,6 +33,8 @@ def cmd_serve(args):
     _need_git(args)
     os.umask(0o077)  # every file the hub creates is private from the start
     hub = Hub(args.data, port=args.port, extra_hosts=args.allow_host or [])
+    from . import projects as _projects
+    _projects.DEFAULT_ONLINE = bool(hub.cfg.load().get("online_refs_default", True))
     pub = hub.cfg.load().get("public_url")
     if pub and not guard.public_host(pub):
         raise SystemExit("lemmata: public_url must be an https:// address without a path (got %r)." % pub)
@@ -54,6 +56,7 @@ def cmd_serve(args):
     if pub:
         print("lemmata hub: PUBLIC site at %s — sign-up: %s, up to %s accounts. Anyone admitted can sign in with GitHub; "
               "their repositories are cloned onto this machine." % (pub, c.get("signup", "owner"), c.get("max_users", 50)), flush=True)
+    print("lemmata hub: references are %s by default (`lemmata hub config --online-refs on|off`)" % ("looked up online (OpenAlex, Crossref)" if _projects.DEFAULT_ONLINE else "not looked up online"), flush=True)
     if not c.get("github_client_id"):
         print("lemmata hub: no GitHub client id set (lemmata hub config --github-client-id ...)", flush=True)
     loop = start_background(hub)
@@ -224,6 +227,8 @@ def cmd_config(args):
         kw["sync_interval"] = args.sync_interval
     if args.overleaf:
         kw["overleaf_enabled"] = args.overleaf == "on"
+    if getattr(args, "online_refs", None):
+        kw["online_refs_default"] = args.online_refs == "on"
     if getattr(args, "public_url", None) is not None:
         from .guard import public_host
         if getattr(args, "public_url", None) in ("", "off", "none"):
@@ -370,6 +375,7 @@ def add_parser(sub):
     p.add_argument("--sync-interval", type=int)
     p.add_argument("--allow-host", action="append")
     p.add_argument("--overleaf", choices=["on", "off"], help="switch the dormant Overleaf feature on or off (default off)")
+    p.add_argument("--online-refs", choices=["on", "off"], help="look references up online by default (OpenAlex, Crossref; titles only). Default on; a project can turn it off")
     p.add_argument("--public-url", help="https address other people use (from Tailscale Funnel or a Cloudflare tunnel); 'off' makes the hub private again")
     p.add_argument("--signup", choices=["owner", "invite", "open"], help="who may sign in on the public site (default after --public-url: invite)")
     p.add_argument("--invite", action="append", help="GitHub login to admit when sign-up is invite (repeatable)")

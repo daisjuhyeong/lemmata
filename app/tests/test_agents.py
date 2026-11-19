@@ -66,6 +66,32 @@ class AgentsTest(unittest.TestCase):
         self.assertIn("What was changed", notice)
         self.assertIn("Apache License", (KIT / "LICENSE-APACHE-2.0").read_text(encoding="utf-8")[:200])
 
+    def test_latex_agent(self):
+        """S31: the agent that writes LaTeX to paste. The founder asked for it to run on Opus."""
+        fm, body = front(agents.ROOT / "latex" / "agents" / "lemmata-latex.md")
+        body = " ".join(body.split())
+        self.assertEqual((fm["name"], fm["model"]), ("lemmata-latex", "opus"))
+        self.assertEqual(fm["tools"], "Read, Grep, Glob, mcp__lemmata__*")         # it reads and hands in; it cannot edit the paper or the repository
+        tools = {t["name"] for t in mcp.TOOLS}
+        self.assertTrue({"latex", "submit_latex", "agent_kit"} <= tools)
+        for must in ("Only from Lemmata's brief", "Copy them exactly", "`submit_latex`", "Write a result that is not in the brief", "Leave out a result because it is unfavourable"):
+            self.assertIn(must, body)
+        fm, skill = front(agents.ROOT / "latex" / "skills" / "lemmata-latex" / "SKILL.md")
+        self.assertEqual(fm["name"], "lemmata-latex")
+        self.assertIn("`lemmata-latex` agent", skill)
+        # the same files reach Claude Code through the hub, with no checkout of Lemmata on the research machine
+        kit = {t["name"]: t for t in mcp.TOOLS}["agent_kit"]
+        text, data, hint = kit["fn"](None, {})
+        paths = [f["path"] for f in data["files"]]
+        self.assertEqual(len(paths), 13)
+        self.assertTrue(all(p.startswith(".claude/") for p in paths))
+        self.assertIn(".claude/agents/lemmata-latex.md", paths)
+        self.assertIn(".claude/lemmata-paper-agents/LICENSE-APACHE-2.0", paths)    # the licence travels this way too
+        self.assertIn("=== .claude/agents/lemmata-latex.md ===", text)
+        self.assertEqual(len(kit["fn"](None, {"kit": "latex"})[1]["files"]), 3)
+        with self.assertRaises(mcp._Fail):
+            kit["fn"](None, {"kit": "nope"})
+
     def test_install(self):
         tmp = tempfile.mkdtemp()
         try:
@@ -85,7 +111,11 @@ class AgentsTest(unittest.TestCase):
                 agents.install("nope", tmp)
             with self.assertRaises(ValueError):
                 agents.install("paper", tmp + "/missing")
-            self.assertEqual(cli.main(["agents", "install", tmp]), 0)
+            self.assertEqual(cli.main(["agents", "install", tmp]), 0)                    # with no --kit: every kit
+            self.assertTrue(Path(tmp, ".claude/agents/lemmata-latex.md").is_file())
+            self.assertTrue(Path(tmp, ".claude/skills/lemmata-latex/SKILL.md").is_file())
+            self.assertEqual(len(agents.install("all", tmp)[0]), 13)
+            self.assertEqual(len(agents.install("latex", tmp)[0]), 3)
             self.assertEqual(cli.main(["agents", "list"]), 0)
             self.assertEqual(cli.main(["agents", "install", tmp + "/missing"]), 2)
         finally:

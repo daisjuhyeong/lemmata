@@ -5,7 +5,8 @@ model: the files are copied into a research repository and run in the researcher
 """
 from pathlib import Path
 
-KITS = {"paper": "Draft and revise a paper in stages (six agents and the /lemmata-paper skill), adapted from PaperOrchestra"}
+KITS = {"latex": "Write LaTeX to paste (tables, paragraphs, captions) from what Lemmata holds; one agent on Opus and the /lemmata-latex skill",
+        "paper": "Draft and revise a paper in stages (six agents and the /lemmata-paper skill), adapted from PaperOrchestra"}
 ROOT = Path(__file__).resolve().parent
 
 
@@ -16,17 +17,18 @@ def plan(kit, target):
     src, dst = ROOT / kit, Path(target) / ".claude"
     out = [(p, dst / "agents" / p.name) for p in sorted((src / "agents").glob("*.md"))]
     out += [(p, dst / "skills" / p.relative_to(src / "skills")) for p in sorted((src / "skills").rglob("*.md"))]
-    out += [(src / n, dst / ("lemmata-%s-agents" % kit) / n) for n in ("NOTICE.md", "README.md", "LICENSE-APACHE-2.0")]
+    out += [(src / n, dst / ("lemmata-%s-agents" % kit) / n) for n in ("NOTICE.md", "README.md", "LICENSE-APACHE-2.0") if (src / n).is_file()]
     return out
 
 
 def install(kit, target, force=False):
-    """Copy a kit into <target>/.claude. An existing file is left alone unless force. -> (written, kept)."""
+    """Copy a kit ("all" for every kit) into <target>/.claude. An existing file is left alone unless force. -> (written, kept)."""
     target = Path(target).expanduser()
     if not target.is_dir():
         raise ValueError("%s is not a folder" % target)
     written, kept = [], []
-    for src, dst in plan(kit, target):
+    todo = [f for k in sorted(KITS) for f in plan(k, target)] if kit == "all" else plan(kit, target)
+    for src, dst in todo:
         if dst.exists() and not force and dst.read_bytes() != src.read_bytes():
             kept.append(dst)
             continue

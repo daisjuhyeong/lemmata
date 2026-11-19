@@ -21,6 +21,8 @@
   --success: #6F9A76;
   --warning: #C9A66B;
   --error: #B87474;
+  --on-accent: #fafcfb;       /* text on the header band */
+  --on-accent-muted: #D4DDD6; /* quieter text and lines on the band */
 
   --font-serif: "Source Serif 4", Georgia, "Noto Serif KR", "Noto Serif CJK KR", AppleMyungjo, Batang, serif;
   --font-sans: "Source Sans 3", "Helvetica Neue", Helvetica, Arial, "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
@@ -37,5 +39,31 @@
   --col-wide: 1100px;
   --radius: 2px;
   --motion: 120ms ease-out;
+}
+/* Dark set (S31). Chosen in Settings; "System" follows the computer. Same sage family, on a dark page. The VS Code tab does
+   not use it: there the editor's own theme supplies the neutral colours (vscode.css). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151a18;
+  --bg-2: #1b2220;
+  --surface: #1e2623;
+  --surface-hover: #27312d;
+  --text: #e8ecea;
+  --text-secondary: #c3ccc7;
+  --muted: #96a39c;
+  --muted-light: #7b8882;
+  --border: #313d38;
+  --border-strong: #45544d;
+  --accent: #3f5a50;
+  --accent-dark: #a7c1a8;
+  --accent-vivid: #7db79f;
+  --accent-light: #5f8273;
+  --accent-pale: #34443d;
+  --highlight: #c9b06a;
+  --success: #7fb089;
+  --warning: #d3b074;
+  --error: #cf8a8a;
+  --on-accent: #f3f7f5;
+  --on-accent-muted: #c5d3cc;
 }
 @media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }

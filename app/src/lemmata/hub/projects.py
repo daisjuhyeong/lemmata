@@ -68,6 +68,11 @@ def todo_changes(alarms, entries):
     return n
 
 
+# S31: references are looked up online (OpenAlex, Crossref) unless a project turns it off. A served hub switches this on at
+# start (`hub serve`, config online_refs_default); a hub object built in code or in a test stays offline.
+DEFAULT_ONLINE = False
+
+
 class ProjectError(Exception):
     def __init__(self, status, code, message):
         super().__init__(message)
@@ -321,7 +326,7 @@ class Manager:
             a = self.apps.get(pid)
             if a is None:
                 from lemmata.engine.api import Engine
-                a = App(Engine(root, online=bool((read_json(root / "project.json", {}) or {}).get("online_refs", False))))
+                a = App(Engine(root, online=bool((read_json(root / "project.json", {}) or {}).get("online_refs", DEFAULT_ONLINE))))
                 self.apps[pid] = a
         return a
 
@@ -359,7 +364,7 @@ class Manager:
             versions = int(git(paper, ["rev-list", "--count", "HEAD"] + (["--", sub] if sub else []))) if (paper / ".git").exists() else 0
         except ProjectError:
             versions = 0
-        return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
+        return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", DEFAULT_ONLINE)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
                 "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"), "sync": self.sync_state(pid), "study": st.get("study"),
                 "owner": m.get("owner") or self.cfg.load().get("owner"), "digest": self.digest_settings(pid),
                 "counts": {"recheck": todo_changes(al, ents), "findings": st["counts"]["findings"], "claims": claims}}

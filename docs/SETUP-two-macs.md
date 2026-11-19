@@ -171,7 +171,7 @@ The exact button labels follow the S06 design (`wiki/design/screens/s06-obsidian
 
 **Existing project with a zip paper.** Open it → paper source → **Connect a GitHub repo** → pick `www27-paper` (or a folder). The old paper is kept on the mini as `projects/<pid>/paper.prev-<time>/`.
 
-**References.** They are checked offline by default. To look them up online, turn on "Check references online" for the project. This sends only bibliography titles and DOIs to OpenAlex and Crossref.
+**References.** They are looked up online by default (since S31): bibliography titles and DOIs are sent to OpenAlex and Crossref, nothing else. To stop it for one project, turn off "Look up my references online" on that project; to stop it for the whole hub, run `lemmata hub config --online-refs off` on the Mac mini and restart the hub. A local `lemmata open` or `lemmata serve` takes `--offline`.
 
 ## 8. VS Code: the Lemmata extension and Claude Code
 **Open both repos in one window:** File → Open Folder `~/work/alarm-analyzer-eval`, then File → Add Folder to Workspace `~/work/www27-paper`. Save the workspace (File → Save Workspace As…) **outside** both repos. The extension recognises each folder by its GitHub remote.

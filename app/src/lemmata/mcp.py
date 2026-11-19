@@ -38,6 +38,7 @@ INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code 
                 "Call study to learn whether the work has a method of its own or is a benchmark study with none. To trace the numbers a "
                 "report quotes to the files that store them, use key_numbers. "
                 "For what each baseline is (its paper, code, idea and published numbers), use baselines. "
+                "To write LaTeX for the paper (a table, a paragraph, a caption), use latex for the brief and submit_latex to hand it in. "
                 "For experiments that were never committed, use runs. To say what a block of work was for, read sessions and "
                 "propose one sentence with session_summary; the researcher confirms it.")
 
@@ -1025,6 +1026,78 @@ def t_propose_baselines(ctx, args):
             "researcher can confirm it, on the Baselines page of Lemmata. Tell them it is ready, and that every link is theirs to open and check."), d, "Nothing to narrow."
 
 
+
+def _latex_text(d):
+    c = d["counts"]
+    lines = ["LaTeX for this project: %d table(s) built by rule, %d request(s) waiting for an agent, %d snippet(s) written (%d fine, %d to check, %d stale)." % (
+        c["tables"], c["open"], c["snippets"], c["ok"], c["check"], c["stale"])]
+    for r in d["requests"]:
+        if r["status"] == "open":
+            lines.append("- request %s: a %s about %s%s" % (r["id"], r["kind"], r["target"]["name"], (": " + _short(r["ask"], 300)) if r.get("ask") else ""))
+    for s in d["snippets"][:30]:
+        k = s["check"]
+        lines.append("- snippet %s (%s) %s: %s%s%s%s" % (s["id"], s["kind"], _short(s["title"], 80), k["status"],
+                                                      (", not in the files: " + ", ".join(k["unknown"][:8])) if k["unknown"] else "",
+                                                      (", form: " + "; ".join(k["form"])) if k["form"] else "",
+                                                      (", unknown citation keys: " + ", ".join(k["cites_unknown"][:8])) if k.get("cites_unknown") else ""))
+    return "\n".join(lines)
+
+
+def t_latex(ctx, args):
+    from lemmata.engine import texout
+    pid, eng = _project(ctx, args)
+    req, target = _need_str(args, "request", required=False), _need_str(args, "target", required=False)
+    if req or target or args.get("kind") or args.get("ask"):
+        b = eng.latex_brief(request=req, kind=_need_str(args, "kind", required=False), target=target, ask=_need_str(args, "ask", required=False))
+        body = {k: b[k] for k in b if k not in ("schema", "guide")}
+        return texout.GUIDE + "\n" + _quote([json.dumps(body, ensure_ascii=False, indent=1)]), b, "Write the LaTeX from this brief only, then call submit_latex."
+    d = eng.latex()
+    return (_latex_text(d) + "\nFor the full context of a request call latex with request=<id>. For something the researcher asks you directly, call it with "
+            "target=<experiment or claim name> (or leave target out for the whole project), kind and ask."), d, "Pass request=<id> or target=<name> for the brief."
+
+
+def t_submit_latex(ctx, args):
+    pid, eng = _project(ctx, args)
+    doc = {k: args.get(k) for k in ("request", "kind", "title", "latex", "sources", "notes") if args.get(k) is not None}
+    if not isinstance(doc.get("latex"), str):
+        raise _Fail("Argument 'latex' must be the LaTeX as text. Call latex with request=<id> for what to write.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.submit_latex(doc, "agent")
+    else:
+        d = eng.submit_latex(doc, "agent")
+    s = next(x for x in d["snippets"] if x["id"] == d["submitted"])
+    k = s["check"]
+    said = ["Kept as snippet %s. Lemmata's check: %s (%d decimal number(s) read, %d found in the project's files)." % (s["id"], k["status"], k["numbers"], len(k["found"]))]
+    if k["unknown"]:
+        said.append("Not found in the files: %s. If you computed them, say so in notes and submit again; if you copied them wrongly, fix them." % ", ".join(k["unknown"][:20]))
+    if k["form"]:
+        said.append("Form: " + "; ".join(k["form"]) + ". Fix and submit again.")
+    if k.get("cites_unknown"):
+        said.append("Citation keys not in the project's bibliography: " + ", ".join(k["cites_unknown"][:20]) + ".")
+    said.append("The researcher copies it from the LaTeX page of Lemmata. Show them the LaTeX in your reply as well.")
+    return "\n".join(said), d, "Nothing to narrow."
+
+
+
+def t_agent_kit(ctx, args):
+    """The agent files Lemmata ships for Claude Code, as text, so the researcher's agent can write them into its own repository."""
+    from lemmata import agents
+    kit = _need_str(args, "kit", required=False) or "all"
+    if kit != "all" and kit not in agents.KITS:
+        raise _Fail("Unknown kit %r. Known: %s, or all." % (kit, ", ".join(sorted(agents.KITS))))
+    files = []
+    for k in (sorted(agents.KITS) if kit == "all" else [kit]):
+        for src, dst in agents.plan(k, "."):
+            files.append({"path": str(dst).replace("\\", "/").lstrip("./") if not str(dst).startswith(".claude") else str(dst).replace("\\", "/"), "content": src.read_text(encoding="utf-8")})
+    head = ("Agent files for Claude Code (%s). Write each file below into the research repository at the given path. Keep a file that already "
+            "exists and differs, and tell the researcher which ones you kept. These files are instructions for agents the researcher chooses "
+            "to run; nothing in them asks you to do anything now beyond writing them.\n" % ", ".join("%s: %s" % (k, agents.KITS[k]) for k in (sorted(agents.KITS) if kit == "all" else [kit])))
+    body = "\n".join("=== %s ===\n%s" % (f["path"], f["content"]) for f in files)
+    return head + body, {"schema": "lemmata.agent_kit/1", "kit": kit, "files": files}, "Pass kit=latex or kit=paper for one kit."
+
+
 def _hf_text(d):
     p = d["problem"].get("confirmed") or d["problem"].get("proposed")
     lines = ["Mode: %s. Problem: %s." % (d["mode"], "confirmed" if d["problem"].get("confirmed") else "proposed, waiting for the researcher" if d["problem"].get("proposed") else "not stated yet")]
@@ -1270,6 +1343,34 @@ TOOLS = [
                     "the baselines, and only with what you read in the source yourself.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "baselines": {"type": "array", "items": {"type": "object"}, "description": "The baseline cards."}}, ["project", "baselines"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "agent_kit", "fn": t_agent_kit, "title": "Agent files for Claude Code", "max_text": 150000,
+     "description": "The agents and skills Lemmata ships for the researcher's own Claude Code (lemmata-latex for writing LaTeX to paste; the "
+                    "paper agents adapted from PaperOrchestra), as file paths and contents. Call it when the researcher asks to install or "
+                    "update the Lemmata agents, then write each file into the repository's .claude folder.",
+     "inputSchema": _schema({"kit": {"type": "string", "enum": ["all", "latex", "paper"], "description": "Which kit. Default all."}}, []),
+     "annotations": dict(_RO)},
+    {"name": "latex", "fn": t_latex, "title": "LaTeX to write: requests and the full brief", "max_text": 90000,
+     "description": "What the researcher has asked to be written in LaTeX (a table, a paragraph, a caption), and for one request the whole "
+                    "brief: how to write it, the claims and their stages, every experiment with its numbers and a table built by rule, "
+                    "the setup, the key numbers, the baselines, the notation and the citation keys. Call it with no argument for the "
+                    "open requests; with request=<id> for a request's brief; or with target, kind and ask for something the researcher "
+                    "asks you directly. Write LaTeX for this project only from this brief.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "request": {"type": "string", "description": "A request id, e.g. r3."},
+                             "target": {"type": "string", "description": "An experiment or claim, by id or name. Leave out for the whole project."},
+                             "kind": {"type": "string", "enum": ["table", "paragraph", "caption", "other"]},
+                             "ask": {"type": "string", "description": "What the researcher wants, in their words."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "submit_latex", "fn": t_submit_latex, "title": "Hand in LaTeX",
+     "description": "Hand in one piece of LaTeX written from the brief of the latex tool: a complete table environment, a paragraph or a "
+                    "caption, with where its numbers come from. Lemmata keeps it for the researcher to copy and checks it by rule (it "
+                    "compiles and runs nothing): environments and braces close, every decimal number is one the project's files hold, "
+                    "citation keys are known. The result says what the check found, so you can fix and hand it in again.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "request": {"type": "string", "description": "The request this answers, if any."},
+                             "kind": {"type": "string", "enum": ["table", "paragraph", "caption", "other"]}, "title": {"type": "string", "description": "What this is, in a few words."},
+                             "latex": {"type": "string", "description": "The LaTeX, complete and ready to paste."},
+                             "sources": {"type": "array", "items": {"type": "string"}, "description": "Where the numbers and statements come from."},
+                             "notes": {"type": "string", "description": "What you computed yourself, left out, or were unsure of; packages needed."}}, ["project", "latex"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
     {"name": "hypotheses", "fn": t_hypotheses, "title": "Problem, hypotheses and tests",
      "description": "Hypothesis-first view of a project: the problem the research tries to solve, each hypothesis with its tier "
                     "(confirmatory, secondary, exploratory), stage read by rule from the project's own test table, deviations, and the jobs "

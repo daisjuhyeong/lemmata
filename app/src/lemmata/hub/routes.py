@@ -359,6 +359,10 @@ class HubHandler(Handler):
                   "owner": c.get("owner") if dev else None, "is_admin": self._is_admin(dev),
                   "user": acct, "device": dev["name"] if dev else None,
                   "start_view": (acct or {}).get("view") or (acct or {}).get("variant"), "variant": (acct or {}).get("variant")}
+            if dev:      # S31: which build this hub runs, so "I do not see the new page" can be answered from the website
+                from . import update as _update
+                u = _update.state(hub.data)
+                st["build"] = {"branch": c.get("update_branch") or u.get("branch"), "commit": (u.get("running") or "")[:7] or None, "updated": u.get("time"), "result": u.get("result")}
             if hub.mgr.overleaf_on() and not pub:
                 st["overleaf_configured"] = hub.mgr.ol.configured()
             return self._json(st)

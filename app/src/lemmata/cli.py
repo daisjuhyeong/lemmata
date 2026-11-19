@@ -279,7 +279,7 @@ def cmd_agents(args):
     if args.action == "list" or not args.repo:
         for k, what in agents.KITS.items():
             print("%s: %s" % (k, what))
-        print("Install: lemmata agents install <research repository> [--kit paper] [--force]")
+        print("Install: lemmata agents install <research repository> [--kit latex|paper|all] [--force]")
         return 0
     try:
         written, kept = agents.install(args.kit, args.repo, force=args.force)
@@ -290,7 +290,7 @@ def cmd_agents(args):
         print("wrote %s" % p)
     for p in kept:
         print("kept  %s (it differs from the kit; use --force to replace it)" % p)
-    print("%d written, %d kept. In Claude Code in that repository: /lemmata-%s" % (len(written), len(kept), args.kit))
+    print("%d written, %d kept. In Claude Code in that repository: %s" % (len(written), len(kept), " or ".join("/lemmata-" + k for k in (sorted(agents.KITS) if args.kit == "all" else [args.kit]))))
     return 0
 
 
@@ -311,7 +311,8 @@ def build_parser():
     def common(p, serving=True):
         p.add_argument("--fixtures", nargs="?", const="sample", default=None, choices=["sample", "large"],
                        help="run on fixture data instead of the engine (UI development)")
-        p.add_argument("--online", action="store_true", help="opt in to online reference lookup (OpenAlex, Crossref)")
+        p.add_argument("--online", action="store_true", default=True, help="look references up online (OpenAlex, Crossref; titles only). On by default since S31")
+        p.add_argument("--offline", dest="online", action="store_false", help="do not look references up online")
         if serving:
             p.add_argument("--port", type=int, default=8765, help="0 = any free port")
             p.add_argument("--no-open", action="store_true", help="do not open the browser")
@@ -356,7 +357,7 @@ def build_parser():
     ag = sub.add_parser("agents", help="install the Lemmata agents for Claude Code into a research repository")
     ag.add_argument("action", choices=["list", "install"])
     ag.add_argument("repo", nargs="?", help="the research repository to install into")
-    ag.add_argument("--kit", default="paper", help="which kit (default: paper)")
+    ag.add_argument("--kit", default="all", help="which kit: latex, paper or all (default: all)")
     ag.add_argument("--force", action="store_true", help="replace files that differ from the kit")
     ag.set_defaults(fn=cmd_agents)
 

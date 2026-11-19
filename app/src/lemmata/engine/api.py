@@ -13,6 +13,7 @@ from . import experiments as expmod
 from . import notation as notationmod
 from . import numbers as numbersmod
 from . import baselines as baselinesmod
+from . import texout as latexmod
 from . import process as processmod
 from . import graph as graphmod
 from . import history as historymod
@@ -700,6 +701,83 @@ class Engine:
         st = baselinesmod.decide(st, action, key)
         self.hub.write_json("baselines.json", st)
         return baselinesmod.build(st, setup)
+
+    # ------------------------------------------------------------------ LaTeX to paste (S31)
+    def _latex_ctx(self):
+        """(setup, claims, every number the project holds, the paper's citation keys or None when there is no bibliography)."""
+        setup = self._baselines_setup()
+        claims = self.claims()
+        docs = [[x.get("grid") for x in setup.get("experiments") or []], [it.get("uses") for it in setup.get("items") or []],
+                [e.get("published") for e in baselinesmod.load(self.hub)["entries"].values()]]
+        for read in (self.numbers, self.hypothesis):
+            try:
+                docs.append(read())
+            except Exception:      # a project without key numbers or without a hypothesis-first record still gets its tables
+                pass
+        G = self._ensure()["G"]
+        bib = {e["key"] for e in G.bib_entries if e.get("key")} if G.bib_entries else None
+        return setup, claims, latexmod.pool(*docs), bib
+
+    def latex(self):
+        """Tables built by rule from the result files, what the researcher asked an agent to write, and what was written, checked."""
+        setup, claims, numbers, bib = self._latex_ctx()
+        return latexmod.build(latexmod.load(self.hub), setup, claims, numbers, bib)
+
+    def latex_request(self, kind, target=None, ask=None):
+        """The researcher asks for a table, a paragraph or a caption. It waits for their own agent."""
+        setup, claims, numbers, bib = self._latex_ctx()
+        st = latexmod.load(self.hub)
+        latexmod.add_request(st, kind, latexmod.find_target(target, latexmod.targets(setup, claims)), ask)
+        self.hub.write_json("latex.json", st)
+        return latexmod.build(st, setup, claims, numbers, bib)
+
+    def latex_brief(self, request=None, kind=None, target=None, ask=None):
+        """Everything an agent needs to write the LaTeX: the guide and the whole state of the project. For a stored request, or ad hoc."""
+        setup, claims, numbers, bib = self._latex_ctx()
+        st = latexmod.load(self.hub)
+        if request:
+            req = next((r for r in st["requests"] if r["id"] == request), None)
+            if req is None:
+                raise NotFound("unknown request %r" % request)
+        else:
+            if (kind or "other") not in latexmod.KINDS:
+                raise BadRequest("kind must be one of: " + ", ".join(latexmod.KINDS))
+            t = latexmod.find_target(target, latexmod.targets(setup, claims))
+            req = {"id": None, "kind": kind or "other", "target": t, "ask": (ask or None), "status": "ad hoc"}
+        extra = {"citation_keys": sorted(bib)[:400] if bib else [], "already_written": [{"id": x["id"], "kind": x["kind"], "title": x["title"]} for x in st["snippets"]][-30:]}
+        try:
+            n = self.numbers()
+            extra["key_numbers"] = [{k: r.get(k) for k in ("id", "claim", "text", "says", "value", "now", "holds", "status", "file", "unit") if r.get(k) is not None} for r in (n.get("numbers") or n.get("rows") or [])][:200]
+        except Exception:
+            extra["key_numbers"] = []
+        try:
+            b = baselinesmod.build(baselinesmod.load(self.hub), setup)
+            extra["baselines"] = [{"name": r["name"], "role": r["role"], "idea": r["entry"].get("intuition"), "falls_short": r["entry"].get("limit"), "ours_differs": r["entry"].get("differs"),
+                                   "paper": {k: (r["entry"].get("paper") or {}).get(k) for k in ("title", "authors", "year", "venue")},
+                                   "cited_as": [c["key"] for c in r["cited"]], "published": r["compare"]} for r in b["rows"]]
+        except Exception:
+            extra["baselines"] = []
+        try:
+            extra["notation"] = [{k: x.get(k) for k in ("symbol", "latex", "meaning", "name", "code") if x.get(k)} for x in (self.notation().get("symbols") or [])][:150]
+        except Exception:
+            extra["notation"] = []
+        return latexmod.brief(req, setup, claims, extra)
+
+    def submit_latex(self, doc, by=None):
+        """LaTeX written by the researcher's agent. Kept with its sources and checked by rules; nothing is compiled or run."""
+        setup, claims, numbers, bib = self._latex_ctx()
+        st = latexmod.load(self.hub)
+        snip = latexmod.add_snippet(st, doc, (by or "agent")[:60], numbers)
+        self.hub.write_json("latex.json", st)
+        out = latexmod.build(st, setup, claims, numbers, bib)
+        out["submitted"] = snip["id"]
+        return out
+
+    def decide_latex(self, action, ident):
+        setup, claims, numbers, bib = self._latex_ctx()
+        st = latexmod.decide(latexmod.load(self.hub), action, ident)
+        self.hub.write_json("latex.json", st)
+        return latexmod.build(st, setup, claims, numbers, bib)
 
     # ------------------------------------------------------------------ the kind of study (S29, ADR-009)
     def study(self):

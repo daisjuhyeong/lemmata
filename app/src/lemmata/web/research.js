@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'], baselines: ['≡', 'Baselines'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'], baselines: ['≡', 'Baselines'], settings: ['', 'Settings'], latex: ['', 'LaTeX'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -76,9 +76,10 @@ async function rxLoad() {
     try { study = await apiGet('/api/study'); } catch (e) { /* a method paper, as before */ }
     try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
     let baselines = null; try { baselines = await apiGet('/api/baselines'); } catch (e) { /* S30: older hubs and snapshots have no Baselines page */ }
+    let latex = null; try { latex = await apiGet('/api/latex'); } catch (e) { /* S31: same for the LaTeX page */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -1673,7 +1674,8 @@ function pageSetup() {
   root.classList.add('wide');
   root.append(h('h1', { class: 'ptitle' }, 'Setup'), rxStudyLine(), rxBehindNote(), hfB ? null :
     h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), D.study === 'benchmark' ? ' compared methods' : ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
-      c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
+      c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null,
+      h('button', { class: 'linkbtn', id: 'su-baselines', title: 'Each baseline\'s paper, PDF, code, idea and published numbers', onclick: () => openTab('baselines') }, 'Baselines →')));
   const B = D.board && (D.board.experiments.length || D.board.claims.length) ? D.board : null, hf = B && B.mode === 'hypothesis_first';
   if (!D.mapped && !hf) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
   if (B) root.append(bdBoard(B));
@@ -1973,6 +1975,9 @@ const FAQ = [
 function pageFaq() {
   S.outline = [];
   const root = doc(h('h1', { class: 'ptitle' }, 'FAQ'), h('p', { class: 'muted' }, 'Where to look for what. Each answer has a button to the page it is about.'));
+  return faqBlock(root);
+}
+function faqBlock(root) {
   const q = (RX.faqQ || '').toLowerCase().trim();
   const inp = h('input', { type: 'search', value: RX.faqQ || '', placeholder: 'Filter the questions', 'aria-label': 'Filter the questions' });
   inp.addEventListener('input', () => { RX.faqQ = inp.value; renderPage(true); const el = document.querySelector('.fq-f input'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
@@ -2378,7 +2383,130 @@ function pageBaselines() {
   if (RX.blSel) setTimeout(() => { const el = document.getElementById('bl-' + RX.blSel); if (el) el.scrollIntoView({ block: 'center' }); RX.blSel = null; }, 0);
   return root;
 }
-const RX_PAGES = { baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
+/* ---------- Settings (S31) ----------
+   Founder (chat 2026-11-19 23:53 KST): a Settings button at the bottom left holding the FAQ, how Lemmata works and light / dark
+   mode, like the settings of the Claude app. One page of sections; nothing here is a modal. */
+function pageSettings() {
+  S.outline = [];
+  const root = doc(h('h1', { class: 'ptitle' }, 'Settings'));
+  const SECS = [['appearance', 'Appearance'], ['project', 'Project'], ['agents', 'Agents'], ['how', 'How Lemmata works'], ['faq', 'FAQ'], ['about', 'About']];
+  const sec = (id, kids) => h('section', { class: 'st-sec', id: 'st-' + id }, h('h2', { class: 'st-h' }, SECS.find(x => x[0] === id)[1]), kids);
+  const row = (label, hint, control) => h('div', { class: 'st-row' }, h('div', { class: 'st-l' }, h('div', null, label), hint ? h('div', { class: 'muted small' }, hint) : null), control ? h('div', { class: 'st-c' }, control) : null);
+  root.append(h('nav', { class: 'st-nav', 'aria-label': 'Sections' }, SECS.map(([id, l]) => h('button', { class: 'linkbtn', onclick: () => { const el = document.getElementById('st-' + id); if (el) el.scrollIntoView({ block: 'start' }); } }, l))));
+  // appearance
+  const cur = themeGet();
+  root.append(sec('appearance', row('Theme', EMBED ? 'In VS Code, Lemmata follows the editor\'s own theme.' : 'System follows your computer\'s light or dark setting. Kept in this browser.',
+    EMBED ? null : h('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' }, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) =>
+      h('button', { class: 'btn sm', id: 'th-' + v, 'aria-pressed': String(cur === v), onclick: () => { themeSet(v); renderAll(); } }, l))))));
+  // project
+  const hc = hubControls(), pk = [];
+  if (S.project) pk.push(row(S.project.name, S.project.scanned_at ? 'Files read ' + agoText(S.project.scanned_at) : null, READONLY ? null : h('button', { class: 'btn sm', disabled: !!BUSY, onclick: () => syncNow() }, 'Sync now')));
+  if (!READONLY) pk.push(row('Export report', 'A single HTML file you can share. It is a copy; it does not update.', h('a', { class: 'btn sm', href: apiUrl('/api/export'), download: '' }, 'Download')));
+  hc.menu.forEach(m => pk.push(row(m.label, m.hint || null, m.fn ? h('button', { class: 'btn sm', onclick: m.fn }, /^←/.test(m.label) ? 'Open' : 'Change') : null)));
+  if (pk.length) root.append(sec('project', pk));
+  // agents for the researcher's own Claude Code
+  if (!READONLY) root.append(h('section', { class: 'st-sec', id: 'st-agents' }, h('h2', { class: 'st-h' }, 'Agents for Claude Code'),
+    row('LaTeX agent and paper agents', 'They run in your own Claude Code, on your own plan and model. Paste the prompt in Claude Code inside your research repository: it fetches the agent files from Lemmata and writes them to .claude/.', h('button', { class: 'btn sm', id: 'st-kit', title: KIT_PROMPT, onclick: () => copyText(KIT_PROMPT) }, 'Copy install prompt')),
+    row('Write LaTeX', 'Ask for a table, a paragraph or a caption; your agent writes it from everything Lemmata holds.', h('button', { class: 'btn sm', onclick: () => openTab('latex') }, 'Open LaTeX'))));
+  // how Lemmata works
+  root.append(sec('how', [T.intro.map(([head, text], i) => h('div', { class: 'hf-row st-how' }, h('span', { class: 'hf-tag' }, '[' + (i + 1) + ']'), h('span', { class: 'grow' }, h('b', null, head), ' ', text))),
+    h('div', { class: 'st-acts' }, h('button', { class: 'btn sm', onclick: () => intro(true) }, 'Show the walkthrough'))]));
+  // FAQ
+  const fq = h('div', { class: 'st-faq' }, h('p', { class: 'muted small' }, 'Where to look for what. Each answer has a button to the page it is about.'));
+  faqBlock(fq);
+  root.append(sec('faq', fq));
+  // about: which build this hub runs
+  const ab = [row('Lemmata', 'Reads your paper, code and results; shows what backs each claim and what changed. It runs no language model: what needs one is done by your own agent.', null)];
+  if (HUB_ON && !READONLY) {
+    if (RX.build === undefined) { RX.build = null; fetch('/api/hub/status', { cache: 'no-store' }).then(r => r.json()).then(d => { RX.build = d.build || {}; RX.buildV = d.version; const t = S.tabs[S.active]; if (t && t.k === 'settings') renderPage(true); }).catch(() => { RX.build = {}; }); }
+    const b = RX.build;
+    ab.push(row('This hub runs', !b ? 'Reading…' : b.branch ? 'New pages appear here after the hub has updated to the branch that holds them.' : 'Self-update is not set up on the hub, so it runs whatever was last installed by hand.',
+      b && (b.branch || b.commit) ? h('span', { class: 'mono small', id: 'st-build' }, [b.branch, b.commit, b.updated ? dmon(b.updated) : null].filter(Boolean).join(' · ') + (b.result && b.result !== 'updated' ? ' · last update ' + b.result.replace('_', ' ') : '')) : null));
+  }
+  root.append(sec('about', ab));
+  if (RX.stSel) setTimeout(() => { const el = document.getElementById('st-' + RX.stSel); if (el) el.scrollIntoView({ block: 'start' }); RX.stSel = null; }, 0);
+  return root;
+}
+/* ---------- LaTeX to paste (S31) ----------
+   Founder (chat 2026-11-19 23:53 KST): the paper is in Overleaf, which Lemmata cannot read, so Lemmata is where the LaTeX is made:
+   tables, paragraphs and captions written by the researcher's own agent from everything Lemmata holds, ready to copy and paste. */
+const LX_PROMPT = (name, id) => 'For the Lemmata project "' + name + '": ' + (id ? 'call Lemmata\'s latex tool with request=' + id + ', write it from that brief only, and hand it in with submit_latex.' : 'call Lemmata\'s latex tool for the open requests, write each one from its brief only, and hand each in with submit_latex.') + ' Use the lemmata-latex agent if it is installed. Copy every number exactly, and show me the LaTeX as well.';
+const KIT_PROMPT = 'Call Lemmata\'s agent_kit tool and write each file it returns into this repository at the path it gives (under .claude/). Do not change a file that already exists and differs; list those instead. Then tell me which agents and skills are now available.';
+const LX_STATE = { ok: ['[checked]', 'd-ok', 'Every decimal number in it is one your files hold, and its form is sound.'], check: ['[check]', 'd-warn', 'Something in it could not be confirmed. Open "What the check found".'], stale: ['[stale]', 'd-err', 'A number that was in your files when this was written is no longer there. If you pasted it, the paper is out of date.'] };
+function lxCode(latex, id) {
+  const pre = h('pre', { class: 'lx-code', id: id || null, tabindex: '0' }, latex);
+  return h('div', { class: 'lx-box' }, h('button', { class: 'btn sm lx-copy', onclick: () => copyText(latex) }, 'Copy'), pre);
+}
+function pageLatex() {
+  const nr = rxNotReady('LaTeX'); if (nr) return nr;
+  S.outline = [];
+  const L = RX.latex, name = S.project ? S.project.name : 'this project';
+  const root = doc(h('h1', { class: 'ptitle' }, 'LaTeX'));
+  root.classList.add('wide');
+  if (!L) return root.append(h('p', { class: 'muted' }, 'This hub has no LaTeX page yet. It appears after the hub updates.')), root;
+  const c = L.counts;
+  const act = async (body, msg) => { const r = await rxPost('/api/latex', body, msg); if (r) { RX.latex = r; renderAll(); } return r; };
+  root.append(h('p', { class: 'lede muted' }, 'Tables, paragraphs and captions to paste into your paper. Tables by rule are exact copies of your result files. Anything else is written by your own agent from everything Lemmata holds about the project, and its numbers are checked against your files.'), rxBehindNote());
+  // ask
+  if (!READONLY) {
+    const kind = h('select', { 'aria-label': 'What to write' }, Object.entries(L.kinds).map(([k, l]) => h('option', { value: k, selected: (RX.lxKind || 'table') === k ? '' : null }, l)));
+    const tgt = h('select', { 'aria-label': 'About' }, L.targets.map((t, i) => h('option', { value: String(i), selected: RX.lxTarget === (t.id || '') ? '' : null }, trunc((t.type === 'experiment' ? 'Experiment: ' : t.type === 'claim' ? 'Claim ' : '') + t.name, 90))));
+    const ask = h('textarea', { rows: '2', class: 'rx-ta', 'aria-label': 'What you want', placeholder: 'What you want, in your words. For example: one table with the main results, ours last, best in bold; then a two-sentence caption.' });
+    ask.value = RX.lxAsk || ''; ask.addEventListener('input', () => { RX.lxAsk = ask.value; });
+    const go = async () => { const t = L.targets[Number(tgt.value)] || L.targets[0]; RX.lxKind = kind.value; RX.lxTarget = t.id || '';
+      const d = await act({ action: 'request', kind: kind.value, target: t.type === 'project' ? null : { type: t.type, id: t.id }, ask: ask.value }, 'Asked. It waits for your agent.'); if (d) { RX.lxAsk = ''; renderPage(true); } };
+    root.append(h('h2', { class: 'st-h' }, 'Ask your agent'), h('div', { class: 'lx-ask' }, h('div', { class: 'lx-pick' }, kind, h('span', { class: 'muted' }, 'about'), tgt), ask,
+      h('div', { class: 'bl-acts' }, h('button', { class: 'btn sm primary', id: 'lx-go', onclick: go }, 'Ask'), h('span', { class: 'muted small' }, 'Lemmata writes nothing itself. Your agent gets the full brief and hands the LaTeX back here.'))));
+  }
+  const open = L.requests.filter(r => r.status === 'open');
+  if (open.length) root.append(h('div', { class: 'flag nb-prop' }, h('b', null, plural(open.length, 'request') + ' waiting for your agent. '),
+    READONLY ? null : [h('button', { class: 'btn sm primary', title: LX_PROMPT(name), onclick: () => copyText(LX_PROMPT(name)) }, 'Copy prompt for Claude Code'), h('span', { class: 'muted small' }, ' or type /lemmata-latex there')]),
+    open.map(r => h('div', { class: 'hf-row lx-req', id: 'lx-' + r.id }, h('span', { class: 'hf-tag' }, '[' + (L.kinds[r.kind] || r.kind).toLowerCase() + ']'), h('span', { class: 'grow' }, h('b', null, r.target.name), r.ask ? ['. ', r.ask] : null, h('span', { class: 'muted small' }, ' · asked ' + dmon(r.created))),
+      READONLY ? null : h('button', { class: 'linkbtn small', onclick: () => act({ action: 'remove_request', id: r.id }, 'Removed.') }, 'Remove'))));
+  // written
+  if (L.snippets.length) {
+    root.append(h('h2', { class: 'st-h' }, 'Written for you'), h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.snippets), c.snippets === 1 ? ' snippet' : ' snippets'), h('span', null, h('b', null, c.ok), ' checked'),
+      c.check ? h('span', { class: 'warn' }, h('b', null, c.check), ' to check') : null, c.stale ? h('span', { class: 'warn' }, h('b', null, c.stale), ' stale') : null));
+    for (const sn of L.snippets) {
+      const k = sn.check, st = LX_STATE[k.status] || LX_STATE.check, on = RX.lxOpen === sn.id || L.snippets.length === 1 || k.status !== 'ok' && RX.lxOpen == null;
+      const found = [];
+      if (k.stale.length) found.push(h('div', { class: 'rx-warn' }, 'No longer in your files: ', h('span', { class: 'mono' }, k.stale.join(', ')), '. The results changed after this was written.'));
+      const rest = k.unknown.filter(x => !k.stale.includes(x));
+      if (rest.length) found.push(h('div', null, 'Not found in your files: ', h('span', { class: 'mono' }, rest.join(', ')), '. A value your agent computed (an average, a difference) shows up here; check that its notes say so.'));
+      k.form.forEach(f => found.push(h('div', { class: 'rx-warn' }, 'Form: ' + f + '.')));
+      if (k.cites_todo.length) found.push(h('div', null, 'Citations still to fill in: ', h('span', { class: 'mono' }, k.cites_todo.join(', ')), '.'));
+      if (k.cites_unknown && k.cites_unknown.length) found.push(h('div', null, 'Citation keys not in your bibliography: ', h('span', { class: 'mono' }, k.cites_unknown.join(', ')), '.'));
+      if (k.cites_unknown == null && k.cites.length) found.push(h('div', { class: 'muted' }, 'Citation keys were not checked: Lemmata has no bibliography for this project.'));
+      if (!found.length) found.push(h('div', { class: 'muted' }, plural(k.numbers, 'decimal number') + ' read, all found in your files. Form is sound.'));
+      root.append(h('section', { class: 'lx-sn' + (on ? ' on' : ''), id: 'lx-' + sn.id },
+        h('div', { class: 'hf-row lx-head', onclick: () => { RX.lxOpen = on ? '' : sn.id; renderPage(true); } }, h('span', { class: 'rdot ' + st[1], 'aria-hidden': 'true' }), h('span', { class: 'hf-tag', title: st[2] }, st[0]),
+          h('button', { class: 'bl-name grow', 'aria-expanded': String(on), onclick: ev => { ev.stopPropagation(); RX.lxOpen = on ? '' : sn.id; renderPage(true); } }, sn.title), h('span', { class: 'muted small' }, (L.kinds[sn.kind] || sn.kind) + ' · ' + sn.by + ' · ' + dmon(sn.at)),
+          h('button', { class: 'btn sm', onclick: ev => { ev.stopPropagation(); copyText(sn.latex); } }, 'Copy')),
+        on ? [lxCode(sn.latex), sn.notes ? h('p', { class: 'small' }, h('b', null, 'Your agent says: '), sn.notes) : null,
+          h('div', { class: 'lx-found small' }, h('b', null, 'What the check found'), found),
+          sn.sources.length ? h('div', { class: 'small muted' }, 'From: ' + sn.sources.join(' · ')) : null,
+          READONLY ? null : h('div', { class: 'bl-acts' }, h('button', { class: 'linkbtn small', onclick: () => act({ action: 'remove_snippet', id: sn.id }, 'Removed.') }, 'Remove'))] : null));
+    }
+  }
+  // tables by rule
+  root.append(h('h2', { class: 'st-h' }, 'Tables by rule'));
+  if (!L.tables.length) root.append(h('p', { class: 'muted' }, 'No result file could be read as a table of methods and numbers yet.'));
+  else {
+    root.append(h('p', { class: 'muted small' }, 'Built from your result files with no model: the numbers are exactly the ones in the files. Needs the booktabs package.'));
+    for (const t of L.tables) {
+      const on = RX.lxTab === t.x;
+      root.append(h('section', { class: 'lx-sn' + (on ? ' on' : '') },
+        h('div', { class: 'hf-row lx-head', onclick: () => { RX.lxTab = on ? null : t.x; renderPage(true); } }, h('span', { class: 'hf-tag' }, '[table]'),
+          h('button', { class: 'bl-name grow', 'aria-expanded': String(on), onclick: ev => { ev.stopPropagation(); RX.lxTab = on ? null : t.x; renderPage(true); } }, t.name),
+          h('span', { class: 'muted small' }, [t.metric ? t.metric + (t.lower ? ' ↓' : ' ↑') : null, t.rows + ' × ' + t.cols].filter(Boolean).join(' · ')),
+          h('button', { class: 'btn sm', onclick: ev => { ev.stopPropagation(); copyText(t.latex); } }, 'Copy')),
+        on ? [t.note ? h('p', { class: 'small muted' }, t.note) : null, lxCode(t.latex),
+          h('div', { class: 'bl-acts' }, h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(t.x) }, 'Open the experiment'))] : null));
+    }
+  }
+  return root;
+}
+const RX_PAGES = { latex: pageLatex, settings: pageSettings, baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

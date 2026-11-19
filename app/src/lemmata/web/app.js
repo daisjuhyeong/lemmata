@@ -58,6 +58,17 @@ const trunc = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? 
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+/* ---------- theme (S31): system, light or dark. The VS Code tab follows the editor's own theme instead. ---------- */
+function themeGet() { const v = lsGet('lemmata.theme', 'system'); return v === 'light' || v === 'dark' ? v : 'system'; }
+function themeApply() {
+  if (window.LEMMATA_EMBED) return;
+  const v = themeGet(); let dark = v === 'dark';
+  try { if (v === 'system') dark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { /* no matchMedia: light */ }
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+function themeSet(v) { lsSet('lemmata.theme', v); themeApply(); }
+themeApply();
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { themeApply(); }); } catch (e) { /* older browsers */ }
 
 /* ---------- API ---------- */
 async function apiGet(path) {
@@ -1954,7 +1965,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'baselines'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'baselines', 'settings', 'latex'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (!S.tabs.length) { S.tabs = [{ k: 'digest' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
@@ -1968,7 +1979,7 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
-    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': case 'baselines': return RX_TABS[t.k][1];
+    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': case 'baselines': case 'settings': case 'latex': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
@@ -2018,10 +2029,11 @@ const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
   app.append(
-    h('header', { id: 'band' }, h('h1', { class: 'bt' }, PRODUCT), h('p', { class: 'bsub', id: 'bsub' }, ''), h('button', { class: 'bsearch', id: 'bsearch', onclick: () => quickSwitcher() }, 'Search…'), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
+    h('header', { id: 'band' }, h('h1', { class: 'bt' }, h('button', { class: 'bt-home', id: 'bt-home', title: 'Home', 'aria-label': PRODUCT + ': go to Home', onclick: () => goHome() }, PRODUCT)), h('p', { class: 'bsub', id: 'bsub' }, ''), h('button', { class: 'bsearch', id: 'bsearch', onclick: () => quickSwitcher() }, 'Search…'), h('nav', { id: 'topnav', role: 'tablist', 'aria-label': 'Main' })),
     h('div', { id: 'banner', class: 'hidden', role: 'alert' }),
     h('div', { id: 'body' }, window.LEMMATA_EMBED ? null : h('aside', { id: 'side', 'aria-label': 'More pages' }), h('main', { id: 'page', tabindex: '-1' })),
     h('footer', { id: 'status' }),
+    window.LEMMATA_EMBED ? null : h('button', { id: 'setfab', class: 'btn sm', title: 'Settings: appearance, project, how Lemmata works, FAQ', onclick: () => openTab('settings') }, 'Settings'),
     h('div', { id: 'extras' }));
 }
 function renderShellExtras() {
@@ -2039,6 +2051,11 @@ function projectMenu(anchor) {
   menuPop(anchor, es, { up: true });
 }
 
+/* S31: the title goes back to the first page. In a project that is Home; on a hub with no project open, the list of projects. */
+function goHome() {
+  if (S.project) { openTab('digest'); window.scrollTo(0, 0); }
+  else if (HUB_ON && !window.LEMMATA_EMBED) location.href = '/';
+}
 /* ---------- left sidebar ---------- */
 const sgl = st => h('span', { class: 'sg ' + st, 'aria-hidden': 'true' }, ST[st].glyph);
 function activeIs(k, id) { const t = S.tabs[S.active]; return !!t && t.k === k && (id == null || t.id === id); }
@@ -2052,8 +2069,7 @@ function usedByText(nid) {
    not at the bottom of the page. The five main tabs stay in the band. The VS Code tab and narrow windows keep them in the footer. */
 const SIDE = [
   ['Explore', [['baselines', 'Baselines'], ['numbers', 'Key numbers'], ['graph', 'Graph'], ['notation', 'Notation'], ['timeline', 'Growth'], ['checks', 'Checks'], ['changes', 'Changes']]],
-  ['Work', [['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
-  ['Help', [['faq', 'FAQ']]],
+  ['Work', [['latex', 'LaTeX'], ['tasks', 'Tasks'], ['ask', 'Ask'], ['search', 'Search']]],
 ];
 function renderLeft() {
   const side = $('#side'); if (!side) return;
@@ -2062,14 +2078,14 @@ function renderLeft() {
   if (!S.project) return;
   const t = S.tabs[S.active], cur = t ? t.k : null;
   const nb = RX.numbers && RX.numbers.counts ? RX.numbers.counts : null;
-  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0 };
+  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0, latex: RX.latex && RX.latex.counts ? RX.latex.counts.stale + RX.latex.counts.open : 0 };
   const go = k => k === 'search' ? quickSwitcher() : openTab(k);
   const top = NAV_OF[cur] || null;
   side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' }, b) : null); })));
   SIDE.forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
     items.map(([k, label]) => h('button', { class: 'sd-i' + (k === cur ? ' on' : ''), 'aria-current': k === cur ? 'page' : null, onclick: () => go(k) },
       h('span', null, label), n[k] ? h('span', { class: 'sd-n' }, n[k]) : null)))));
-  side.append(h('div', { class: 'sd-g sd-foot' }, h('button', { class: 'sd-i', onclick: ev => projectMenu(ev.currentTarget) }, 'Project menu'), h('button', { class: 'sd-i', onclick: () => intro(true) }, 'How Lemmata works')));
+  side.append(h('div', { class: 'sd-g sd-foot' }, h('button', { class: 'sd-i sd-set' + (cur === 'settings' ? ' on' : ''), id: 'sd-settings', 'aria-current': cur === 'settings' ? 'page' : null, title: 'Appearance, project, how Lemmata works, FAQ', onclick: () => openTab('settings') }, h('span', null, 'Settings'))));
 }
 
 /* ---------- tab bar, page ---------- */
@@ -2091,7 +2107,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' || t.k === 'baselines' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
@@ -2171,7 +2187,7 @@ function renderStatus() {
   const embed = !!window.LEMMATA_EMBED;
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
   const more = [link('Baselines', () => openTab('baselines')), link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
-    link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('Ask', () => openTab('ask')), link('FAQ', () => openTab('faq')), link('Search', () => quickSwitcher())];
+    link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('LaTeX', () => openTab('latex')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher()), link('Settings', () => openTab('settings'))];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
       h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
@@ -2237,7 +2253,7 @@ function palette() {
     { label: 'Sync now', run: () => syncNow(), disabled: READONLY, reason: 'Read-only snapshot' },
     { label: 'Show files behind items', run: () => { S.gf.files = true; persistUI(); GR.sig = ''; openTab('graph'); } },
     { label: 'Export report (HTML)', run: () => { goTo(apiUrl('/api/export')); }, disabled: READONLY, reason: 'Read-only snapshot' },
-    { label: 'Go to FAQ: where to look for what', run: () => openTab('faq') },
+    { label: 'Go to FAQ: where to look for what', run: () => openTab('faq') }, { label: 'Go to Settings (theme, project, how Lemmata works, FAQ)', run: () => openTab('settings') }, { label: 'Go to LaTeX (tables, paragraphs and captions to paste)', run: () => openTab('latex') },
     { label: 'How Lemmata works', run: () => intro(true) },
   ];
   listModal('Type a command or an item', q => cmds.map(c => ({ ...c, s: fuzzy(q, c.label) })).filter(c => c.s >= 0).sort((a, b) => b.s - a.s), '↑↓ to move · Enter to run · Esc to close');

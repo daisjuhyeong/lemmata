@@ -707,6 +707,32 @@ class HubTest(HubBase):
         self.assertFalse(self.api("GET", "/p/%s/api/runs" % pid)[1]["runs"][0]["unsure"])
         self.assertFalse(self.hub.gh.stored()["needs_reauth"])
 
+    def test_online_refs_default_follows_the_served_hub(self):
+        """S31 (founder, 2026-11-19): references are looked up online by default on a served hub. A hub built in a test stays offline
+        unless the default is switched, and a project's own choice wins."""
+        from unittest import mock
+        from lemmata.hub import projects as P
+        from lemmata.hub.config import DEFAULTS
+        self.assertIs(DEFAULTS["online_refs_default"], True)
+        self.assertIs(P.DEFAULT_ONLINE, False)
+        self.signin()
+        pid = self.make_project()
+        self.assertIs(self.api("GET", "/api/hub/projects/%s" % pid)[1]["online_refs"], False)
+        with mock.patch.object(P, "DEFAULT_ONLINE", True), mock.patch("lemmata.engine.refs.online_fill", return_value=False):
+            self.assertIs(self.api("GET", "/api/hub/projects/%s" % pid)[1]["online_refs"], True)
+            self.assertIs(self.api("PATCH", "/api/hub/projects/%s" % pid, {"online_refs": False})[1]["online_refs"], False)
+            self.assertIs(self.api("GET", "/api/hub/projects/%s" % pid)[1]["online_refs"], False)      # the project said no
+
+    def test_status_names_the_build_for_a_signed_in_device(self):
+        """S31: Settings > About shows which branch and commit the hub runs."""
+        self.assertNotIn("build", self.api("GET", "/api/hub/status")[1] if not self.api("GET", "/api/hub/status")[1].get("authenticated") else {})
+        self.signin()
+        st = self.api("GET", "/api/hub/status")[1]
+        self.assertEqual(set(st["build"]), {"branch", "commit", "updated", "result"})
+        (self.data / "hub" / "update.json").write_text(json.dumps({"time": "2026-11-19T18:30:00+0900", "branch": "s30-baselines", "to": "a" * 40, "running": "a2e6e7b499ff", "result": "updated"}))
+        b = self.api("GET", "/api/hub/status")[1]["build"]
+        self.assertEqual((b["branch"], b["commit"], b["result"]), ("s30-baselines", "a2e6e7b", "updated"))
+
     def test_online_refs_default_off_and_check_status(self):
         from unittest import mock
         self.signin()

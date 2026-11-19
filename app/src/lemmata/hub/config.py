@@ -19,6 +19,7 @@ DEFAULTS = {
     "allow_hosts": [],
     "owner": None,
     "sync_interval": 300,
+    "online_refs_default": True,  # S31: look references up online (titles only, OpenAlex and Crossref) unless a project turns it off
     # public site (S07). public_url unset = private hub: Tailscale only, pairing code, one owner (the S04 behaviour).
     "public_url": None,          # e.g. https://mac-mini.tailnet-name.ts.net  (set on the Mac mini only, never over HTTP)
     "signup": "owner",           # owner | invite | open
