@@ -2418,10 +2418,19 @@ function pageSettings() {
   // about: which build this hub runs
   const ab = [row('Lemmata', 'Reads your paper, code and results; shows what backs each claim and what changed. It runs no language model: what needs one is done by your own agent.', null)];
   if (HUB_ON && !READONLY) {
-    if (RX.build === undefined) { RX.build = null; fetch('/api/hub/status', { cache: 'no-store' }).then(r => r.json()).then(d => { RX.build = d.build || {}; RX.buildV = d.version; const t = S.tabs[S.active]; if (t && t.k === 'settings') renderPage(true); }).catch(() => { RX.build = {}; }); }
+    if (RX.build === undefined) { RX.build = null; fetch('/api/hub/status', { cache: 'no-store' }).then(r => r.json()).then(d => { RX.build = d.build || {}; RX.buildV = d.version; RX.ghUser = d.user || null; RX.ghReauth = !!d.github_needs_reauth; const t = S.tabs[S.active]; if (t && t.k === 'settings') renderPage(true); }).catch(() => { RX.build = {}; }); }
     const b = RX.build;
     ab.push(row('This hub runs', !b ? 'Reading…' : b.branch ? 'New pages appear here after the hub has updated to the branch that holds them.' : 'Self-update is not set up on the hub, so it runs whatever was last installed by hand.',
       b && (b.branch || b.commit) ? h('span', { class: 'mono small', id: 'st-build' }, [b.branch, b.commit, b.updated ? dmon(b.updated) : null].filter(Boolean).join(' · ') + (b.result && b.result !== 'updated' ? ' · last update ' + b.result.replace('_', ' ') : '')) : null));
+  }
+  if (HUB_ON && !READONLY && RX.build) {      // why a GitHub sign-in is or is not asked for again
+    const u = RX.ghUser;
+    const say = !u ? 'No GitHub sign-in is saved on this hub.'
+      : RX.ghReauth || u.needs_reauth ? 'GitHub no longer accepts the saved sign-in. Sign in once more from the project list; after that Lemmata renews it by itself.'
+      : u.expires && u.renews ? 'GitHub ends each sign-in of this app after eight hours. Lemmata renews it by itself' + (u.renewed ? ' (' + plural(u.renewed, 'time') + ' since you signed in' + (u.signed_in ? ' on ' + dmon(u.signed_in) : '') + ').' : '.') + ' You should not be asked again.'
+      : u.signed_in ? 'This sign-in does not run out by itself.'
+      : 'Saved before Lemmata could renew sign-ins. If GitHub ends it, sign in once more; from then on Lemmata renews it by itself.';
+    ab.push(row('GitHub sign-in', say, u ? h('span', { class: 'mono small', id: 'st-gh' }, u.login + (u.private_repos === false ? ' · public only' : '')) : null));
   }
   root.append(sec('about', ab));
   if (RX.stSel) setTimeout(() => { const el = document.getElementById('st-' + RX.stSel); if (el) el.scrollIntoView({ block: 'start' }); RX.stSel = null; }, 0);

@@ -707,6 +707,72 @@ class HubTest(HubBase):
         self.assertFalse(self.api("GET", "/p/%s/api/runs" % pid)[1]["runs"][0]["unsure"])
         self.assertFalse(self.hub.gh.stored()["needs_reauth"])
 
+    def test_a_sign_in_that_github_ends_after_hours_is_renewed_by_the_hub(self):
+        """S31 (founder, 2026-11-20: 'Why is it that I have to re-sign into github all the time?'). When the GitHub app is set to
+        expiring tokens, a sign-in lasts eight hours and comes with a refresh token. The hub used to drop that token."""
+        import time as _t
+        gh = self.hub.gh
+        original = self.fake.token
+        self.addCleanup(self._plain_signin, original)        # the hub and the fake GitHub are shared by the tests of this class
+        self.fake.expiring = True
+        self.signin_again()
+        rec = gh.stored()
+        self.assertEqual(rec["refresh"], "ghr_0")
+        self.assertAlmostEqual(rec["expires"], _t.time() + 28800, delta=30)
+        u = self.api("GET", "/api/hub/status")[1]["user"]
+        self.assertEqual((u["expires"], u["renews"], u["renewed"]), (True, True, 0))
+        first = rec["token"]
+        self.assertEqual((gh.token(), self.fake.refreshes), (first, 0))                      # hours left: nothing to do
+        gh._patch(None, expires=_t.time() + 60)                                              # a minute left: renewed before it is used
+        self.assertEqual((gh.token(), self.fake.refreshes), ("gho_renewed_1", 1))
+        rec = gh.stored()
+        self.assertEqual((rec["refresh"], rec["refreshes"], rec["needs_reauth"]), ("ghr_1", 1, False))
+        self.assertAlmostEqual(rec["expires"], _t.time() + 28800, delta=30)
+        self.assertEqual((gh.token(), self.fake.refreshes), ("gho_renewed_1", 1))            # and not again
+        # the hub was off while the token ran out: GitHub answers 401, the hub renews and asks again
+        gh._patch(None, refreshed_at=0)
+        self.fake.token = "gho_ended_at_github"
+        self.assertIs(gh.check(), True)
+        self.assertEqual((self.fake.refreshes, gh.stored()["token"], gh.stored()["needs_reauth"]), (2, "gho_renewed_2", False))
+        self.assertEqual(self.api("GET", "/api/hub/status")[1]["user"]["renewed"], 2)
+        # two requests at once do not both spend the refresh token
+        gh._patch(None, expires=_t.time() + 60, refreshed_at=0)
+        self.assertEqual((gh.token(), gh.token(), self.fake.refreshes), ("gho_renewed_3", "gho_renewed_3", 3))
+        gh._patch(None, expires=_t.time() + 60)                                              # renewed a moment ago by another request: not spent twice
+        self.assertEqual((gh.token(), self.fake.refreshes), ("gho_renewed_3", 3))
+        # GitHub cannot be reached while renewing: nothing is marked, the old pair is kept for the next try
+        gh._patch(None, expires=_t.time() + 60, refreshed_at=0)
+        web = self.hub.cfg.load()["github_web"]
+        self.hub.cfg.update(github_web="http://127.0.0.1:9")
+        try:
+            self.assertIsNone(gh.refresh())
+        finally:
+            self.hub.cfg.update(github_web=web)
+        self.assertEqual((gh.stored()["refresh"], gh.stored()["needs_reauth"]), ("ghr_3", False))
+        # the refresh token itself is no longer good (used elsewhere, or unused for six months): now a sign-in is needed, and said
+        gh._patch(None, refresh="ghr_stale", refreshed_at=0)
+        self.fake.token = "gho_ended_again"
+        self.assertIs(gh.check(), False)
+        self.assertEqual((gh.stored()["needs_reauth"], gh.stored()["refresh"]), (True, None))
+        self.assertTrue(self.api("GET", "/api/hub/status")[1]["github_needs_reauth"])
+        # signing in again clears it and starts a new pair
+        self.fake.token = "gho_fresh"
+        self.signin_again()
+        self.assertEqual((gh.stored()["token"], gh.stored()["refresh"], gh.stored()["needs_reauth"], gh.stored()["refreshes"]), ("gho_fresh", "ghr_0", False, 0))
+
+    def _plain_signin(self, token):
+        self.fake.expiring, self.fake.refresh, self.fake.refreshes, self.fake.token, self.fake.fail = False, None, 0, token, None
+        self.signin_again()
+
+    def test_a_sign_in_that_does_not_expire_is_left_alone(self):
+        self.signin_again()
+        rec = self.hub.gh.stored()
+        self.assertNotIn("refresh", rec)
+        u = self.api("GET", "/api/hub/status")[1]["user"]
+        self.assertEqual((u["expires"], u["renews"]), (False, False))
+        self.assertIs(self.hub.gh.refresh(), False)
+        self.assertEqual(self.fake.refreshes, 0)
+
     def test_online_refs_default_follows_the_served_hub(self):
         """S31 (founder, 2026-11-19): references are looked up online by default on a served hub. A hub built in a test stays offline
         unless the default is switched, and a project's own choice wins."""

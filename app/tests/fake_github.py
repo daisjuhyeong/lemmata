@@ -51,6 +51,9 @@ class FakeGitHub:
         self.accounts = {}   # extra token -> user (S07 multi-user tests); self.token / self.user stay the default account
         self.issue = None    # token handed out by the next approved device flow (default: self.token)
         self.fail = None     # None | "rate" | "forbidden" | "revoked": how /user and /user/repos answer
+        self.expiring = False  # True: the app is set to expiring tokens (8 hours, with a refresh token that works once)
+        self.refresh = None    # the refresh token that works now
+        self.refreshes = 0
         self.api_calls = 0
         self.repos = []  # /user/repos entries
         self.state = "pending"  # pending | approved | denied | expired
@@ -166,8 +169,20 @@ class FakeGitHub:
                     return self._reply(200, {"device_code": "devcode123", "user_code": "WDJB-MJHT",
                                              "verification_uri": fake.url + "/login/device", "expires_in": 900, "interval": 1})
                 if u.path == "/login/oauth/access_token":
-                    self._form()
+                    f = self._form()
+                    if f.get("grant_type") == "refresh_token":      # S31: a refresh token works once and brings a new pair
+                        if not fake.refresh or f.get("refresh_token") != fake.refresh or f.get("client_id") != CLIENT_ID:
+                            return self._reply(200, {"error": "bad_refresh_token", "error_description": "The refresh token passed is incorrect or expired."})
+                        fake.refreshes += 1
+                        fake.token = "gho_renewed_%d" % fake.refreshes      # the old access token stops working
+                        fake.refresh = "ghr_%d" % fake.refreshes
+                        return self._reply(200, {"access_token": fake.token, "expires_in": 28800, "refresh_token": fake.refresh,
+                                                 "refresh_token_expires_in": 15897600, "token_type": "bearer", "scope": "repo,read:user"})
                     if fake.state == "approved":
+                        if fake.expiring:
+                            fake.refresh = "ghr_0"
+                            return self._reply(200, {"access_token": fake.issue or fake.token, "expires_in": 28800, "refresh_token": fake.refresh,
+                                                     "refresh_token_expires_in": 15897600, "token_type": "bearer", "scope": "repo,read:user"})
                         return self._reply(200, {"access_token": fake.issue or fake.token, "token_type": "bearer", "scope": "repo,read:user"})
                     if fake.state == "denied":
                         return self._reply(200, {"error": "access_denied"})

@@ -43,6 +43,7 @@ SCOPE_PUBLIC = "read:user"          # sign in only; public repositories need no 
 VARIANTS = ("claims", "inbox", "timeline", "ask")
 REPO_CACHE_TTL = 120
 MAX_FLOWS = 200
+REFRESH_EARLY = 600                  # renew a sign-in this many seconds before GitHub ends it
 
 
 class GitHub:
@@ -54,6 +55,7 @@ class GitHub:
         self.flows = {}      # flow id -> {"device_code","interval","expires","scope","expect"}
         self._repos = {}     # login -> (time, [repo dicts])
         self._lock = threading.Lock()
+        self._rlock = threading.RLock()   # one renewal of a sign-in at a time (a refresh token works once)
 
     # --- legacy single-flow attribute (tests and old callers)
     @property
@@ -87,15 +89,60 @@ class GitHub:
         return d if isinstance(d, dict) and d.get("token") else None
 
     def token(self, login=None):
+        """The saved token. A sign-in that GitHub ends after a few hours is renewed here, shortly before it runs out."""
         s = self.stored(login)
-        return s["token"] if s else None
+        if not s:
+            return None
+        if s.get("refresh") and s.get("expires") and time.time() > s["expires"] - REFRESH_EARLY:
+            self.refresh(login)
+            s = self.stored(login) or s
+        return s["token"]
 
-    def save(self, token, user, scope=None, login=None):
+    @staticmethod
+    def _lifetime(r):
+        """The expiry part of a token answer. GitHub sends it when the app is set to expiring tokens: the access token then
+        lasts eight hours and comes with a refresh token. Empty for a token that does not expire."""
+        try:
+            if r.get("refresh_token") and r.get("expires_in"):
+                now = time.time()
+                return {"refresh": r["refresh_token"], "expires": now + int(r["expires_in"]),
+                        "refresh_expires": now + int(r["refresh_token_expires_in"]) if r.get("refresh_token_expires_in") else None}
+        except (TypeError, ValueError):
+            pass
+        return {}
+
+    def refresh(self, login=None):
+        """Trade the saved refresh token for a new token pair, without the person signing in again.
+        -> True (renewed), False (GitHub refused: a new sign-in is needed), None (GitHub could not be asked; try later)."""
+        with self._rlock:
+            s = self.stored(login)
+            if not s or not s.get("refresh"):
+                return False
+            if time.time() - (s.get("refreshed_at") or 0) < 30:      # another request renewed it a moment ago
+                return True
+            c = self.cfg.load()
+            try:
+                r = self._http("POST", c["github_web"].rstrip("/") + "/login/oauth/access_token",
+                               {"client_id": c["github_client_id"], "grant_type": "refresh_token", "refresh_token": s["refresh"]})
+            except GitHubError:
+                return None
+            if "access_token" not in r:
+                if r.get("error") == "bad_refresh_token":                # used up, or unused for six months
+                    self._patch(login, needs_reauth=True, refresh=None)
+                    return False
+                return None
+            life = self._lifetime(r) or {"refresh": None, "expires": None, "refresh_expires": None}
+            self._patch(login, token=r["access_token"], needs_reauth=False, refreshed_at=time.time(), refreshes=(s.get("refreshes") or 0) + 1, **life)
+            return True
+
+    def save(self, token, user, scope=None, login=None, life=None):
         login = login or user.get("login")
         old = read_json(self._path(login), None) or {}
         rec = {"token": token, "login": user.get("login"), "name": user.get("name"), "avatar_url": user.get("avatar_url"),
                "scope": scope or old.get("scope") or SCOPE, "created": old.get("created") or time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-               "variant": old.get("variant") or self._next_variant(), "view": old.get("view"), "needs_reauth": False}
+               "variant": old.get("variant") or self._next_variant(), "view": old.get("view"), "needs_reauth": False,
+               "signed_in": time.time(), "refreshes": 0}
+        rec.update(life or {})
         write_private(self._path(login), json.dumps(rec, indent=1) + "\n")
         self._repos.pop((login or "").lower(), None)
 
@@ -118,7 +165,10 @@ class GitHub:
         if not s:
             return None
         return {"login": s.get("login"), "name": s.get("name"), "avatar_url": s.get("avatar_url"), "private_repos": "repo" in (s.get("scope") or SCOPE).split(),
-                "needs_reauth": bool(s.get("needs_reauth")), "variant": s.get("variant"), "view": s.get("view")}
+                "needs_reauth": bool(s.get("needs_reauth")), "variant": s.get("variant"), "view": s.get("view"),
+                # S31: does GitHub end this sign-in by itself, and does the hub renew it? (answers "why must I sign in again")
+                "expires": bool(s.get("expires")), "renews": bool(s.get("refresh")), "renewed": int(s.get("refreshes") or 0),
+                "signed_in": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(s["signed_in"])) if s.get("signed_in") else None}
 
     def logins(self):
         out = []
@@ -148,7 +198,7 @@ class GitHub:
         self._patch(login, view=view)
 
     # --- http
-    def _http(self, method, url, form=None, token=None, timeout=20, login=False):
+    def _http(self, method, url, form=None, token=None, timeout=20, login=False, _renew=True):
         data = urllib.parse.urlencode(form).encode() if form is not None else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Accept", "application/json")
@@ -166,6 +216,8 @@ class GitHub:
                 msg = ""
             if token and e.code == 401:
                 if login is not False:
+                    if _renew and self.refresh(login) is True:      # the token ran out; the hub renewed it, so ask again
+                        return self._http(method, url, form=form, token=self.stored(login)["token"], timeout=timeout, login=login, _renew=False)
                     self._patch(login, needs_reauth=True)
                 raise GitHubError(401, "github_token_invalid", "GitHub no longer accepts the saved sign-in. Reconnect GitHub to continue.")
             if token and e.code in (403, 429):
@@ -258,7 +310,7 @@ class GitHub:
         self._admit(login, c)
         if not c.get("owner"):
             self.cfg.update(owner=login)
-        self.save(token, u, scope=p.get("scope"), login=login)
+        self.save(token, u, scope=p.get("scope"), login=login, life=self._lifetime(r))
         return {"state": "ok", "user": self.user_public(login), "login": login}
 
     def check(self, login=None):
