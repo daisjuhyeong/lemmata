@@ -51,8 +51,8 @@ def num(s):
 
 
 # ------------------------------------------------------------------ result files
-def records(path, data):
-    """A result file -> its raw records [{column: value}], or None when it is not a table."""
+def records(path, data, limit=500):
+    """A result file -> its raw records [{column: value}], or None when it is not a table. limit: rows read from a csv."""
     if data is None or len(data) > MAX_BYTES:
         return None
     text = data.decode("utf-8", "replace")
@@ -79,7 +79,7 @@ def records(path, data):
         if len(rows) >= 2:
             head = [h.strip() for h in rows[0]]
             if all(num(h) is None for h in head if h):
-                recs = [dict(zip(head, [c.strip() for c in r])) for r in rows[1:500]]
+                recs = [dict(zip(head, [c.strip() for c in r])) for r in rows[1:limit]]
     return recs or None
 
 
@@ -167,6 +167,21 @@ def summarise(table, ours, col, lower):
     return {"ours": mine, "std": row["std"].get(col), "n": row["n"].get(col, 1), "best": {"label": best[0], "value": best[1]} if best else None,
             "gap": gap, "rank": rank, "of": len(vals), "order": [l for l, _ in order],
             "vs": [{"label": l, "value": v, "gap": round((v - mine) if lower else (mine - v), 10)} for l, v in others[:40]]}
+
+
+def field_summary(table, col, lower):
+    """A benchmark study has no "ours": the same summary for the whole field of compared rows.
+    -> {best, worst, median, spread, of, order, n} with ours, gap and rank left empty, so every reader of a summary still works."""
+    vals = [(r["label"], r["values"][col]) for r in table["rows"] if col in r["values"]]
+    if not vals:
+        return None
+    order = sorted(vals, key=lambda x: x[1], reverse=not lower)
+    xs = sorted(v for _, v in vals)
+    mid = xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2
+    ns = [r["n"].get(col, 1) for r in table["rows"] if col in r["values"]]
+    return {"ours": None, "std": None, "n": min(ns) if ns else 1, "best": {"label": order[0][0], "value": order[0][1]},
+            "worst": {"label": order[-1][0], "value": order[-1][1]}, "median": mid, "spread": round(abs(order[0][1] - order[-1][1]), 10),
+            "gap": None, "rank": None, "of": len(vals), "order": [l for l, _ in order], "vs": []}
 
 
 # ------------------------------------------------------------------ the paper's table, cell by cell
@@ -301,7 +316,7 @@ def _config_diff(root, rid, rev, paths):
     return out[:8]
 
 
-def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, table_at=None, versions=None, ref=None):
+def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, table_at=None, versions=None, ref=None, field=False):
     """Every committed version of a result file, with the changes made between versions.
     -> [{time, short, rev, ours, best, best_label, rank, ruler, delta, changes: [...], attribution, cats}]
     A group of result files (a project-map experiment) passes is_result(path) and table_at(event) instead of one path,
@@ -326,9 +341,9 @@ def history(events, infos, nodes, rid, path, ours, col, lower, is_result=None, t
                 t.close()
         except Exception:
             tab = None
-        s = summarise(tab, ours, col, lower) if tab and col in tab["cols"] else None
+        s = (field_summary(tab, col, lower) if field else summarise(tab, ours, col, lower)) if tab and col in tab["cols"] else None
         step = {"time": ev["time"], "short": ev["short"], "rev": ev["rev"], "subject": ev.get("subject") or "",
-                "ours": s["ours"] if s else None, "best": s["best"]["value"] if s and s["best"] else None,
+                "ours": s["ours"] if s else None, "best": s["best"]["value"] if s and s["best"] else None, "median": s.get("median") if s else None,
                 "best_label": s["best"]["label"] if s and s["best"] else None, "rank": s["rank"] if s else None, "of": s["of"] if s else None,
                 "ref": next((v["value"] for v in s["vs"] if v["label"] == ref), None) if s and ref else None,      # the base method's value in this version
                 "ruler": bool(tab and prev_cols is not None and set(tab["cols"]) != set(prev_cols)), "changes": [], "cats": []}
@@ -388,8 +403,12 @@ def decide(store, known, exp_id, ours=None, metric=None, lower=None):
     return e
 
 
-def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, github=None, detail=None):
-    """-> the Experiments document; with detail=<experiment id>, that one experiment in full."""
+def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, github=None, detail=None, study=None, roles=None):
+    """-> the Experiments document; with detail=<experiment id>, that one experiment in full.
+    study "benchmark" (S29): nothing is called "ours"; each file is summarised as a field of compared rows."""
+    from . import study as studymod
+    bench = study == "benchmark"
+    roles = roles or studymod.roles_of(None)
     P = G.paper
     ctx = _Ctx(G, alarms, findings)
     ents = (store or {}).get("entries", {})
@@ -433,19 +452,21 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
             x["last"] = row["made"]["time"]
         if tab:
             col = e.get("metric") if e.get("metric") in tab["cols"] else tab["cols"][0]
-            ours, how = (e["ours"], "you") if e.get("ours") in [r["label"] for r in tab["rows"]] else pick_ours(tab, hints, bold_labels)
+            ours, how = (None, None) if bench else (e["ours"], "you") if e.get("ours") in [r["label"] for r in tab["rows"]] else pick_ours(tab, hints, bold_labels)
             lower = e["lower"] if "lower" in e else lower_better(col)
-            s = summarise(tab, ours, col, lower)
+            s = field_summary(tab, col, lower) if bench else summarise(tab, ours, col, lower)
+            row_kind = studymod.role_of(tab.get("label_col"), roles)
             rn = G.nodes[res]
             x["result"] = {"node_id": res, "name": rn["name"], "path": rn["loc"]["path"], "repo": rn["repo"],
                            "github": github[rn["repo"]] + rn["loc"]["path"] if rn["repo"] in github else None}
             x["summary"] = dict(s or {}, ours_label=ours, ours_by=how, metric=col, lower=lower, metric_by="you" if e.get("metric") in tab["cols"] else "first column",
-                                methods=[r["label"] for r in tab["rows"]], baselines=[r["label"] for r in tab["rows"] if r["label"] != ours],
+                                study=study or "method", row_kind=row_kind, row_column=tab.get("label_col"),
+                                methods=[r["label"] for r in tab["rows"]], baselines=[] if bench else [r["label"] for r in tab["rows"] if r["label"] != ours],
                                 cols=tab["cols"], datasets=tab["datasets"] or ([c for c in tab["cols"]] if len(tab["cols"]) > 1 and tab["metrics"] and len(tab["metrics"]) == 1 and tab["datasets"] else []))
             main = tab["metrics"][0] if len(tab["metrics"]) == 1 else col.rsplit(" · ", 1)[-1]
             x["grid"] = {"cols": tab["cols"], "rows": [{"label": r["label"], "values": r["values"], "n": r["n"]} for r in tab["rows"][:40]],
-                         "datasets": tab["datasets"], "metric": main, "measures": tab["metrics"], "tuning": False}
-            hist = history(events, infos, G.nodes, rn["repo"], rn["loc"]["path"], ours, col, lower)
+                         "datasets": tab["datasets"], "metric": main, "measures": tab["metrics"], "tuning": False, "row_kind": row_kind, "row_column": tab.get("label_col")}
+            hist = history(events, infos, G.nodes, rn["repo"], rn["loc"]["path"], ours, col, lower, field=bench)
             x["history_n"] = len(hist)
             x["spark"] = [{"o": h["ours"], "b": h["best"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
             if s and s["n"] <= 1 and s.get("std") is None:
@@ -454,7 +475,7 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
                 x["caveats"].append({"k": "single", "t": "One metric column"})
             if any(h["ruler"] or "evaluation" in h["cats"] for h in hist[1:]):
                 x["caveats"].append({"k": "ruler", "t": "Evaluation changed"})
-            if how not in ("you", "name", "paper"):
+            if how not in ("you", "name", "paper") and not bench:
                 x["caveats"].append({"k": "guess", "t": "“Ours” is a guess"})
             if full:
                 x["table"] = {"cols": tab["cols"], "rows": tab["rows"], "seeds": tab["seeds"]}
@@ -529,6 +550,6 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
         if n["kind"] in ("table", "figure") and not (n.get("attrs") or {}).get("in_appendix") or (n["kind"] == "result" and nid in led and not led[nid]["used_by"]):
             loose.append(experiment(nid))
     allx = [x for s in sections for x in s["experiments"]] + loose
-    return {"schema": SCHEMA, "sections": sections, "unassigned": loose,
+    return {"schema": SCHEMA, "sections": sections, "unassigned": loose, "study": study or "method",
             "counts": {"questions": len(sections), "untested": sum(1 for s in sections if not s["experiments"]), "experiments": len({x["id"] for x in allx}),
                        "attention": len({x["id"] for x in allx if x["attention"]}), "versions": sum(x["history_n"] for x in {x["id"]: x for x in allx}.values())}}

@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -72,12 +72,38 @@ async function rxLoad() {
     let trail = null; try { trail = await apiGet('/api/trail'); } catch (e) { /* older hubs and snapshots */ }
     let setup = null; try { setup = await apiGet('/api/setup'); } catch (e) { /* older hubs and snapshots: the page says so */ }
     let hf = null; try { hf = await apiGet('/api/hypothesis'); } catch (e) { /* older hubs and snapshots have no hypothesis-first view */ }
+    let study = null, numbers = null;      // S29: the kind of study, and the numbers it rests on (older hubs and snapshots have neither)
+    try { study = await apiGet('/api/study'); } catch (e) { /* a method paper, as before */ }
+    try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
     try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
+/* S29 (ADR-009): a project is a method paper (it has an "ours") or a benchmark study (it has none). One line says which,
+   and the researcher can change it there. Shown on Home, Thesis and Setup. */
+const rxBench = () => !!(RX.study && RX.study.kind === 'benchmark');
+const ST_BY = { you: 'set by you', map: 'from the confirmed map', rule: 'Lemmata’s reading' };
+function rxStudyLine() {
+  const D = RX.study; if (!D) return null;
+  const bench = D.kind === 'benchmark';
+  const set = async kind => { const r = await rxPost('/api/study', { kind }, kind === 'auto' ? 'Lemmata decides again.' : 'Now read as a ' + (kind === 'benchmark' ? 'benchmark study' : 'method paper') + '.'); if (r) { RX.study = r; RX.setup = null; await rxRefresh(); } };
+  const sel = READONLY ? null : h('select', { class: 'st-sel', 'aria-label': 'Kind of study' }, D.kinds.map(k => h('option', { value: k.k, selected: D.kind === k.k ? '' : null }, k.word)), D.chosen ? h('option', { value: 'auto' }, 'Let Lemmata decide') : null);
+  if (sel) sel.addEventListener('change', () => set(sel.value));
+  return h('div', { class: 'st-line' + (D.by === 'rule' ? ' unsure' : ''), title: D.why },
+    h('span', { class: 'tag' }, 'Study'), sel || h('b', null, D.word), h('span', { class: 'muted small' }, ST_BY[D.by] || D.by),
+    h('span', { class: 'st-w' }, bench ? 'No method of its own. Methods are compared; each claim is decided by its own test.' : 'Ours' + (D.ours ? ': ' + D.ours : '') + ', ranked against baselines.'),
+    D.by === 'rule' && !READONLY ? h('button', { class: 'linkbtn small', title: 'Keep this reading', onclick: () => set(D.kind) }, 'Confirm') : null,
+    D.note ? h('span', { class: 'muted small' }, D.note) : null);
+}
+/* S29: while the hub cannot sync, Lemmata's copy is behind GitHub. Every page that lists what is "not there" says so. */
+function rxBehindNote() {
+  const s = S.project && S.project.sync; if (!s || !s.failing) return null;
+  return h('div', { class: 'flag st-sync', role: 'status' }, h('b', null, 'Sync with GitHub is failing'), s.since ? ' since ' + dmon(s.since) : '', '. ', s.message || '',
+    ' Lemmata still shows commit ', h('span', { class: 'mono' }, (s.head || '?').slice(0, 7)), '; a run, commit or result file it does not have may only be not pulled yet. ',
+    READONLY ? null : h('button', { class: 'linkbtn', onclick: () => syncNow() }, 'Sync now'));
+}
 function rxChip(st) { const s = RX_STATUS[st]; return plainChip(s[0], s[1], s[2]); }
 function rxWhere(loc, repo) {
   if (!loc || !loc.path) return null;
@@ -457,7 +483,15 @@ function pageTimeline() {
 const RX_CAT = { method: ['◆', 'Method'], settings: ['●', 'Settings'], data: ['▲', 'Data'], evaluation: ['⟂', 'Evaluation'] };
 const RX_CELL = { match: ['✓', 'Matches the result file'], rounding: ['≈', 'Rounded differently'], differs: ['✕', 'Differs from the result file'], loose: ['~', 'Value is in the file, but not in the matching row and column'], untraced: ['?', 'Not found in the result file'] };
 function rxFmt(v) { if (v == null) return '—'; const a = Math.abs(v); return a >= 100 ? v.toFixed(1) : a >= 1 ? v.toFixed(2) : v.toFixed(3).replace(/0$/, ''); }
+function rxFieldCell(sm) {      // benchmark study: the field of what is compared, not ours against the best other
+  if (!sm.best) return h('span', { class: 'muted small' }, '—');
+  const meth = sm.row_kind === 'method', word = { method: 'method', dataset: 'dataset', condition: 'case', group: 'group' }[sm.row_kind] || 'row';
+  return h('span', { class: 'rx-field small', title: (meth ? 'Best: ' : 'Highest: ') + sm.best.label + ' ' + rxFmt(sm.best.value) + (sm.worst ? ' · ' + (meth ? 'worst: ' : 'lowest: ') + sm.worst.label + ' ' + rxFmt(sm.worst.value) : '') + ' · ' + sm.metric + (sm.lower ? ' (lower is better)' : '') },
+    meth ? [h('b', { class: 'mono' }, rxFmt(sm.best.value)), h('span', { class: 'muted' }, ' ' + trunc(sm.best.label, 12))]
+      : [h('span', { class: 'mono' }, rxFmt(sm.worst ? Math.min(sm.worst.value, sm.best.value) : sm.best.value) + '–' + rxFmt(sm.worst ? Math.max(sm.worst.value, sm.best.value) : sm.best.value)), h('span', { class: 'muted' }, ' ' + (sm.of || 0) + ' ' + word + 's')]);
+}
 function rxGapBar(sm) {
+  if (sm && sm.study === 'benchmark') return rxFieldCell(sm);
   if (!sm || sm.gap == null) return h('span', { class: 'muted small' }, sm && sm.ours != null ? rxFmt(sm.ours) : '—');
   const W = 132, mid = 56, scale = Math.max(Math.abs(sm.gap), Math.abs(sm.best.value) * 0.12, 1e-9), len = Math.max(2, Math.min(mid - 2, Math.abs(sm.gap) / scale * (mid - 2)));
   const good = sm.gap > 0, s = sv('svg', { viewBox: '0 0 ' + W + ' 18', width: W, height: 18, class: 'rx-gap', role: 'img', 'aria-label': 'Ours ' + rxFmt(sm.ours) + ', best other ' + rxFmt(sm.best.value) + ' (' + sm.best.label + ')' });
@@ -467,6 +501,7 @@ function rxGapBar(sm) {
   return s;
 }
 function rxSpark(spark) {
+  if (!spark.some(p => p.o != null) && spark.some(p => p.b != null)) spark = spark.map(p => Object.assign({}, p, { o: p.b, b: null }));      // no "ours": follow the best of the field
   const pts = spark.filter(p => p.o != null); if (pts.length < 2) return h('span', { class: 'muted small' }, spark.length ? spark.length + '×' : '');
   const W = 90, H = 22, vals = spark.flatMap(p => [p.o, p.b]).filter(v => v != null), lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1;
   const x = i => 3 + i * (W - 6) / (spark.length - 1), y = v => H - 3 - (v - lo) / sp * (H - 6);
@@ -490,7 +525,8 @@ const RX_XTYPE = { main: 'Main', ablation: 'Ablation', sensitivity: 'Sensitivity
 /* S24 step 1 (ADR-008): the claim-experiment link. One word from a rule; the sentence behind it on hover. */
 const RX_LINK = { supports: ['supports', 'fine'], contradicts: ['contradicts', 'fix'], inconclusive: ['inconclusive', 'look'], not_run: ['not run', 'plain'] };
 const RX_LINKS = ['supports', 'contradicts', 'inconclusive', 'not_run'];
-function rxLinkChip(l) { const w = RX_LINK[l.status] || RX_LINK.inconclusive; const ch = plainChip('', w[0], w[1] + ' lk-' + l.status); ch.title = l.why + ' (rule ' + l.rule + (l.criterion_by === 'default' ? ', default criterion' : '') + ')'; return ch; }
+const RX_LINK_TEST = { supports: ['test met', 'fine'], contradicts: ['test not met', 'plain'], inconclusive: ['no verdict', 'look'], not_run: ['not run', 'plain'] };      // benchmark study: a test that is not met is a result, not an error
+function rxLinkChip(l) { const w = (l.rule === 'L5' ? RX_LINK_TEST : RX_LINK)[l.status] || RX_LINK.inconclusive; const ch = plainChip('', w[0], w[1] + ' lk-' + (l.rule === 'L5' && l.status === 'contradicts' ? 'not_run' : l.status)); ch.title = l.why + ' (rule ' + l.rule + (l.criterion_by === 'default' ? ', default criterion' : l.criterion_by === 'test' ? ', the claim’s own test' : '') + ')'; return ch; }
 function rxLinkBar(bar, big) { const n = RX_LINKS.reduce((a, k) => a + (bar[k] || 0), 0);
   return h('span', { class: 'rx-lbar' + (big ? ' big' : ''), role: 'img', 'aria-label': RX_LINKS.filter(k => bar[k]).map(k => bar[k] + ' ' + RX_LINK[k][0]).join(', ') || 'no experiment', title: RX_LINKS.filter(k => bar[k]).map(k => bar[k] + ' ' + RX_LINK[k][0]).join(' · ') || 'No experiment yet' },
     n ? RX_LINKS.map(k => bar[k] ? h('span', { class: 'lb-' + k, style: 'flex:' + bar[k] }) : null) : null); }
@@ -498,6 +534,8 @@ function rxLinkBar(bar, big) { const n = RX_LINKS.reduce((a, k) => a + (bar[k] |
 const RX_OVER = { main: 'the main column', all: 'every dataset', majority: 'most datasets', average: 'the average over datasets' };
 function rxCriterion(x, sec, link) {
   const c = link.criterion, cid = sec.claim_id || sec.id, ours = (x.summary || {}).ours_label;
+  if (!c || c.kind === 'test') return h('div', { class: 'rx-crit' }, h('span', { class: 'rx-why-h' }, 'Decided by'), h('span', { class: 'rx-crit-t' }, 'the claim’s own test, not a method’s rank'), h('span', { class: 'tag' }, 'benchmark study'),
+    h('span', { class: 'rx-crit-w muted small' }, link.why + ' Rule ' + link.rule + '.'));
   const who = { default: 'default', confirmed: 'from the confirmed map', you: 'set by you' }[link.criterion_by] || link.criterion_by;
   const cmpLabel = v => v === 'best_other' ? 'the best other method' : v === 'base' ? 'the base method' : v;
   const text = 'Ours ' + (c.strict ? 'better than ' : 'at least as good as ') + cmpLabel(c.compare) + ' on ' + RX_OVER[c.over] + (c.metric && c.over === 'main' ? ' (' + c.metric + ')' : '');
@@ -526,12 +564,16 @@ function rxThesisHead(E) {
     h('div', { class: 'rx-th-k' }, h('span', { class: 'tag' }, 'Thesis'), T.loc ? rxWhere(T.loc) : null, h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', title: 'Open the claims tree', onclick: () => { RX.sel = 'core'; RX.view = 'tree'; openTab('claims'); } }, 'Tree')),
     h('p', { class: 'rx-th-t serif' }, T.text ? rxMath(T.text) : h('span', { class: 'muted' }, 'No core message yet. It is drafted from the abstract on Claims.')),
     h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, plural(T.claims, 'claim')), stages.length ? stages : h('span', { class: 'muted' }, 'none yet')),
-    h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, plural(T.links_n, 'experiment link')), T.links_n ? [rxLinkBar(T.links, true), links] : h('span', { class: 'muted' }, 'none yet')),
+    E.study === 'benchmark' ? null : h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, plural(T.links_n, 'experiment link')), T.links_n ? [rxLinkBar(T.links, true), links] : h('span', { class: 'muted' }, 'none yet')),
     h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, 'Gaps'), bucket('untested', B.untested, B.untested === 1 ? 'claim with no experiment' : 'claims with no experiment', 'Claims nothing tests yet'),
       bucket('no_claim', B.no_claim, B.no_claim === 1 ? 'experiment with no claim' : 'experiments with no claim', 'Results that back no claim')));
   if (open === 'untested' && B.untested) head.append(h('div', { class: 'rx-th-list' }, T.untested.map(c => h('button', { class: 'rx-th-i', title: 'Open in Claims', onclick: () => { RX.sel = c.id; RX.view = 'tree'; openTab('claims'); } }, h('b', null, c.short || ''), rxStageChip(c), h('span', { class: 'serif' }, rxMath(trunc(c.text, 120)))))));
   if (open === 'no_claim' && B.no_claim) head.append(h('div', { class: 'rx-th-list' }, h('button', { class: 'linkbtn', onclick: () => { const el = document.querySelector('.rx-x-sec.loose, .rx-x-sec.k-other'); if (el) el.scrollIntoView({ block: 'start' }); } }, 'They are listed under the claims ↓')));
   return head;
+}
+function rxExpHead(E) {
+  const X = E && E.extends;
+  return h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, E && E.study === 'benchmark' ? 'What is compared' : X ? 'Ours vs ' + trunc(X.base.name, 12) : 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
 }
 function rxExpRow(x, sec) {
   const key = (sec ? sec.id : '-') + '|' + x.id, open = RX.exOpen === key, tu = x.tuning, link = sec && sec.kind !== 'other' && sec.links ? sec.links[x.id] : null;
@@ -601,12 +643,13 @@ function rxExpDetail(id) {
       out.push(blk('Result', h('div', { class: 'rx-x-ctl' }, x.map && sm.measures && sm.measures.length > 1 ? sel(sm.measure, sm.measures, v => post({ measure: v }), 'Measure') : null,
         sm.cols.length > 1 || !x.map ? sel(sm.metric, sm.cols, v => post({ metric: v }), x.map ? 'Dataset' : 'Metric') : null,
         sm.target != null ? h('span', { class: 'tag' }, '→ ' + sm.target + ' is best') : h('button', { class: 'btn sm', disabled: READONLY, title: 'Switch which direction is better', onclick: () => post({ lower: !sm.lower }) }, sm.lower ? '↓ lower is better' : '↑ higher is better'),
-        x.tuning ? null : [h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
-        sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, ['paper', 'name', 'map'].includes(sm.ours_by) ? '' : '(guessed)') : null]),
+        x.tuning || sm.study === 'benchmark' ? null : [h('span', { class: 'muted small' }, 'ours:'), sel(sm.ours_label, sm.methods, v => post({ ours: v }), 'Our method'),
+        sm.ours_by !== 'you' ? h('span', { class: 'muted small' }, ['paper', 'name', 'map'].includes(sm.ours_by) ? '' : '(guessed)') : null],
+        sm.study === 'benchmark' ? h('span', { class: 'muted small' }, plural(rows.length, { method: 'method', dataset: 'dataset', condition: 'case', group: 'group' }[sm.row_kind] || 'row') + (sm.row_column ? ' (column ' + sm.row_column + ')' : '') + ', none of them “ours”') : null),
         h('div', { class: 'rx-bars' }, sorted.map((r, i) => { const v = r.values[sm.metric], me = r.label === sm.ours_label; return h('div', { class: 'rx-bar' + (me ? ' me' : '') },
           h('span', { class: 'bl' }, r.label, sm.base && r.label === sm.base.label ? h('span', { class: 'tag' }, 'base') : null), h('span', { class: 'bt' }, h('span', { class: 'bf', style: 'width:' + Math.max(1, Math.abs(v) / hi * 100) + '%' })),
-          h('span', { class: 'bv mono' }, rxFmt(v) + (r.std[sm.metric] != null ? ' ±' + rxFmt(r.std[sm.metric]) : '')), h('span', { class: 'muted small' }, i === 0 ? '★' : '')); }))));
-    } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.map ? (x.connected ? 'These files could not be read as tables with the map’s metric.' : 'No file matches this experiment’s patterns any more.') : x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
+          h('span', { class: 'bv mono' }, rxFmt(v) + (r.std[sm.metric] != null ? ' ±' + rxFmt(r.std[sm.metric]) : '')), h('span', { class: 'muted small' }, i === 0 && !(sm.study === 'benchmark' && sm.row_kind !== 'method') ? '★' : '')); }))));
+    } else out.push(blk('Result', h('div', { class: 'rx-warn' }, x.map ? (x.connected ? 'These files could not be read as tables with the map’s metric.' : x.waiting ? 'Waiting for its result files: nothing matches its patterns yet. Lemmata looks again at every scan.' : 'No file matches this experiment’s patterns any more.') : x.connected ? 'The result file could not be read as a table (CSV or JSON with one row per method).' : 'No result file is connected. Put “% source: code:results/file.csv” above it in the LaTeX.')));
     // design
     const d = x.design || { scripts: [], settings: [], runs: [], values: [] };
     out.push(blk('Design', rxEditorRow(x) || (rxVsLink('x:' + id) ? h('div', { class: 'rx-x-ed' }, rxVsLink('x:' + id)) : null), h('dl', { class: 'rx-dl' },
@@ -624,10 +667,11 @@ function rxExpDetail(id) {
     if (x.history && x.history.length) {
       const hs = x.history, chart = hs.length > 1 ? rxHistoryChart(hs, sm) : null;
       const word = { single: 'one change', bundled: 'several changes at once', none: 'no code change found', ruler: 'evaluation changed: not comparable', first: 'first version' };
-      out.push(blk('History', chart, hs.length > 1 ? h('div', { class: 'rx-legend' }, h('span', null, h('span', { class: 'lg-o' }, '━'), ' ' + sm.ours_label), h('span', null, h('span', { class: 'lg-b' }, '┄'), ' best other'),
+      const fld = sm.study === 'benchmark';
+      out.push(blk('History', chart, hs.length > 1 ? h('div', { class: 'rx-legend' }, fld ? null : h('span', null, h('span', { class: 'lg-o' }, '━'), ' ' + sm.ours_label), h('span', null, h('span', { class: 'lg-b' }, '┄'), fld ? ' best of the field' : ' best other'),
         Object.keys(RX_CAT).filter(c => hs.some(p => p.cats.includes(c))).map(c => h('span', null, h('span', { class: 'lg-g' }, RX_CAT[c][0]), ' ' + RX_CAT[c][1])), hs.some(p => p.became_best) ? h('span', null, '★ became best') : null) : null,
         h('div', { class: 'rx-steps' }, hs.slice().reverse().map(p => { const better = p.delta != null && (sm.lower ? p.delta < 0 : p.delta > 0); return h('div', { class: 'rx-st' },
-          h('span', { class: 'mono small muted' }, dmon(p.time)), h('span', { class: 'mono' }, rxFmt(p.ours)),
+          h('span', { class: 'mono small muted' }, dmon(p.time)), h('span', { class: 'mono', title: fld && p.best_label ? 'Best: ' + p.best_label : null }, rxFmt(fld ? p.best : p.ours)),
           h('span', { class: 'mono rx-dlt ' + (p.delta == null || p.delta === 0 ? '' : better ? 'good' : 'bad') }, p.delta == null ? '' : (p.delta > 0 ? '+' : '') + rxFmt(p.delta)),
           h('span', { class: 'rx-st-w' }, p.became_best ? h('b', null, '★ became best · ') : null, p.rank ? h('span', { class: 'muted' }, '#' + p.rank + '/' + p.of + ' · ') : null,
             p.changes.length ? p.changes.map((c, i) => [i ? '; ' : null, c.cats.map(k => h('span', { class: 'lg-g c-' + k, title: (RX_CAT[k] || ['', k])[1] }, (RX_CAT[k] || ['•'])[0])), ' ' + c.subject, c.keys.length ? h('span', { class: 'mono small' }, ' ' + c.keys.map(k => k.key + ' ' + k.from + '→' + k.to).join(', ')) : null]) : h('span', { class: 'muted' }, p.subject),
@@ -660,14 +704,17 @@ function rxMapCard() {
   const head = h('div', { class: 'rx-map-h' }, h('span', { class: 'sg ' + (prop ? 'look' : 'fine') }, prop ? '◐' : '✓'),
     h('b', { title: prop ? 'Not used until you confirm' : null }, prop ? 'Proposed map' : 'Project map'), h('span', { class: 'muted small' }, prop ? 'by ' + (M.proposed_by || 'agent') : M.confirmed_at ? dmon(M.confirmed_at) : ''),
     h('span', { class: 'grow' }),
-    h('span', { class: 'rx-map-n' }, h('span', { title: 'Our method' }, h('b', null, m.method ? m.method.name : '?')), m.base ? h('span', { title: 'Extends' }, '↳ ', h('b', null, m.base.name)) : null, h('span', { title: 'Questions' }, '◆ ', h('b', null, m.questions.length)), h('span', { title: 'Experiments' }, '▦ ', h('b', null, m.experiments.length)),
+    h('span', { class: 'rx-map-n' }, m.study === 'benchmark' ? h('span', { title: 'A benchmark study has no method of its own' }, h('b', null, 'Benchmark')) : h('span', { title: 'Our method' }, h('b', null, m.method ? m.method.name : '?')), m.base ? h('span', { title: 'Extends' }, '↳ ', h('b', null, m.base.name)) : null, h('span', { title: 'Questions' }, '◆ ', h('b', null, m.questions.length)), h('span', { title: 'Experiments' }, '▦ ', h('b', null, m.experiments.length)),
       cov.n_files ? h('span', { class: 'warn' }, h('b', null, cov.n_files), ' files unmapped') : null, dropped.length ? h('span', { class: 'bad' }, h('b', null, dropped.length), ' dropped') : null),
     prop && !READONLY ? [h('button', { class: 'btn sm', onclick: () => act('/api/map/discard', {}, 'Proposal discarded') }, 'Discard'), h('button', { class: 'btn sm primary', disabled: !m.experiments.length, onclick: () => act('/api/map/confirm', {}, 'Map confirmed') }, 'Confirm')] : null);
   const edit = change => act('/api/map/edit', { change });
   const body = h('details', { class: 'rx-map-d', open: prop || RX.mapOpen ? '' : null, ontoggle: ev => { if (!prop) RX.mapOpen = ev.target.open; } }, h('summary', null, prop ? 'Review' : 'Show map'),
-    h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ours'), READONLY ? h('b', null, m.method ? m.method.name : '?') : (() => { const i = h('input', { class: 'rx-map-in', value: m.method ? m.method.name : '', 'aria-label': 'Name of our method', placeholder: 'Method name' }); i.addEventListener('change', () => edit({ method: i.value })); return i; })(),
+    h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Study'),
+      READONLY ? h('b', null, m.study === 'benchmark' ? 'Benchmark study' : 'Method paper') : (() => { const st = h('select', { class: 'rx-map-sc', 'aria-label': 'Kind of study' }, [['method', 'Method paper (has an “ours”)'], ['benchmark', 'Benchmark study (no method of its own)']].map(o => h('option', { value: o[0], selected: (m.study || 'method') === o[0] ? '' : null }, o[1]))); st.addEventListener('change', () => edit({ study: st.value })); return st; })(),
+      m.study === 'benchmark' ? h('span', { class: 'muted small' }, Object.keys(m.roles || {}).length ? Object.entries(m.roles).map(e => e[0] + ': ' + e[1].join(', ')).join(' · ') : 'columns read by their usual names (model, dataset, variant, seed)') : null),
+    m.study === 'benchmark' ? null : h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ours'), READONLY ? h('b', null, m.method ? m.method.name : '?') : (() => { const i = h('input', { class: 'rx-map-in', value: m.method ? m.method.name : '', 'aria-label': 'Name of our method', placeholder: 'Method name' }); i.addEventListener('change', () => edit({ method: i.value })); return i; })(),
       m.method && m.method.aliases.length ? h('span', { class: 'muted small' }, 'also ' + m.method.aliases.join(', ')) : null),
-    h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k', title: 'The method of the paper this work extends' }, 'Extends'),
+    m.study === 'benchmark' ? null : h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k', title: 'The method of the paper this work extends' }, 'Extends'),
       READONLY ? h('b', null, m.base ? m.base.name : '—') : (() => { const i = h('input', { class: 'rx-map-in', value: m.base ? m.base.name : '', 'aria-label': 'Method being extended', placeholder: 'none' }); i.addEventListener('change', () => edit({ base: i.value })); return i; })(),
       h('span', { class: 'rx-map-k' }, 'Goal'),
       READONLY ? h('span', null, m.goal || '—') : (() => { const i = h('input', { class: 'rx-map-in wide', value: m.goal || '', 'aria-label': 'New target of the extension', placeholder: 'What the extension aims at, in one sentence' }); i.addEventListener('change', () => edit({ goal: i.value })); return i; })()),
@@ -680,11 +727,11 @@ function rxMapCard() {
         const ts = h('select', { disabled: READONLY, 'aria-label': 'Which question it tests' }, h('option', { value: '' }, '—'), qOpts.map(o => h('option', { value: o[0], selected: x.tests[0] === o[0] }, o[1] + (x.tests.length > 1 && x.tests[0] === o[0] ? ' +' + (x.tests.length - 1) : ''))));
         ts.addEventListener('change', () => edit({ experiment: { id: x.id, tests: ts.value ? [ts.value] : [] } }));
         return h('tr', null, h('td', null, h('b', null, x.name), x.note ? h('div', { class: 'muted small' }, trunc(x.note, 90)) : null), h('td', null, ty), h('td', null, ts),
-          h('td', { class: 'mono small', title: x.files.join('\n') }, h('b', null, x.matched), ' ' + trunc(x.files[0] || '', 30)), h('td', { class: 'mono small' }, x.metric || h('span', { class: 'muted' }, 'guess')),
+          h('td', { class: 'mono small', title: x.files.join('\n') }, x.waiting ? h('span', { class: 'tag warn', title: 'No file matches yet. Lemmata looks again at every scan.' }, 'waiting') : h('b', null, x.matched), ' ' + trunc(x.files[0] || '', 30)), h('td', { class: 'mono small' }, x.metric || h('span', { class: 'muted' }, 'guess')),
           h('td', { class: 'small' }, x.paper.map((p, i) => [i ? ', ' : null, rxNodeBtn(p, ((IX.node && IX.node.get(p)) || {}).name || p)])), h('td', null, READONLY ? null : h('button', { class: 'linkbtn small', title: 'Remove this experiment', onclick: () => edit({ remove: 'experiment:' + x.id }) }, '✕'))); })))),
     m.ignore.length ? h('div', { class: 'rx-map-row' }, h('span', { class: 'rx-map-k' }, 'Ignored'), m.ignore.map(p => h('span', { class: 'rx-code mono' }, p))) : null,
     dropped.length ? h('div', { class: 'rx-map-rep' }, h('b', null, 'Dropped by the checker'), dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why))) : null,
-    warns.length ? h('div', { class: 'rx-map-rep' }, warns.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))) : null,
+    warns.length ? h('div', { class: 'rx-map-rep' }, warns.map(r => h('div', { class: 'muted small' }, (r.level === 'waiting' ? '… ' : '! ') + r.where + ': ' + r.why))) : null,
     !READONLY ? h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm', title: 'Paste it into your Claude Code to redo the map: ' + RX_MAP_PROMPT(name), onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy prompt for Claude Code'),
       !prop ? h('button', { class: 'btn sm', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules') : null) : null);
   return h('section', { class: 'rx-map ' + M.state }, head, body);
@@ -734,9 +781,9 @@ function rxExpMap(E, renderSec) {
   const all = tally(exps), cmp = all.ahead + all.behind + all.tie;
   box.append(h('button', { class: 'rx-m-root' + (sel ? ' dim' : ''), style: 'left:0;top:' + rootY + 'px;width:' + CW[0] + 'px', onclick: () => { RX.mapSel = null; renderPage(true); }, title: 'Show everything' },
     E.thesis && E.thesis.text ? h('span', { class: 'rx-m-goal rx-m-thesis serif' }, rxMath(trunc(E.thesis.text, 110))) : null,
-    h('span', { class: 'rx-m-ours' + (E.thesis && E.thesis.text ? ' sub' : '') }, (E.map && E.map.method ? E.map.method.name : null) || 'Ours'), X ? h('span', { class: 'rx-m-sub' }, 'extends ' + X.base.name) : null,
+    h('span', { class: 'rx-m-ours' + (E.thesis && E.thesis.text ? ' sub' : '') }, E.study === 'benchmark' ? 'Benchmark study' : (E.map && E.map.method ? E.map.method.name : null) || 'Ours'), X ? h('span', { class: 'rx-m-sub' }, 'extends ' + X.base.name) : null,
     X && X.goal ? h('span', { class: 'rx-m-goal serif' }, trunc(X.goal, 90)) : null, meter(exps, true),
-    h('span', { class: 'rx-m-sub' }, cmp ? 'Ahead of ' + trunc(vs, 18) + ' in ' + all.ahead + ' of ' + cmp : 'Nothing to compare yet'), all.check ? h('span', { class: 'rx-m-chk' }, '! ' + all.check + ' to check') : null));
+    h('span', { class: 'rx-m-sub' }, E.study === 'benchmark' ? plural(exps.length, 'experiment') + ', each claim decided by its test' : cmp ? 'Ahead of ' + trunc(vs, 18) + ' in ' + all.ahead + ' of ' + cmp : 'Nothing to compare yet'), all.check ? h('span', { class: 'rx-m-chk' }, '! ' + all.check + ' to check') : null));
   let lastScope;
   secs.forEach(s => {
     const y = qy.get(s.id), t = tally(s.experiments), c = t.ahead + t.behind + t.tie, st = s.stage ? RX_STAGE[s.stage] : RX_STATUS[s.status];
@@ -767,6 +814,7 @@ function pageExperiments() {
   const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['table', 'Outline'], ['map', 'Map']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'table') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)), h('button', { 'aria-pressed': 'false', title: 'The claims as a tree', onclick: () => { RX.view = 'tree'; openTab('claims'); } }, 'Tree'));
   const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
+  root.append(rxStudyLine(), rxBehindNote());
   const c = E.counts, mapped = !!E.unmapped;
   const HF = RX.hf && RX.hf.mode === 'hypothesis_first';
   if (HF) {
@@ -782,7 +830,7 @@ function pageExperiments() {
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
     X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal')));
   if (c.attention || E.sections.length) root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), c.attention ? h('span', { class: 'warn' }, h('b', null, c.attention), ' to check') : null));
-  const head = () => h('div', { class: 'rx-x-r head' }, h('span', null, 'Experiment'), h('span', null, 'Metric'), h('span', null, X ? 'Ours vs ' + trunc(X.base.name, 12) : 'Ours vs best other'), h('span', null, 'Over time'), h('span', null, 'Paper'), h('span', null, 'Last'));
+  const head = () => rxExpHead(E);
   const WORD = { supported: 'Tested, nothing to check', partial: 'Something to check', unsupported: 'Not tested' };
   const renderSec = s => {
     const st = RX_STATUS[s.status], cid = mapped ? s.claim_id : s.id;
@@ -790,7 +838,7 @@ function pageExperiments() {
       h('div', { class: 'rx-x-h' }, s.stage ? null : h('span', { class: 'sg ' + st[2], title: mapped ? WORD[s.status] : st[1] }, st[0]),
         cid ? h('button', { class: 'rx-x-q', title: 'Open in Claims', onclick: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } }, s.short || s.label) : h('span', { class: 'rx-x-q static' }, s.label),
         s.stage ? rxStageChip(s) : null,
-        h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), s.loc ? rxWhere(s.loc) : null, s.bar && s.kind !== 'other' && s.experiments.length ? rxLinkBar(s.bar) : null, h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
+        h('span', { class: 'rx-x-qt serif' + (s.kind === 'other' ? ' muted' : '') }, rxMath(trunc(s.text, 150))), h('span', { class: 'grow' }), s.loc ? rxWhere(s.loc) : null, s.bar && s.kind !== 'other' && s.experiments.length && E.study !== 'benchmark' ? rxLinkBar(s.bar) : null, h('span', { class: 'muted small' }, s.experiments.length ? plural(s.experiments.length, 'experiment') : '')));
     if (s.experiments.length) sec.append(h('div', { class: 'rx-x-t' }, head(), s.experiments.map(x => rxExpRow(x, s))));
     else sec.append(h('div', { class: 'rx-x-none miss' }, h('span', null, 'Not tested yet'),
       READONLY ? null : s.suggested.map(g => h('button', { class: 'chip-btn', title: 'Link this as the experiment for it', onclick: async () => { const r = await rxPost('/api/claims/link', { id: s.id, target: g.node_id, on: true }); if (r) { RX.claims = r; await rxRefresh(); } } }, g.name + '?'))));
@@ -946,6 +994,7 @@ function pageReview() {
   const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Review'), R ? seg : null));
   root.classList.add('wide');
   if (!R) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
+  root.append(rxBehindNote());
   const post = async body => { const r = await rxPost('/api/review', Object.assign({ days }, body)); if (r) { RX.review = r; renderPage(true); } };
   const F = RX.rvFilter, fc = F && R.checks.find(c => c.k === F);
   root.append(h('div', { class: 'rx-rv-checks' }, R.checks.map((c, i) => { const v = RX_VERDICT[c.verdict];
@@ -971,6 +1020,7 @@ function pageReview() {
     }
     if (R.baselines.length > 6) sec.append(h('div', { class: 'rx-x-none' }, h('button', { class: 'linkbtn small', onclick: () => { RX.rvAllB = !RX.rvAllB; renderPage(true); } }, RX.rvAllB ? 'Show fewer' : 'Show all ' + R.baselines.length + ' baselines')));
     root.append(sec); }
+  if (R.study === 'benchmark' && RX.numbers) root.append(nbSummary(RX.numbers));
   // behind list for the "ahead" check
   // questions
   const TREND = { moved: ['↗', 'Moved', 'fine'], stalled: ['–', 'Stalled', 'ign'], none: ['○', 'Not started', 'ign'] };
@@ -998,7 +1048,7 @@ function pageReview() {
           rep ? h('span', { class: 'muted small' }, 'Confounds: ' + rep.by + ', ' + dmon(rep.at)) : null)));
     }
   }
-  if (!rows.length) tbl.append(h('div', { class: 'rx-x-none' }, R.questions.length ? 'Nothing behind this check.' : 'No questions yet. Confirm a project map on the Experiments page.'));
+  if (!rows.length) tbl.append(h('div', { class: 'rx-x-none' }, R.questions.length ? 'Nothing behind this check.' : R.study === 'benchmark' ? 'No claim yet. Confirm the hypotheses on Thesis.' : 'No questions yet. Confirm a project map on the Experiments page.'));
   root.append(tbl);
   return root;
 }
@@ -1066,6 +1116,7 @@ function pageDigest() {      // Home (S24 step 8): one research as a whole. The 
   S.outline = [];
   const root = doc(h('h1', { class: 'ptitle' }, S.project ? S.project.name : 'Home'));
   const E = RX.experiments, T = RX.trail;
+  root.append(rxStudyLine(), rxBehindNote());
   if (E && E.thesis) { const th = rxThesisHead(E); th.classList.add('home'); th.querySelector('.rx-th-k .linkbtn').replaceWith(h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the thesis')); root.append(th); }
   if (T) { const ym = RX.trMonth || (RX.trDay || T.today).slice(0, 7); root.append(h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day to see its work sessions: what was done, why, by whom, where, how and with what result.'))); }
   const cards = h('div', { class: 'hm-cards' });
@@ -1215,7 +1266,7 @@ function rxNotationDetail(s, post) {
    claims they test. Click any box: what it connects to stays lit, and the panel under the map says how each experiment
    uses it, where the paper and the code name it, and what to check. Everything comes from /api/setup (rules only). */
 const SU_KIND = { metric: ['Metrics', 'Metric'], dataset: ['Datasets', 'Dataset'], method: ['Methods', 'Method'] };
-const SU_ROLE = { ours: 'Ours', base: 'Extends', baseline: 'Baseline', variant: 'Variant' };
+const SU_ROLE = { ours: 'Ours', base: 'Extends', baseline: 'Baseline', variant: 'Variant', compared: 'Compared', row: 'Row' };
 const SU_XTYPE = { main: 'Main', ablation: 'Ablation', sensitivity: 'Sensitivity', tuning: 'Search', efficiency: 'Cost', analysis: 'Analysis', other: 'Other', table: 'Table', figure: 'Figure', result: 'Result', group: '' };
 function suDir(u) { return u.target != null ? 'closest to ' + rxFmt(u.target) : u.lower ? '↓ lower is better' : '↑ higher is better'; }
 function suDirShort(d) { return !d ? 'recorded only' : d === 'mixed' ? '! direction differs' : d.startsWith('target') ? '→ ' + d.slice(7) + ' is best' : d === 'lower' ? '↓ lower is better' : '↑ higher is better'; }
@@ -1223,6 +1274,7 @@ function suSub(it, D) {
   const nx = it.experiments.length, ex = plural(nx, 'experiment');
   if (it.kind === 'metric') return suDirShort(it.direction) + ' · ' + (it.main_in ? 'main in ' + it.main_in + ' of ' + nx : ex);
   if (it.kind === 'dataset') return ex + (it.compared ? ' · ours best in ' + it.ours_best + ' of ' + it.compared : '');
+  if (it.role === 'compared') return 'Compared · ' + (it.ranked ? 'best in ' + it.best_in + ' of ' + it.ranked : ex);
   if (it.role === 'ours') return 'Ours · ' + ex;
   return (SU_ROLE[it.role] || 'Method') + ' · ' + (it.compared ? 'beats ours in ' + it.wins + ' of ' + it.compared : ex);
 }
@@ -1246,7 +1298,23 @@ function suUsesTable(it, D) {
   const num = (v, cls) => h('td', { class: 'mono' + (cls ? ' ' + cls : '') }, v == null ? '—' : rxFmt(v));
   const best = b => b ? [h('span', null, rxFmt(b.value)), h('span', { class: 'muted small' }, ' ' + trunc(b.label, 18))] : '—';
   let head, rows;
-  if (it.kind === 'metric') {
+  const bench = D.study === 'benchmark';
+  if (bench && it.kind === 'metric') {
+    head = ['Experiment', 'Role', 'Better', 'Best', 'Worst', 'Datasets'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', null, u.role === 'main' ? h('b', null, 'Main number') : u.role === 'compared' ? 'In the table' : h('span', { class: 'muted' }, 'Recorded, not compared')),
+      h('td', { class: 'small' }, u.role === 'main' ? suDir(u) : '—'), h('td', { class: 'mono' }, best(u.field && u.field.best)), h('td', { class: 'mono' }, best(u.field && u.field.worst)), h('td', { class: 'small' }, (u.datasets || []).length ? trunc(u.datasets.join(', '), 60) : '—')));
+  } else if (bench && it.kind === 'dataset') {
+    head = ['Experiment', 'Metric', 'Best', 'Worst', 'Methods', 'Not run'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', { class: 'small' }, h('span', { class: 'mono' }, u.metric), h('div', { class: 'muted small' }, suDir(u))),
+      h('td', { class: 'mono' }, u.as_row ? h('span', { class: 'muted small' }, 'a row of the table') : best(u.best_other)), h('td', { class: 'mono' }, best(u.worst)),
+      h('td', { class: 'small' }, u.methods || '—'), h('td', { class: 'small' + ((u.missing || []).length ? ' warn' : ' muted') }, (u.missing || []).length ? trunc(u.missing.join(', '), 50) : 'none')));
+  } else if (bench) {
+    head = ['Experiment', 'Metric', 'This method', 'Rank', 'Best in', 'Per dataset'];
+    rows = it.uses.map(u => h('tr', null, xcell(u), h('td', { class: 'small' }, h('span', { class: 'mono' }, u.metric), h('div', { class: 'muted small' }, suDir(u) + (u.column && u.column !== u.metric ? ' · ' + u.column : ''))),
+      num(u.value, u.rank === 1 ? 'good' : ''), h('td', { class: 'small' }, u.rank ? u.rank + ' of ' + u.methods : '—'), h('td', { class: 'small' }, u.of_cols ? u.best_in + ' of ' + u.of_cols : '—'),
+      h('td', null, h('div', { class: 'su-cells' }, (u.cells || []).filter(c => c.dataset).slice(0, 80).map(c => h('span', { class: 'su-cell' + (c.value == null ? ' miss' : ''), title: c.dataset + ': ' + (c.value == null ? 'no result' : rxFmt(c.value)) + (c.n ? ' · ' + plural(c.n, 'run') : '') },
+        h('span', { class: 'su-cd' }, trunc(c.dataset, 12)), h('span', { class: 'mono' }, c.value == null ? '×' : rxFmt(c.value))))))));
+  } else if (it.kind === 'metric') {
     head = ['Experiment', 'Role', 'Better', 'Ours', 'Best other', 'Datasets'];
     rows = it.uses.map(u => h('tr', null, xcell(u), h('td', null, u.role === 'main' ? h('b', null, 'Main number') : u.role === 'compared' ? 'In the table' : h('span', { class: 'muted' }, 'Recorded, not compared')),
       h('td', { class: 'small' }, u.role === 'main' ? suDir(u) : '—'), u.tuning ? h('td', { class: 'small' }, u.best_setting ? ['best ', h('span', { class: 'mono' }, rxFmt(u.best_setting.value)), h('div', { class: 'muted small' }, trunc(u.best_setting.label, 28))] : '—') : num(u.ours),
@@ -1276,7 +1344,7 @@ function suItemDetail(it, D) {
   const facts = [];
   if (it.kind === 'metric') facts.push(suDirShort(it.direction), it.main_in ? 'main number in ' + plural(it.main_in, 'experiment') : 'never the main number');
   if (it.kind === 'dataset') { facts.push(plural(it.experiments.length, 'experiment')); if (it.compared) facts.push('ours best in ' + it.ours_best + ' of ' + it.compared); if ((it.metrics || []).length) facts.push('scored with ' + it.metrics.join(', ')); }
-  if (it.kind === 'method') { facts.push(SU_ROLE[it.role] || 'Method', plural(it.experiments.length, 'experiment')); if (it.compared) facts.push('beats ours in ' + it.wins + ' of ' + plural(it.compared, 'comparison')); }
+  if (it.kind === 'method') { facts.push(SU_ROLE[it.role] || 'Method', plural(it.experiments.length, 'experiment')); if (it.compared) facts.push('beats ours in ' + it.wins + ' of ' + plural(it.compared, 'comparison')); if (it.ranked) facts.push('best in ' + it.best_in + ' of ' + plural(it.ranked, 'column')); }
   return h('section', { class: 'rx-x-sec su-detail' },
     h('div', { class: 'rx-x-h' }, h('span', { class: 'tag' }, SU_KIND[it.kind][1]), h('b', { class: 'su-dn' }, it.name), it.aliases.length ? h('span', { class: 'muted small' }, 'also ' + it.aliases.join(', ')) : null, h('span', { class: 'grow' }),
       rxVsLink('i:' + it.id, null, 'setup'), h('button', { class: 'linkbtn small', onclick: () => { RX.suSel = null; renderPage(true); } }, 'Close')),
@@ -1363,7 +1431,10 @@ function suContext(x, claim) {   // S26: why, what, where, how, when, who on one
   const C = x.context, P = x.protocol; if (!C) return null;
   const cell = (k, v, miss) => h('div', { class: 'su-cx-c' + (miss ? ' miss' : '') }, h('span', { class: 'su-cx-k' }, k), h('div', { class: 'su-cx-v' }, v));
   const base = P && !P.search ? P.methods.filter(m => m.role !== 'ours').length : 0;
+  const dir = P ? (P.target != null ? '' : P.lower ? ' (lower is better)' : ' (higher is better)') : '';
   const what = !P ? 'Result files that could not be read as a table.' : P.search ? 'A search over ' + plural(P.settings_n, 'setting') + ', judged by ' + P.metric + '.'
+    : P.study === 'benchmark' ? (P.rows ? plural(P.rows.n, { dataset: 'dataset', condition: 'case', group: 'group' }[P.rows.kind] || 'row') + (P.rows.column ? ' (column ' + P.rows.column + ')' : '') + ', measured by ' + P.metric + '. No method is compared here.'
+      : plural(P.methods.length, 'method') + ' compared' + (P.datasets.length ? ' on ' + plural(P.datasets.length, 'dataset') : '') + ', judged by ' + P.metric + dir + '. None of them is “ours”.')
     : (P.ours || 'Ours') + ' against ' + plural(base, 'other method') + (P.datasets.length ? ' on ' + plural(P.datasets.length, 'dataset') : '') + ', judged by ' + P.metric + (P.target != null ? '' : P.lower ? ' (lower is better)' : ' (higher is better)') + '.';
   const W = C.where, H = C.how, T = C.when, O = C.who;
   const howBits = H.scripts.concat(H.code.filter(c => !H.scripts.some(sc => sc.endsWith(c)))), noHow = !howBits.length && !H.settings.length;
@@ -1393,18 +1464,20 @@ function suSheet(x, claim, D, hl) {
     row('Metric', itemBtn('metric', P.metric, P.target != null ? '→ ' + rxFmt(P.target) : P.lower ? '↓ lower is better' : '↑ higher is better'), P.measures.filter(m => m !== P.metric).length ? h('span', { class: 'muted small' }, 'also recorded: ' + P.measures.filter(m => m !== P.metric).join(', ')) : null),
     row('Datasets', P.datasets.length ? P.datasets.map(d => itemBtn('dataset', d)) : h('span', { class: 'muted small' }, 'not split by dataset')),
     P.search ? row('Search', h('span', null, plural(P.settings_n, 'setting') + ' tried'), P.best ? h('span', { class: 'muted small' }, 'best: ' + P.best.label + ' (' + rxFmt(P.best.value) + ')') : null)
-      : row('Methods', P.methods.map(m => itemBtn('method', m.name, m.role !== 'baseline' ? SU_ROLE[m.role].toLowerCase() : null))),
+      : P.rows ? row({ dataset: 'Datasets (rows)', condition: 'Cases', group: 'Groups' }[P.rows.kind] || 'Rows', h('span', null, P.rows.names.join(', ') + (P.rows.n > P.rows.names.length ? ' and ' + (P.rows.n - P.rows.names.length) + ' more' : '')), h('span', { class: 'muted small' }, 'not methods'))
+      : row(P.study === 'benchmark' ? 'Compared' : 'Methods', P.methods.map(m => itemBtn('method', m.name, m.role !== 'baseline' && m.role !== 'compared' ? SU_ROLE[m.role].toLowerCase() : null))),
     P.search ? null : row('Runs', h('span', null, P.seeds ? (P.seeds[0] === P.seeds[1] ? P.seeds[0] : P.seeds[0] + ' to ' + P.seeds[1]) + ' per result' : '—')),
     P.paper.length ? row('In the paper', h('span', null, P.paper.join(', '))) : null));
   if (x.grid) {
     const G = x.grid, sel = RX.suCell && RX.suCell.x === x.id ? RX.suCell : null;
     const hlM = hl && hl.startsWith('method:') ? hl.slice(7) : null, hlD = hl && hl.startsWith('dataset:') ? hl.slice(8) : null, nm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
     card.append(h('div', { class: 'su-gw' }, h('table', { class: 'su-g' }, h('thead', null, h('tr', null, h('th', null, P.metric + (P.lower ? ' ↓' : P.target != null ? '' : ' ↑')), G.cols.map((c, i) => h('th', { class: hlD === nm(G.datasets[i]) ? 'hl' : null }, G.datasets[i])))),
-      h('tbody', null, G.rows.map(r => h('tr', { class: (r.role === 'ours' ? 'ours' : '') + (hlM === nm(r.label) ? ' hl' : '') }, h('th', null, r.label, r.role !== 'baseline' && SU_ROLE[r.role].toLowerCase() !== String(r.label).toLowerCase() ? h('span', { class: 'tag' }, SU_ROLE[r.role].toLowerCase()) : null),
+      h('tbody', null, (G.rows.length > 14 && !hl && !sel && !(RX.suRows || {})[x.id] ? G.rows.slice(0, 12) : G.rows).map(r => h('tr', { class: (r.role === 'ours' ? 'ours' : '') + (hlM === nm(r.label) ? ' hl' : '') }, h('th', null, r.label, !['baseline', 'compared', 'row'].includes(r.role) && SU_ROLE[r.role] && SU_ROLE[r.role].toLowerCase() !== String(r.label).toLowerCase() ? h('span', { class: 'tag' }, SU_ROLE[r.role].toLowerCase()) : null),
         G.cols.map((c, i) => { const v = r.values[c], on = sel && sel.m === r.label && sel.c === c;
           return h('td', { class: (v == null ? 'miss' : '') + (r.best.includes(c) ? ' best' : '') + (on ? ' on' : '') + (hlD === nm(G.datasets[i]) ? ' hl' : '') },
             h('button', { class: 'su-cb', title: v == null ? 'No result: ' + r.label + ' on ' + G.datasets[i] : 'Trace this number', 'aria-pressed': String(!!on), onclick: () => { RX.suCell = on ? null : { x: x.id, m: r.label, c }; if (!on) suLoadTrace(x.id); renderPage(true); } },
               v == null ? '—' : h('span', { class: 'mono' }, rxFmt(v)), v != null && r.n[c] ? h('span', { class: 'su-cn' }, '×' + r.n[c]) : null)); })))))));
+    if (G.rows.length > 14 && !hl && !sel) card.append(h('button', { class: 'linkbtn small su-more', onclick: () => { RX.suRows = Object.assign({}, RX.suRows, { [x.id]: !(RX.suRows || {})[x.id] }); renderPage(true); } }, (RX.suRows || {})[x.id] ? 'Show the first 12 rows' : 'Show all ' + G.rows.length + ' rows'));
     if (sel) card.append(suTracePanel(x, sel.m, sel.c));
     else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it: what the paper says → where it comes from → how → who ran it → when. ×n is the number of runs; bold is the best in its column.'));
   }
@@ -1597,8 +1670,8 @@ function pageSetup() {
   }
   const c = D.counts, hfB = D.board && D.board.mode === 'hypothesis_first' && (D.board.experiments.length || D.board.claims.length);
   root.classList.add('wide');
-  root.append(h('h1', { class: 'ptitle' }, 'Setup'), hfB ? null :
-    h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
+  root.append(h('h1', { class: 'ptitle' }, 'Setup'), rxStudyLine(), rxBehindNote(), hfB ? null :
+    h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), D.study === 'benchmark' ? ' compared methods' : ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
       c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null));
   const B = D.board && (D.board.experiments.length || D.board.claims.length) ? D.board : null, hf = B && B.mode === 'hypothesis_first';
   if (!D.mapped && !hf) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
@@ -1617,7 +1690,12 @@ function pageSetup() {
   D.claims.forEach(cl => {
     const xs = cl.experiments.map(id => byX.get(id)).filter(x => x && uses(x)); if (!xs.length) return;
     root.append(h('div', { class: 'su-cl-h' + (cl.stage ? rxSt(cl.stage) : '') }, h('button', { class: 'rx-x-q', title: 'Open in Thesis', onclick: () => suGotoClaim(cl.id) }, cl.label), cl.stage ? rxStageChip(cl) : null, h('span', { class: 'rx-x-qt serif' }, rxMath(trunc(cl.text, 160)))));
-    xs.forEach(x => { seen.add(x.id); root.append(suSheet(x, cl, D, hl)); });
+    xs.forEach(x => {
+      if (D.study === 'benchmark' && seen.has(x.id) && !hl) {      // one sheet per experiment: under a later claim, only the line that says how it bears on that claim
+        const link = cl.links[x.id], first = D.claims.find(c => c.experiments.includes(x.id));
+        return root.append(h('div', { class: 'su-sh su-ref' }, h('div', { class: 'su-sh-h' }, link ? rxLinkChip(Object.assign({ criterion_by: '' }, link)) : null, h('b', null, x.name), h('span', { class: 'muted small' }, 'its sheet is above, under ' + (first ? first.label : 'another claim')), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, 'Open'))));
+      }
+      seen.add(x.id); root.append(suSheet(x, cl, D, hl)); });
   });
   const loose = D.experiments.filter(x => !seen.has(x.id) && !x.claims.length && x.protocol && uses(x));
   if (loose.length) { root.append(h('div', { class: 'su-cl-h' }, h('span', { class: 'rx-x-q static' }, 'No claim'), h('span', { class: 'rx-x-qt muted' }, 'Experiments that test no claim'))); loose.forEach(x => root.append(suSheet(x, null, D, hl))); }
@@ -1636,6 +1714,7 @@ function rxOpenTarget(t) {
   if (t.view === 'node' && t.id) return openTab('node', t.id);
   if (t.view === 'commit') { if (t.url) { if (EMBED) { const a = h('a', { href: t.url }); document.body.append(a); a.click(); a.remove(); } else window.open(t.url, '_blank', 'noopener'); } return; }
   if (t.view === 'runs') return openTab('experiments');
+  if (t.view === 'numbers') { RX.nbSel = t.sel || null; return openTab('numbers'); }
   return openTab(t.view || 'digest');
 }
 function rxTodoList(limit) {
@@ -1765,7 +1844,7 @@ function ssMoved(r) {
   const moved = r.before != null && r.before !== r.after, better = moved && (r.lower ? r.after < r.before : r.after > r.before), ahead = r.best_other != null && (r.lower ? r.after <= r.best_other : r.after >= r.best_other);
   return h('div', { class: 'tr-res' }, h('button', { class: 'ilink', onclick: () => rxOpenExp(r.x) }, r.name), r.claims.length ? h('span', { class: 'tag' }, 'tests ' + r.claims.join(', ')) : h('span', { class: 'tag warn' }, 'no claim'),
     h('span', { class: 'mono' }, (r.before != null ? rxFmt(r.before) + ' → ' : 'first result ') + rxFmt(r.after)), moved ? h('span', { class: better ? 'good' : 'bad' }, better ? 'better' : 'worse') : r.before != null ? h('span', { class: 'muted' }, 'unchanged') : null,
-    r.best_other != null ? h('span', { class: 'muted small' }, 'best other ' + rxFmt(r.best_other) + (ahead ? ' · ours ahead' : ' · ours behind')) : null, r.metric ? h('span', { class: 'muted small' }, 'on ' + r.metric + (r.lower ? ' ↓' : ' ↑')) : null);
+    r.field ? h('span', { class: 'muted small' }, 'best of the field') : r.best_other != null ? h('span', { class: 'muted small' }, 'best other ' + rxFmt(r.best_other) + (ahead ? ' · ours ahead' : ' · ours behind')) : null, r.metric ? h('span', { class: 'muted small' }, 'on ' + r.metric + (r.lower ? ' ↓' : ' ↑')) : null);
 }
 function ssCard(s) {
   const row = (k, v) => v == null || (Array.isArray(v) && !v.flat(3).filter(Boolean).length) ? null : h('div', { class: 'ss-r' }, h('span', { class: 'ss-k' }, k), h('div', { class: 'ss-v' }, v));
@@ -1865,12 +1944,15 @@ const FAQ = [
     ['What should I do next?', '“Next to do” on Home is made by rules: feedback someone is waiting on, things waiting for you to confirm, places where the paper disagrees with the results, results that are out of date, and gaps. Each item opens the thing it is about.', [['Home', 'digest']]],
     ['Does the paper still agree with the results?', 'Items tagged [paper] in “Next to do” are cells where the paper and the result files differ. Checks lists every mismatch with the file and line. Each Setup sheet also says how many cells match.', [['Checks', 'checks'], ['Home', 'digest']]],
     ['Which results are out of date?', 'A result is out of date when the code or settings behind it changed after it was written. These show as [old] items in “Next to do” and as a warning on the experiment’s Setup sheet.', [['Home', 'digest'], ['Setup', 'setup']]],
+    ['My work has no method of its own. Why does Lemmata look for “ours”?', 'It should not. Set the study to “Benchmark study” on Home, Thesis or Setup. Nothing is then called “ours”: the methods in your result files are listed as compared methods, datasets and test rows are no longer mistaken for methods, and each claim is decided by its own test instead of a method’s rank. A method paper keeps “ours” and the baseline comparison.', [['Home', 'digest'], ['Setup', 'setup']]],
+    ['Where does a number in my report come from, and is it still right?', 'Key numbers lists the numbers the study rests on under the claim each belongs to: what the report says, what the committed file holds today, the commit that last wrote the file and the runs behind it. A number no file stores, a file no logged run wrote and a mismatch are listed as open gaps.', [['Key numbers', 'numbers']]],
+    ['Lemmata says a run or a file is not in GitHub, but it is.', 'Look for the “Sync with GitHub is failing” note. While syncing fails, Lemmata’s copy of your repository is behind, and the note says why: usually the saved GitHub sign-in has expired or covers public repositories only. Sign in to GitHub again on the Projects page, then use “Sync now”.', [['Home', 'digest']]],
     ['What changed since I last looked?', 'Changes lists what moved since your last checkpoint and what to re-check because of it. “Mark everything as looked at” starts a new checkpoint.', [['Changes', 'changes']]],
   ]],
   ['Keeping it right', [
     ['Lemmata has an experiment or a claim wrong. How do I fix it?', 'Lemmata drafts and you confirm. On Thesis you can edit and confirm the project map (which files form which experiment, which claim each tests), set a claim’s stage yourself, and change when an experiment counts as support under “Supports when”.', [['Thesis', 'experiments']]],
     ['Why does an experiment say “supports” when the result is a tie?', 'By default a tie with the best other method counts as support. Set a stricter rule for that experiment under “Supports when” on Thesis. Every status shows the rule that produced it.', [['Thesis', 'experiments']]],
-    ['How do runs get recorded?', 'From three places: commands run in the VS Code terminal with the Lemmata extension, the results watcher that sees result files change, and your coding agent through the Lemmata tools. Runs made elsewhere appear only once their result files are committed.', [['Trail', 'history']]],
+    ['How do runs get recorded?', 'From three places: commands run in the VS Code terminal with the Lemmata extension, the results watcher that sees result files change, and your coding agent through the Lemmata tools. Runs made elsewhere appear only once their result files are committed. A logged command that wrote no file and no number (a check, a look at a file) is kept as a command, not counted as an experiment.', [['Trail', 'history']]],
     ['A day shows “Lemmata cannot tell” under Why. What now?', 'Nothing in that session wrote a result file of a mapped experiment. Write a one-sentence summary on the card, or ask your coding agent to draft one and then confirm it. If the files belong to an experiment, add them to the project map on Thesis.', [['Home', 'digest'], ['Thesis', 'experiments']]],
     ['How do I get session summaries written for me?', 'In your coding agent with the Lemmata tools connected, ask it to draft summaries for the sessions that have none. Each draft is marked “draft by your agent” until you confirm, edit or discard it. It runs on your own plan.', [['Trail', 'history']]],
     ['Does Lemmata send my work to an AI model?', 'No. Tracking is done by rules on your own machine or hub. A model is used only when your own coding agent drafts the project map or a session summary, and nothing it drafts counts until you confirm it.', []],
@@ -2022,6 +2104,7 @@ function hfDetail(hy, D) {
       hy.aliases.length ? [h('dt', null, 'Merged from'), h('dd', null, hy.aliases.join(', '))] : null,
       (hy.prediction || []).length ? [h('dt', null, 'Your prediction'), h('dd', null, hy.prediction.map(p => p.outcome.replace('_', ' ') + ' (' + p.at.slice(0, 10) + ')').join(' → '))] : null,
       devs.length ? [h('dt', null, 'Deviations'), h('dd', null, devs.map(x => h('div', { class: 'small' }, h('b', null, x.id), ' ' + (x.date || ''), ' · ' + x.title + ' · ', x.timing[hy.id] === 'after_data' ? h('b', null, 'after data') : x.timing[hy.id] === 'before_data' ? 'before data' : 'date unknown', x.path ? [' ', rxWhere({ path: x.path, line: x.line }, 'code')] : null)))] : null),
+    hfEvidence(hy),
     READONLY ? null : h('div', { class: 'row hf-acts' },
       hy.validity !== 'valid' ? h('button', { class: 'btn primary small', onclick: () => hfAct('confirm', { target: hy.id }) }, 'Confirm') : null,
       h('button', { class: 'btn small', onclick: () => hfFix(hy) }, 'Fix'),
@@ -2030,6 +2113,18 @@ function hfDetail(hy, D) {
       hy.stance === 'tested' ? h('button', { class: 'linkbtn small', onclick: () => hfAct('premise', { target: hy.id }) }, 'Check the source') : null,
       h('span', { class: 'grow' }),
       h('select', { class: 'hf-pred', 'aria-label': 'Set the stage yourself', onchange: ev => { if (ev.target.value) hfAct('stage', { target: hy.id, stage: ev.target.value }); } }, h('option', { value: '' }, 'Stage…'), h('option', { value: 'auto' }, 'By the rule'), RX_STAGES.map(k => h('option', { value: k }, RX_STAGE[k][1])))));
+}
+/* S29: under a hypothesis, the experiments the map files under it and the numbers the report quotes for it.
+   Top-down: problem, hypothesis, its test, the experiments behind it, the numbers it rests on, the runs that wrote them. */
+function hfEvidence(hy) {
+  const E = RX.experiments, N = RX.numbers, out = [];
+  const sec = E && hy.claim_id ? E.sections.find(s => (s.claim_id || s.id) === hy.claim_id) : null;
+  if (sec && sec.experiments.length) out.push(h('div', { class: 'hf-ev' }, h('div', { class: 'hf-evh' }, 'Experiments', h('span', { class: 'muted small' }, ' · from the project map')),
+    h('div', { class: 'rx-x-t' }, rxExpHead(E), sec.experiments.map(x => rxExpRow(x, sec)))));
+  const g = N && N.groups.find(g => g.key === 'h:' + hy.id);
+  if (g) out.push(h('div', { class: 'hf-ev' }, h('div', { class: 'hf-evh' }, 'Key numbers', h('span', { class: 'muted small' }, ' · ' + nbCounts(g.counts)), h('span', { class: 'grow' }),
+    h('button', { class: 'linkbtn small', onclick: () => openTab('numbers') }, 'All key numbers')), nbTable(g, true)));
+  return out.length ? out : null;
 }
 function hfBranch() {
   if (typeof PID === 'undefined' || !PID || READONLY) return null;
@@ -2072,7 +2167,82 @@ function rxHypoFirst() {
   return out;
 }
 
-const RX_PAGES = { digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
+/* ---------- Key numbers (S29) ----------
+   The numbers a study rests on, by claim: what the report says, what the committed file holds (read again at every scan),
+   the commit that last wrote the file and the runs behind it. What cannot be traced is listed as an open gap. Rules only. */
+const NB_ST = { ok: ['✓', 'fine', 'Agrees with the report'], mismatch: ['✕', 'fix', 'The report and the file disagree'], missing: ['?', 'look', 'Cannot be read from the file'],
+  gap: ['◌', 'look', 'A known gap: no committed file holds it yet'], unquoted: ['·', 'ign', 'Read from the file; nothing to compare it with'] };
+const NB_GAP = { mismatch: 'differs', missing: 'missing', gap: 'no file', uncommitted: 'not committed', stale: 'older than code', no_run: 'no run logged', run_code: 'code not in GitHub', start_commit: 'start commit unknown' };
+const NB_PROMPT = name => 'Use Lemmata to list the key numbers of the project "' + name + '": call key_numbers with brief=true, read the report and the result files, then propose_numbers. For a number the report quotes that no committed file stores, say so with "gap". Fix whatever the checker drops and propose again.';
+function nbCounts(c) { return ['ok', 'mismatch', 'missing', 'gap', 'unquoted'].filter(k => c[k]).map(k => c[k] + ' ' + (k === 'ok' ? 'agree' : k === 'unquoted' ? 'not compared' : k === 'gap' ? (c[k] === 1 ? 'gap' : 'gaps') : k)).join(' · ') || 'none'; }
+function nbRead(n) {
+  const r = n.read; if (!r) return 'no file stores it';
+  const cond = c => c.or ? '(' + c.or.map(cond).join(' or ') + ')' : c.column + ' ' + (c.op === '==' ? '=' : c.op) + (c.value == null ? '' : ' ' + (Array.isArray(c.value) ? c.value.join(' | ') : c.value));
+  const wh = (r.where || []).map(cond).join(' and '), am = (r.among || []).map(cond).join(' and ');
+  if (r.key || r.keys) return (r.agg === 'value' ? '' : r.agg + ' of ') + (r.key || r.keys.join(', '));
+  return (r.agg === 'value' ? r.column : r.agg + (r.column ? ' of ' + r.column : '')) + (wh ? ' where ' + wh : '') + (am ? ' among ' + am : '');
+}
+function nbTable(g, compact) {
+  const act = async body => { const r = await rxPost('/api/numbers', body); if (r) { RX.numbers = r; RX.review = await apiGet('/api/review?days=' + (RX.rvDays || 30)).catch(() => RX.review); RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
+  return h('div', { class: 'su-tw' }, h('table', { class: 'tbl nb-t' }, h('thead', null, h('tr', null, ['', 'Number', 'Report', 'File', 'Stored in', compact ? null : 'Written by', ''].filter(t => t !== null).map(t => h('th', null, t)))),
+    h('tbody', null, g.numbers.map(n => { const st = NB_ST[n.status], q = n.quoted;
+      return h('tr', { class: 'nb-r s-' + n.status + (n.state === 'proposed' ? ' prop' : '') + (RX.nbSel === n.id ? ' hl' : ''), id: 'nb-' + n.id.replace(/[^\w]/g, '_') },
+        h('td', null, h('span', { class: 'sg ' + st[1], title: st[2] }, st[0])),
+        h('td', null, h('span', { class: 'nb-l' }, n.label), n.state === 'proposed' ? h('span', { class: 'hf-tag', title: 'Proposed, not confirmed by you yet' }, ' [confirm]') : n.state === 'test' ? h('span', { class: 'tag', title: 'Read from the row of the test table that decides this hypothesis' }, ' test') : null,
+          n.why || n.gap ? h('div', { class: 'muted small nb-w' }, n.status === 'gap' && n.gap ? n.gap : n.why || '') : null),
+        h('td', { class: 'mono' }, q ? [q.text, q.path ? [' ', rxWhere({ path: q.path, line: q.line }, 'code')] : null] : h('span', { class: 'muted' }, '—')),
+        h('td', { class: 'mono' + (n.status === 'mismatch' ? ' bad' : '') }, n.found == null ? h('span', { class: 'muted' }, '—') : n.found),
+        h('td', { class: 'small' }, n.file ? [h('span', { class: 'mono' }, n.file), h('div', { class: 'muted small', title: nbRead(n) }, trunc(nbRead(n), 70)),
+          n.commit ? h('div', { class: 'muted small', title: n.commit.subject }, 'commit ' + n.commit.short + ' · ' + dmon(n.commit.time)) : n.found != null ? h('div', { class: 'rx-tl warn' }, 'in no commit') : null] : h('span', { class: 'muted' }, 'no file')),
+        compact ? null : h('td', { class: 'small' }, n.runs.length ? n.runs.map(r => h('div', { class: 'mono small', title: r.state }, r.run_id + (r.sha ? ' @' + r.sha : ''))) : n.scripts.length ? h('span', { class: 'muted' }, n.scripts.join(', ') + ' (by name, no logged run)') : n.found != null ? h('span', { class: 'muted' }, 'no logged run') : ''),
+        h('td', null, READONLY || n.state === 'test' ? null : h('button', { class: 'linkbtn small', title: 'Remove this number from the list', onclick: () => act({ action: 'remove', number: n.id }) }, '✕'))); }))));
+}
+function nbSummary(N) {      // one strip, on Review: where the study's numbers stand
+  const c = N.counts;
+  return h('section', { class: 'rx-x-sec nb-sum' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'rx-x-q static' }, 'Key numbers'),
+    h('span', { class: 'rx-x-qt' }, c.total ? nbCounts(c) : 'None listed yet.'), c.gaps ? h('span', { class: 'muted small' }, plural(c.gaps, 'open provenance gap')) : null, h('span', { class: 'grow' }),
+    c.proposed ? h('span', { class: 'hf-tag' }, '[' + c.proposed + ' to confirm]') : null, h('button', { class: 'linkbtn', onclick: () => openTab('numbers') }, 'Open')));
+}
+function pageNumbers() {
+  const nr = rxNotReady('Key numbers'); if (nr) return nr;
+  S.outline = [];
+  const N = RX.numbers, name = S.project ? S.project.name : 'this project';
+  const root = doc(h('h1', { class: 'ptitle' }, 'Key numbers'));
+  root.classList.add('wide');
+  if (!N) return root.append(h('p', { class: 'muted' }, 'This hub has no Key numbers page yet. It appears after the hub updates.')), root;
+  const act = async (body, msg) => { const r = await rxPost('/api/numbers', body, msg); if (r) { RX.numbers = r; RX.review = await apiGet('/api/review?days=' + (RX.rvDays || 30)).catch(() => RX.review); RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
+  const c = N.counts;
+  root.append(h('p', { class: 'lede muted' }, 'The numbers the study rests on, each read again from its committed file and compared with what the report says.'), rxBehindNote());
+  root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.total), ' numbers'), h('span', null, h('b', null, c.ok), ' agree'), c.mismatch ? h('span', { class: 'bad' }, h('b', null, c.mismatch), ' differ') : null,
+    c.missing ? h('span', { class: 'warn' }, h('b', null, c.missing), ' missing') : null, c.gap ? h('span', { class: 'warn' }, h('b', null, c.gap), c.gap === 1 ? ' known gap' : ' known gaps') : null,
+    c.unquoted ? h('span', null, h('b', null, c.unquoted), ' not compared') : null, h('span', null, h('b', null, c.runs), ' logged runs behind them')));
+  if (c.proposed) root.append(h('div', { class: 'flag nb-prop' }, h('b', null, plural(c.proposed, 'number') + ' proposed'), ' by ' + (N.proposed_by || 'agent') + (N.replaces.length ? ' (' + N.replaces.length + ' replace a confirmed one)' : '') + '. Nothing counts until you confirm. ',
+    READONLY ? null : [h('button', { class: 'btn sm primary', onclick: () => act({ action: 'confirm' }, 'Confirmed.') }, 'Confirm'), ' ', h('button', { class: 'btn sm', onclick: () => act({ action: 'discard' }, 'Proposal discarded.') }, 'Discard')]));
+  const dropped = (N.report || []).filter(r => r.level === 'dropped'), notes = (N.report || []).filter(r => r.level !== 'dropped');
+  if (dropped.length || notes.length) root.append(h('details', { class: 'details', open: dropped.length && c.proposed ? '' : null }, h('summary', null, 'What the checker said (' + dropped.length + ' dropped, ' + notes.length + ' notes)'),
+    dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why)), notes.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))));
+  if (!c.total) root.append(emptyState('#', 'No key number yet', 'A hypothesis with a test lists the numbers of its test here by itself. For the others, your own agent reads the report and proposes the list; Lemmata checks every entry against the files and you confirm.',
+    READONLY ? [] : [h('button', { class: 'btn primary', title: NB_PROMPT(name), onclick: () => copyText(NB_PROMPT(name)) }, 'Copy prompt for Claude Code')]));
+  for (const g of N.groups) {
+    const open = RX.nbOpen ? RX.nbOpen === (g.key || '-') : true;
+    const sec = h('section', { class: 'rx-x-sec nb-g' + (g.stage ? rxSt(g.stage) : '') }, h('div', { class: 'rx-x-h' },
+      g.claim_id ? h('button', { class: 'rx-x-q', title: 'Open in Thesis', onclick: () => { if (g.key.startsWith('h:')) { RX.hfOpen = g.label; openTab('experiments'); } else suGotoClaim(g.claim_id); } }, g.label) : h('span', { class: 'rx-x-q static' }, g.label),
+      g.stage ? rxStageChip({ stage: g.stage, stage_by: 'rule', stage_why: g.stage_why || '' }) : null, h('span', { class: 'rx-x-qt serif' + (g.key ? '' : ' muted') }, rxMath(trunc(g.text, 150))), h('span', { class: 'grow' }),
+      h('span', { class: 'muted small' }, nbCounts(g.counts))));
+    if (g.numbers.length) sec.append(nbTable(g));
+    if (g.runs.length) sec.append(h('details', { class: 'details nb-runs' }, h('summary', null, plural(g.runs.length, 'logged run') + ' behind these files'),
+      g.runs.map(r => h('div', { class: 'hf-row small' }, h('span', { class: 'hf-tag' }, '[' + r.state + ']'), h('b', { class: 'mono' }, r.run_id), h('span', { class: 'mono muted' }, r.sha ? '@' + r.sha : 'no commit'),
+        r.sha_basis === 'results_commit' ? h('span', { class: 'tag warn', title: 'The commit the run started from was not recorded; this is the commit that first held its results.' }, 'first results commit') : null,
+        h('span', { class: 'grow mono small', title: r.command }, trunc(r.command || '', 80)), r.note ? h('span', { class: 'muted small' }, trunc(r.note, 60)) : null, h('span', { class: 'muted small' }, r.time ? dmon(r.time) : '')))));
+    root.append(sec);
+  }
+  if (N.gaps.length) root.append(h('section', { class: 'rx-x-sec nb-gaps' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'rx-x-q static' }, 'Open provenance gaps'), h('span', { class: 'rx-x-qt muted' }, 'What cannot be traced yet. Each goes away when a committed file or a logged run closes it.'), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, N.gaps.length)),
+    N.gaps.map(x => h('div', { class: 'hf-row small' }, h('span', { class: 'hf-tag' }, '[' + (NB_GAP[x.k] || x.k) + ']'), h('span', { class: 'grow' }, x.t)))));
+  if (c.total && !READONLY) root.append(h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm', title: NB_PROMPT(name), onclick: () => copyText(NB_PROMPT(name)) }, 'Copy prompt for Claude Code'), h('span', { class: 'muted small' }, ' to add or redo the list')));
+  if (RX.nbSel) setTimeout(() => { const el = document.getElementById('nb-' + RX.nbSel.replace(/[^\w]/g, '_')); if (el) el.scrollIntoView({ block: 'center' }); RX.nbSel = null; }, 0);
+  return root;
+}
+const RX_PAGES = { numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

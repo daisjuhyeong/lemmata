@@ -89,6 +89,11 @@ def clean(m):
            "git_sha": sha, "dirty": dirty, "diff_hash": dh, "configs": _files(m, "configs", 20), "metrics": nums,
            "artifacts": _files(m, "artifacts", 50), "started": _text(m, "started", 40), "ended": _text(m, "ended", 40),
            "exit_code": code, "note": _text(m, "note", 500)}
+    # S29: a run logged after the fact says which commit it gives: the one it started from, or the one that first held its results
+    if m.get("sha_basis") in ("start", "results_commit"):
+        out["sha_basis"] = m["sha_basis"]
+    if m.get("backfilled") is True:
+        out["backfilled"] = True
     for k in ("started", "ended"):
         if out[k] is not None and not TIME_RE.match(out[k]):
             raise BadRequest("run.%s must be an ISO time" % k)
@@ -129,8 +134,15 @@ def _when(r):
     return r.get("ended") or r.get("started") or r.get("received") or ""
 
 
-def view(store, nodes, events, roles, limit=200):
+def kind_of(r):
+    """experiment: it wrote a file, reported a number, or failed. command: none of these (a look at a file, a check).
+    The agent hook logs every Python command it sees; only the first kind is an experiment (S29)."""
+    return "experiment" if r.get("artifacts") or r.get("metrics") or r.get("exit_code") not in (None, 0) else "command"
+
+
+def view(store, nodes, events, roles, limit=200, behind=None):
     """-> {"schema", "runs": [...newest first], "counts"}.
+    behind: the hub's sync state when syncing fails. A commit Lemmata has not seen is then not known to be missing from GitHub.
     Each run also says whether its commit is one the hub has seen (``in_github``) and which of the files it wrote
     are result files the hub already tracks (``tracked``), so a local run can be tied to the paper items that use that file."""
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
@@ -147,11 +159,14 @@ def view(store, nodes, events, roles, limit=200):
         tracked = [dict(by_path[a["path"]], path=a["path"]) for a in r["artifacts"] if a["path"] in by_path and by_path[a["path"]]["kind"] in ("result", "data")]
         state = ("failed" if r.get("exit_code") not in (None, 0) else "uncommitted" if r.get("dirty") else "not in github" if sha and not known
                  else "in github" if known else "unknown commit")
-        rows.append(dict(r, time=_when(r), in_github=known, tracked=tracked, state=state))
+        rows.append(dict(r, time=_when(r), in_github=known, tracked=tracked, state=state, kind=kind_of(r),
+                         unsure=bool(behind and state == "not in github")))
     c = {"total": len(rows), "failed": sum(1 for x in rows if x["state"] == "failed"), "uncommitted": sum(1 for x in rows if x["state"] == "uncommitted"),
          "not_in_github": sum(1 for x in rows if x["state"] == "not in github"), "in_github": sum(1 for x in rows if x["state"] == "in github"),
-         "with_numbers": sum(1 for x in rows if x["metrics"])}
-    return {"schema": SCHEMA, "runs": rows[:limit], "counts": c}
+         "with_numbers": sum(1 for x in rows if x["metrics"]), "experiments": sum(1 for x in rows if x["kind"] == "experiment"),
+         "commands": sum(1 for x in rows if x["kind"] == "command"), "unsure": sum(1 for x in rows if x["unsure"])}
+    return {"schema": SCHEMA, "runs": rows[:limit], "counts": c,
+            "behind": {"since": behind.get("since"), "why": behind.get("message"), "head": behind.get("head")} if behind else None}
 
 
 def newer(time_iso, since_iso):

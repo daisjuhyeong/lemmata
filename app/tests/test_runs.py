@@ -106,7 +106,8 @@ class EngineRunsTest(unittest.TestCase):
         self.assertTrue(by["02"]["in_github"])
         self.assertEqual([t["path"] for t in by["02"]["tracked"]], [result])                # tied to a result file the hub tracks
         self.assertEqual(by["01"]["tracked"], [])
-        self.assertEqual(d["counts"], {"total": 3, "failed": 1, "uncommitted": 1, "not_in_github": 0, "in_github": 1, "with_numbers": 2})
+        self.assertEqual(d["counts"], {"total": 3, "failed": 1, "uncommitted": 1, "not_in_github": 0, "in_github": 1, "with_numbers": 2,
+                                       "experiments": 3, "commands": 0, "unsure": 0})
         self.assertTrue((self.root / ".lemmata" / "runs.json").is_file())
 
     def test_3_bad_post_changes_nothing(self):
@@ -135,7 +136,7 @@ class EngineRunsTest(unittest.TestCase):
         pid = ctx.list_projects()[0]["id"]
         r = call("runs", {"project": pid})
         self.assertFalse(r["isError"])
-        self.assertIn("3 runs logged", r["content"][0]["text"])
+        self.assertIn("3 experiment runs logged", r["content"][0]["text"])
         self.assertIn("<user-file-quote>", r["content"][0]["text"])
         self.assertEqual(len(call("runs", {"project": pid, "contains": "seed 2"})["structuredContent"]["runs"]), 1)
         self.assertTrue(call("runs", {"project": pid, "limit": 0})["isError"])

@@ -13,6 +13,7 @@ import posixpath
 import re
 
 from . import code as codemod
+from . import study as studymod
 from .claims import detex
 from .errors import BadRequest, NotFound
 from .experiments import DATA_COLS, LABEL_COLS, MAX_BYTES, SEED_COLS, norm, num, records
@@ -246,10 +247,14 @@ Read the brief (and, if you have the repository open, the paper and the code the
      "files": ["results/{dataset}/{method}_seed{seed}.csv"],
      "metric": "<column name of the main number>", "lower": false, "target": null,
      "method_column": "<optional: column that names the method>", "dataset_column": "<optional>",
-     "paper": ["tab:main"], "note": "<one line: what is varied, what is held fixed>",
+     "where": {"<optional column>": "<only rows with this value belong to the experiment, e.g. variant: original>"},
+     "paper": ["tab:main"], "note": "<one line: what is varied, what is held fixed>", "planned": false,
      "criteria": {"q1": {"compare": "best_other|base|<a method name in the files>", "over": "main|all|majority|average", "strict": false}}}
   ],
-  "ignore": ["logs/**", "**/debug_*.csv"]
+  "ignore": ["logs/**", "**/debug_*.csv"],
+  "study": "method | benchmark (see below; leave out for a paper that proposes a method)",
+  "roles": {"method": ["<column that names the compared methods>"], "dataset": ["<column(s) that name a dataset>"],
+            "group": ["<column that names a suite of datasets>"], "condition": ["<column that names a condition or a synthetic case>"]}
 }
 
 Rules Lemmata enforces (anything that fails is dropped and reported back to you):
@@ -267,6 +272,16 @@ Rules Lemmata enforces (anything that fails is dropped and reported back to you)
 - Put hyperparameter searches in type "tuning" and point them at the question they served. Put scratch output in "ignore".
 - An experiment is a group of runs that answers one thing, not one file. Prefer few experiments.
 - Do not invent questions the paper does not make. If a result serves no question, leave "tests" empty.
+- A benchmark study (it compares existing methods, datasets or measures; it has no method of its own): set "study" to
+  "benchmark" and leave "method", "base" and "goal" out. Nothing is then called "ours". Say under "roles" which column of
+  the result files names the compared methods, which the datasets, which a condition (a variant, a synthetic case). A row
+  that is not a method (a test, a case, a source) is never listed as a method; for such a table give the experiment a
+  "row_column" (the column that names each row) instead of a "method_column". When one table holds several conditions
+  (original and shuffled rows, say), make one experiment per condition with "where". A question may point at a hypothesis the
+  project already has: put its label ("H1") in "claim". Its test, not a method's rank, decides it; "criteria" are not used.
+- An experiment whose result files are not there yet (it is planned, or Lemmata's copy of the repository is behind):
+  set "planned": true. It is kept as "waiting" and Lemmata looks for its files again at every scan. Without it, an
+  experiment whose patterns match nothing is dropped.
 - "criteria" is optional: per tested question, what counts as support. Leave it out to use the default (ours at least as good as the best other method, or the base when the work extends one, on the main column). The researcher confirms it.
 """
 
@@ -362,9 +377,15 @@ def verify(doc, G, trees, infos, claims_doc):
             note("dropped", where, "only the first %d %s are kept; %d more were ignored" % (n, what, len(items) - n))
         return items[:n]
 
-    out = {"schema": SCHEMA, "method": None, "base": None, "goal": None, "questions": [], "experiments": [], "ignore": []}
-    for k in sorted(set(doc) - {"schema", "method", "base", "goal", "questions", "experiments", "ignore", "proposed_by"}):
-        note("dropped", "map", "unknown field %r (the map has: method, base, goal, questions, experiments, ignore)" % str(k)[:30])
+    out = {"schema": SCHEMA, "study": None, "method": None, "base": None, "goal": None, "roles": {}, "questions": [], "experiments": [], "ignore": []}
+    for k in sorted(set(doc) - {"schema", "study", "method", "base", "goal", "roles", "questions", "experiments", "ignore", "proposed_by"}):
+        note("dropped", "map", "unknown field %r (the map has: study, method, base, goal, roles, questions, experiments, ignore)" % str(k)[:30])
+    # the kind of study (S29): a benchmark study has no method of its own
+    if doc.get("study") in studymod.KINDS:
+        out["study"] = doc["study"]
+    elif doc.get("study") is not None:
+        note("dropped", "study", "study must be one of %s" % ", ".join(studymod.KINDS))
+    bench = out["study"] == "benchmark"
     for k in sorted(set(doc.get("method") or {}) - {"name", "aliases", "evidence", "note"} if isinstance(doc.get("method"), dict) else []):
         note("dropped", "method", "unknown field %r inside method%s" % (str(k)[:30], "; base and goal go at the top level of the map" if k in ("base", "goal") else ""))
     # method (ours) and, for an extension, the method of the paper being extended (base)
@@ -385,9 +406,16 @@ def verify(doc, G, trees, infos, claims_doc):
         note("dropped", where, "the name %r appears neither in the paper nor in the result files" % name)
         return None
 
-    out["method"] = named(doc.get("method"), "method")
-    if out["method"] is None and not (isinstance(doc.get("method"), dict) and doc["method"].get("name")):
-        note("warning", "method", "no method name given: “ours” will be guessed for every experiment")
+    out["roles"] = studymod.clean_roles(doc.get("roles"), labels, note)
+    if bench:
+        for k in ("method", "base", "goal"):
+            if doc.get(k):
+                note("dropped", k, "a benchmark study has no method of its own, so %s is not used; name the column of the compared methods under roles.method" % k)
+        doc = dict(doc, method=None, base=None, goal=None)
+    else:
+        out["method"] = named(doc.get("method"), "method")
+    if out["method"] is None and not bench and not (isinstance(doc.get("method"), dict) and doc["method"].get("name")):
+        note("warning", "method", "no method name given: “ours” will be guessed for every experiment. If the work has no method of its own, set \"study\": \"benchmark\"")
     if doc.get("base") is not None:
         out["base"] = named(doc.get("base"), "base")
         if out["base"] and out["method"] and norm(out["base"]["name"]) == norm(out["method"]["name"]):
@@ -401,6 +429,11 @@ def verify(doc, G, trees, infos, claims_doc):
             note("warning", "goal", "a goal is set but no base method: the goal is kept, nothing is compared with a base")
     # questions and hypotheses
     claim_ids = {c["id"] for c in claims_doc.get("claims", [])}
+    by_name = {}      # a claim can also be named by its label ("H1") when exactly one live claim carries it
+    for c in claims_doc.get("claims", []):
+        if c.get("state") != "rejected":
+            for nm in {norm(c.get("label") or ""), norm(c.get("hypothesis") or "")} - {""}:
+                by_name.setdefault(nm, set()).add(c["id"])
     qids = set()
     for i, q in enumerate(capped(doc.get("questions"), 20, "questions", "questions")):
         where = "question %s" % (q.get("id") if isinstance(q, dict) else i + 1)
@@ -414,6 +447,8 @@ def verify(doc, G, trees, infos, claims_doc):
                 raise BadRequest("no evidence in the paper or notes survived checking")
             kind = "question" if q.get("kind") == "question" else "hypothesis"
             claim = q.get("claim") if q.get("claim") in claim_ids else None
+            if q.get("claim") and not claim and len(by_name.get(norm(str(q["claim"])), ())) == 1:
+                claim = next(iter(by_name[norm(str(q["claim"]))]))
             if q.get("claim") and not claim:
                 note("warning", where, "the claim id %r does not exist; treated as a new statement" % q.get("claim"))
             n_same = sum(1 for x in out["questions"] if x["kind"] == kind) + 1
@@ -439,7 +474,7 @@ def verify(doc, G, trees, infos, claims_doc):
             xid = x.get("id") if isinstance(x.get("id"), str) and ID_RE.match(x["id"]) else "x%d" % (i + 1)
             if xid in xids:
                 raise BadRequest("the id %r is used twice" % xid)
-            pats = []
+            pats, absent = [], []
             for p in capped(x.get("files"), 24, where, "file patterns"):
                 try:
                     compile_pattern(p)
@@ -449,7 +484,7 @@ def verify(doc, G, trees, infos, claims_doc):
                 if match_files([p], files):
                     pats.append(p.strip().lstrip("./"))
                 else:
-                    note("dropped", where, "the pattern %r matches no result file" % p[:80])
+                    absent.append(p.strip().lstrip("./"))
             paper = []
             for ref in capped(x.get("paper"), 8, where, "paper items"):
                 nid = by_label.get(str(ref).lower()) or by_label.get("tex:" + str(ref).lower())
@@ -457,6 +492,15 @@ def verify(doc, G, trees, infos, claims_doc):
                     paper.append(nid)
                 elif not nid:
                     note("dropped", where, "the paper has no table or figure %r" % str(ref)[:40])
+            waiting = bool(absent) and not pats and not paper and x.get("planned") is True
+            if waiting:      # S29: the map says the results are not there yet. Kept, and looked for again at every scan
+                pats = absent
+                note("waiting", where, "no result file matches %s yet; the experiment is kept and its files are looked for again at every scan" % ", ".join(repr(p[:60]) for p in absent[:3]))
+            else:
+                for p in absent:
+                    note("dropped", where, "the pattern %r matches no result file" % p[:80])
+                if absent and not pats and not paper:
+                    raise BadRequest("it points at no existing result file and no table or figure (for an experiment whose results are not there yet, set \"planned\": true)")
             if not pats and not paper:
                 raise BadRequest("it points at no existing result file and no table or figure")
             hit = match_files(pats, files)
@@ -467,10 +511,17 @@ def verify(doc, G, trees, infos, claims_doc):
                 except Exception:
                     recs = []
                 cols |= {str(k) for r in recs[:3] for k in r}
-            col = lambda k: x.get(k) if isinstance(x.get(k), str) and x.get(k) in cols else None
-            for k in ("metric", "method_column", "dataset_column"):
+            col = lambda k: x.get(k)[:120] if isinstance(x.get(k), str) and x.get(k).strip() and (x.get(k) in cols or waiting) else None
+            for k in ("metric", "method_column", "dataset_column", "row_column"):
                 if x.get(k) and not col(k) and pats:
                     note("warning", where, "%s %r is not a column of its files (columns: %s)" % (k.replace("_", " "), str(x.get(k))[:40], ", ".join(sorted(cols)[:8]) or "none"))
+            where_ = {}      # rows of the files that belong to this experiment: {column: value or [values]}
+            for k, v in list((x.get("where") if isinstance(x.get("where"), dict) else {}).items())[:4]:
+                vals = [str(a).strip()[:80] for a in (v if isinstance(v, list) else [v])[:12] if isinstance(a, (str, int, float)) and not isinstance(a, bool) and str(a).strip()]
+                if isinstance(k, str) and vals and (k in cols or waiting):
+                    where_[k[:120]] = vals
+                elif pats:
+                    note("warning", where, "where: %r is not a column of its files, or has no value; the filter is not used" % str(k)[:40])
             tests = [t for t in (x.get("tests") if isinstance(x.get("tests"), list) else []) if t in qids]
             for t in (x.get("tests") if isinstance(x.get("tests"), list) else []):
                 if t not in qids:
@@ -479,6 +530,9 @@ def verify(doc, G, trees, infos, claims_doc):
                 claimed.setdefault(nid, []).append(xid)
             crits = {}
             for q, cr in (x.get("criteria") if isinstance(x.get("criteria"), dict) else {}).items():
+                if bench:
+                    note("warning", where, "criterion dropped: a benchmark study has no “ours” to compare; the claim's own test decides")
+                    continue
                 try:
                     if q not in tests:
                         raise BadRequest("it is for question %r, which this experiment does not test" % str(q)[:30])
@@ -489,8 +543,8 @@ def verify(doc, G, trees, infos, claims_doc):
                                        "tests": list(dict.fromkeys(tests)), "files": pats, "metric": col("metric"),
                                        "lower": x.get("lower") if isinstance(x.get("lower"), bool) else None, "method_column": col("method_column"),
                                        "target": x.get("target") if isinstance(x.get("target"), (int, float)) and not isinstance(x.get("target"), bool) else None,
-                                       "dataset_column": col("dataset_column"),
-                                       "ours": _text(x["ours"], 60, "ours") if isinstance(x.get("ours"), str) and x["ours"].strip() else None,
+                                       "dataset_column": col("dataset_column"), "row_column": col("row_column"), "where": where_, "waiting": waiting, "planned": waiting,
+                                       "ours": _text(x["ours"], 60, "ours") if isinstance(x.get("ours"), str) and x["ours"].strip() and not bench else None,
                                        "paper": paper, "note": " ".join(str(x.get("note") or "").split())[:300], "matched": len(hit), "criteria": crits})
             xids.add(xid)
         except (BadRequest, AttributeError) as e:
@@ -581,6 +635,14 @@ def edit(m, patch):
     if not isinstance(patch, dict):
         raise BadRequest("the change must be an object")
     m = {k: (dict(v) if isinstance(v, dict) else [dict(x) if isinstance(x, dict) else x for x in v] if isinstance(v, list) else v) for k, v in m.items()}
+    if "study" in patch:
+        if patch["study"] not in studymod.KINDS + (None,):
+            raise BadRequest("study must be one of %s" % ", ".join(studymod.KINDS))
+        m["study"] = patch["study"]
+        if m["study"] == "benchmark":
+            m["method"], m["base"], m["goal"] = None, None, None
+            for q in m["questions"]:
+                q["scope"] = None
     if "method" in patch:
         name = patch["method"]
         if not isinstance(name, str) or len(name) > 60:

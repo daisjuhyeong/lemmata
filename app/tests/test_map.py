@@ -737,7 +737,7 @@ class MapTest(unittest.TestCase):
         self.assertIn("propose_map", json.loads(out)["result"]["structuredContent"]["how_to_write_a_map"])
         rep = self.e.propose_map(dict(agent, method={"name": "MCD", "base": {"name": "DDM"}}, goal={"text": "x"}, extra=1))["report"]
         whys = [r["why"] for r in rep]
-        self.assertIn("unknown field 'extra' (the map has: method, base, goal, questions, experiments, ignore)", whys)
+        self.assertIn("unknown field 'extra' (the map has: study, method, base, goal, roles, questions, experiments, ignore)", whys)
         self.assertIn("unknown field 'base' inside method; base and goal go at the top level of the map", whys)
         self.assertIn("the goal must be one sentence of plain text", whys)
 

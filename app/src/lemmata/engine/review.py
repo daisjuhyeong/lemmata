@@ -72,6 +72,69 @@ def _behind_since(x):
     return since
 
 
+# S29, a benchmark study: there is no "ours" to put ahead of a baseline or to ablate. What backs a finding is that its
+# runs are complete, its test was fixed before the data, and the numbers the report quotes are in a committed file.
+BENCH_ITEMS = (("seeds", "More than one run"), ("coverage", "Every method on every dataset"), ("test", "A test fixed before the data"),
+               ("numbers", "Key numbers traced to a file"), ("confounds", "Confounds checked"))
+
+
+def _confounds(sec, conf, last, item, out):
+    c = conf.get(sec["id"])
+    if not c:
+        item("confounds", "todo", "Not checked yet. Ask your agent.")
+    else:
+        stale = bool(last and c.get("at") and _when(last) and _when(c["at"]) and _when(last) > _when(c["at"]))
+        open_ = [r for r in c.get("confounds", []) if not r.get("resolved")]
+        st = "stale" if stale else "done" if c["verdict"] == "clear" or not open_ else "todo"
+        item("confounds", st, "Results changed since the check" if stale else "Checked by %s, none found" % c.get("by", "agent") if c["verdict"] == "clear"
+             else "All resolved" if not open_ else "%d open" % len(open_))
+        out[-1]["report"] = c
+
+
+def bench_checklist(sec, conf, last, numbers):
+    """The checklist of one claim in a benchmark study. numbers: {claim id: the claim's key-number counts}."""
+    xs = [x for x in sec["experiments"] if not x.get("tuning")]
+    out = []
+
+    def item(k, state, why):
+        out.append({"k": k, "label": dict(BENCH_ITEMS)[k], "state": state, "why": why})
+    has = [x for x in xs if x.get("summary") and x["summary"].get("best") and (x.get("grid") or {}).get("row_kind") == "method"]
+    single = [x["name"] for x in has if (x["summary"].get("n") or 1) <= 1]
+    item("seeds", "na" if not has else "todo" if single else "done", "No experiment here runs methods, so there is no seed to repeat" if not has else
+         ("One run only: " + ", ".join(single[:3])) if single else "Every result has more than one run")
+    grids = [x for x in xs if (x.get("grid") or {}).get("row_kind") == "method" and (x["grid"].get("datasets") or [])]
+    holes = []
+    for x in grids:
+        g = x["grid"]
+        n = sum(1 for r in g["rows"] for c in g["datasets"] if c in g["cols"] and r["values"].get(c) is None)
+        if n:
+            holes.append("%s (%d missing)" % (x["name"], n))
+    item("coverage", "na" if not grids else "todo" if holes else "done", "No experiment here compares methods across datasets" if not grids else
+         ("Not complete: " + ", ".join(holes[:3])) if holes else "Every method has a result on every dataset")
+    rule, tier = sec.get("stage_rule"), sec.get("tier")
+    if not sec.get("hypothesis"):
+        item("test", "todo", "This claim has no test of its own yet. A benchmark claim is decided by a row of the project's test table.")
+    elif rule in ("R1", "R2"):
+        item("test", "done", "Decided by its frozen test: %s" % (sec.get("stage_why") or ""))
+    elif rule == "R0":
+        item("test", "todo", "The stage was set by hand, not by a test")
+    elif tier == "exploratory" or rule == "R5":
+        item("test", "todo", "Exploratory: decided after seeing data. It needs a new test fixed in advance to become a finding")
+    else:
+        item("test", "todo", (sec.get("stage_why") or "No test rule yet").capitalize()[:200])
+    c = (numbers or {}).get(sec.get("claim_id") or sec["id"])
+    if not c or not sum(c.values()):
+        item("numbers", "todo", "No key number is listed for this claim")
+    else:
+        bad = c.get("mismatch", 0) + c.get("missing", 0) + c.get("gap", 0)
+        good = c.get("ok", 0)
+        item("numbers", "done" if good and not bad else "todo", ("%d agree with the report" % good) if good and not bad else
+             ("%d of %d need a look (%s)" % (bad, sum(c.values()), ", ".join("%d %s" % (c[k], k) for k in ("mismatch", "missing", "gap") if c.get(k)))) if bad
+             else "%d read from the test table, none compared with the report yet" % c.get("unquoted", 0))
+    _confounds(sec, conf, last, item, out)
+    return out
+
+
 def checklist(sec, extends, conf, last):
     """-> [{"k", "label", "state": done|todo|na|stale, "why"}] for one question."""
     xs = [x for x in sec["experiments"] if not x.get("tuning")]
@@ -98,26 +161,19 @@ def checklist(sec, extends, conf, last):
         bad = [x["name"] for x in tal if x["tally"]["differs"] or x["tally"]["untraced"]]
         ok = [x for x in tal if (x["tally"]["match"] + x["tally"]["rounding"]) and not (x["tally"]["differs"] or x["tally"]["untraced"])]
         item("paper", "done" if ok and not bad else "todo", "Every number traced" if ok and not bad else ("Numbers differ or are untraced: " + ", ".join(bad[:3])) if bad else "No paper table is linked")
-    c = conf.get(sec["id"])
-    if not c:
-        item("confounds", "todo", "Not checked yet. Ask your agent.")
-    else:
-        stale = bool(last and c.get("at") and _when(last) and _when(c["at"]) and _when(last) > _when(c["at"]))
-        open_ = [r for r in c.get("confounds", []) if not r.get("resolved")]
-        st = "stale" if stale else "done" if c["verdict"] == "clear" or not open_ else "todo"
-        item("confounds", st, "Results changed since the check" if stale else "Checked by %s, none found" % c.get("by", "agent") if c["verdict"] == "clear"
-             else "All resolved" if not open_ else "%d open" % len(open_))
-        out[-1]["report"] = c
+    _confounds(sec, conf, last, item, out)
     return out
 
 
-def build(E, store, days=30, now=None):
-    """E: the experiments document. -> the Review document."""
+def build(E, store, days=30, now=None, numbers=None):
+    """E: the experiments document. -> the Review document.
+    numbers: {claim id: key-number counts}, used by a benchmark study's checklist."""
     if days not in WINDOWS:
         raise BadRequest("days must be one of %s" % ", ".join(map(str, WINDOWS)))
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     extends = (E.get("extends") or {}).get("base")
+    bench = E.get("study") == "benchmark"
     name = lambda s: s.get("short") or s["label"]      # the claim's one name (C1, C2 ...) when the claims have been numbered
     rows, seen = [], {}
     for s in E["sections"]:
@@ -132,7 +188,7 @@ def build(E, store, days=30, now=None):
             if x["id"] not in seen and k != "none":
                 seen[x["id"]] = {"id": x["id"], "name": x["name"], "state": k, "gap": g, "question": name(s), "question_id": s["id"],
                                  "since": _behind_since(x) if k == "behind" and not extends else None}
-        chk = checklist(s, extends, store["confounds"], last)
+        chk = bench_checklist(s, store["confounds"], last, numbers) if bench else checklist(s, extends, store["confounds"], last)
         counted = [c for c in chk if c["state"] != "na"]
         moved = bool(times and max(times) >= since)
         trend = "none" if not s["experiments"] else "moved" if moved else "stalled"
@@ -146,7 +202,7 @@ def build(E, store, days=30, now=None):
     base_key = re.sub(r"[^a-z0-9]+", "", extends["name"].lower()) if extends else None
     base_keys = {re.sub(r"[^a-z0-9]+", "", n.lower()) for n in ([extends["name"]] + extends.get("aliases", []))} if extends else set()
     bl, done = {}, set()
-    for s in E["sections"]:
+    for s in ([] if bench else E["sections"]):
         for x in s["experiments"]:
             sm = x.get("summary") or {}
             if x["id"] in done or x.get("tuning") or x.get("type") in ("ablation", "sensitivity") or not sm.get("vs"):      # variants of ours are not baselines
@@ -193,7 +249,17 @@ def build(E, store, days=30, now=None):
          "line": "No question yet" if not rows else "%d of %d claims fully backed" % (len(complete), len(rows)),
          "rows": [r["id"] for r in rows if not r["complete"]]},
     ]
-    return {"schema": SCHEMA, "days": days, "windows": list(WINDOWS), "checks": checks, "questions": rows, "hoped": store["hoped"],
+    if bench:      # the second question of a method paper ("are we ahead?") has no meaning here: ask whether the tests have spoken
+        dec = [r for r in rows if r["stage"] in ("finding", "refuted")]
+        nf, nr = sum(1 for r in dec if r["stage"] == "finding"), sum(1 for r in dec if r["stage"] == "refuted")
+        checks[1] = {"k": "decided", "q": "Have the tests decided the claims?",
+                     "help": "A claim is decided when its own test, fixed before the data, is met (a finding) or not met (not supported). A claim that is not supported is a result too.",
+                     "verdict": "none" if not rows else "yes" if len(dec) == len(rows) else "partly" if dec else "no",
+                     "line": "No claim yet" if not rows else "%d of %d claims decided: %d finding%s, %d not supported" % (len(dec), len(rows), nf, "" if nf == 1 else "s", nr),
+                     "rows": [r["id"] for r in rows if r["stage"] not in ("finding", "refuted")], "behind": []}
+        checks[2]["help"] = "A claim is fully backed when every item of its checklist is done: more than one run, every method on every dataset, a test fixed before the data, key numbers traced to a file, confounds checked."
+        ours = None
+    return {"schema": SCHEMA, "days": days, "windows": list(WINDOWS), "checks": checks, "questions": rows, "hoped": store["hoped"], "study": "benchmark" if bench else "method",
             "supported": [{"label": r["label"], "text": r["text"]} for r in complete],
             "not_yet": [{"label": r["label"], "text": r["text"], "missing": [c["label"] for c in r["checklist"] if c["state"] in ("todo", "stale")]} for r in rows if not r["complete"]],
             "baselines": baselines, "ours": ours, "extends": E.get("extends"), "mapped": bool(E.get("unmapped") is not None)}

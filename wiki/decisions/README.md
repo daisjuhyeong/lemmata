@@ -13,3 +13,4 @@ Architecture decision records, ADR-NNN-title.md. Status proposed -> accepted onl
 - [ADR-004: Hub on the Mac mini over Tailscale](ADR-004-hub-on-mac-mini.md) — proposed, 2026-11-05.
 - [ADR-005: No Overleaf; paper on GitHub, compiled locally](ADR-005-no-overleaf-paper-on-github.md) — proposed, 2026-11-06; supersedes the Overleaf parts of S05, amends ADR-004 Context.
 - [ADR-008: Top-down evidence spine](ADR-008-top-down-evidence-spine.md) — proposed, 2026-11-16; Thesis → Claim → link (criterion, status) → Experiment; rule-made statuses; To-do, Trail, Home, shell.
+- [ADR-009: Two kinds of study, and key numbers](ADR-009-study-kind-and-key-numbers.md) — proposed, 2026-11-19; method paper or benchmark study per project (rules Y1-Y4); a benchmark study has no "ours" (link rule L5, claim rule C10); key numbers traced to files; the hub says when its copy is behind.

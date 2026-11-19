@@ -153,6 +153,7 @@ def mentions(items, P, bib, nodes, trees):
 def build(E, G=None, trees=None):
     """E: the Experiments document (Engine.experiments()). -> the Setup document."""
     trees = trees or {}
+    bench = E.get("study") == "benchmark"      # S29: no "ours"; a row is a method only when its column names methods
     method = (E.get("map") or {}).get("method") or None
     base = (E.get("extends") or {}).get("base") or None
     ours_names = {norm(n) for n in ([method["name"]] + list(method.get("aliases") or [])) if norm(n)} if method else set()
@@ -235,8 +236,16 @@ def build(E, G=None, trees=None):
         if tuning:      # a search: no "ours", only the best setting tried
             orow = None
         tb = (x.get("tuning") or {}).get("best") if tuning else None
+        field = None      # benchmark study: the best and the worst of everything compared, on the main column
+        if bench and not tuning:
+            cand = [(r["label"], val(r, head_col)) for r in rows if val(r, head_col) is not None]
+            if cand:
+                pick = (lambda t: abs(t[1] - target)) if target is not None else (lambda t: t[1])
+                low = lower or target is not None
+                b_, w_ = (min if low else max)(cand, key=pick), (max if low else min)(cand, key=pick)
+                field = {"best": {"label": b_[0], "value": b_[1]}, "worst": {"label": w_[0], "value": w_[1]}, "of": len(cand)}
         use(m, x, role="main", lower=lower, target=target, column=head_col, datasets=[d for d, _ in ds_cols], tuning=tuning,
-            ours=val(orow, head_col) if orow else None, ours_label=ours if orow else None, best_other=best_other, best_setting=tb,
+            ours=val(orow, head_col) if orow else None, ours_label=ours if orow else None, best_other=best_other, best_setting=tb, field=field,
             rank=sm.get("rank") if orow else None, methods=len(rows), runs=len(rows) if tuning else None)
         rec["items"].append(m["id"])
         rec["main_metric"] = m["id"]
@@ -263,11 +272,16 @@ def build(E, G=None, trees=None):
                     pick = (lambda t: abs(t[1] - target)) if target is not None else (lambda t: t[1])
                     bo = (min if (lower or target is not None) else max)(cand, key=pick)
             missing = [r["label"] for r in rows if val(r, col) is None] if not tuning else []
+            wo = None
+            if bench and not tuning and vals:
+                pick = (lambda t: abs(t[1] - target)) if target is not None else (lambda t: t[1])
+                wo = (max if (lower or target is not None) else min)(vals, key=pick)
             use(d, x, metric=main, column=col, lower=lower, target=target, tuning=tuning, runs=len(vals) if tuning else None,
                 ours=ov, ours_label=ours if orow else None, best_other={"label": bo[0], "value": bo[1]} if bo else None,
+                worst={"label": wo[0], "value": wo[1]} if wo else None,
                 best_setting={"label": bs[0], "value": bs[1]} if bs else None,
                 rank=_rank([v for _, v in vals], ov, lower, target) if ov is not None else None, methods=len(vals), missing=missing[:12],
-                seeds=(orow or {}).get("n", {}).get(col) if orow else None)
+                seeds=(orow or {}).get("n", {}).get(col) if orow else (min([r["n"].get(col) or 1 for r in rows if val(r, col) is not None] or [0]) or None) if bench else None)
             rec["items"].append(d["id"])
 
         # methods (not for a search: its rows are settings)
@@ -279,12 +293,22 @@ def build(E, G=None, trees=None):
             continue
         cols = [c for _, c in ds_cols] or [head_col]
         ablation = (x.get("type") or "") == "ablation"
+        row_kind = g.get("row_kind") or "method"
+        as_methods = not bench or row_kind == "method"      # benchmark: tests, cases, sources and groups are rows, not methods
         for r in rows:
             if r["label"] in ("", "result") and len(rows) == 1:      # a file with no method column: nothing to name
                 continue
+            if not as_methods:
+                if row_kind == "dataset":      # a table with one row per dataset names the datasets
+                    d = item("dataset", r["label"])
+                    if x["id"] not in d["experiments"]:
+                        use(d, x, metric=main, column=None, lower=lower, target=target, tuning=False, runs=None, ours=None, ours_label=None, best_other=None, worst=None,
+                            best_setting=None, rank=None, methods=0, missing=[], seeds=None, as_row=True)
+                        rec["items"].append(d["id"])
+                continue
             nm = norm(r["label"])
-            is_ours_here = r["label"] == ours
-            role = "ours" if nm in ours_names or (not method and is_ours_here) else "base" if nm in base_names else "variant" if ablation else "baseline"
+            is_ours_here = r["label"] == ours and not bench
+            role = "compared" if bench else "ours" if nm in ours_names or (not method and is_ours_here) else "base" if nm in base_names else "variant" if ablation else "baseline"
             mi = item("method", r["label"], role=role)
             if role in ("ours", "base"):
                 mi["role"] = role
@@ -304,7 +328,9 @@ def build(E, G=None, trees=None):
             gap = None      # how far ours is ahead of this method (negative: behind)
             if not (is_ours_here or hv is None or hov is None):
                 gap = round(abs(hv - target) - abs(hov - target) if target is not None else (hv - hov) if lower else (hov - hv), 10)
+            best_in = [c for c in cols if val(r, c) is not None and _rank([val(o, c) for o in rows if val(o, c) is not None], val(r, c), lower, target) == 1] if bench else []
             use(mi, x, ours_here=is_ours_here, ours_label=ours if orow else None, metric=main, column=head_col, lower=lower, target=target,
+                best_in=len(best_in), of_cols=sum(1 for c in cols if val(r, c) is not None) if bench else 0,
                 value=hv, ours=None if is_ours_here else hov, gap=gap, wins=wins, compared=cmp, cells=cells, methods=len(rows),
                 missing=[cl["dataset"] for cl in cells if cl["value"] is None and cl["dataset"]],
                 rank=_rank([val(o, head_col) for o in rows if val(o, head_col) is not None], hv, lower, target) if hv is not None else None,
@@ -312,20 +338,23 @@ def build(E, G=None, trees=None):
             rec["items"].append(mi["id"])
         rec["items"] = list(dict.fromkeys(rec["items"]))
         # the protocol sheet (S25): what was run, on what, measured how, and whether every cell is there
-        roles = {r["label"]: next((u for u in [items[_key("method", r["label"])].get("role")] if u), "baseline") for r in rows if _key("method", r["label"]) in items}
+        roles = {r["label"]: next((u for u in [items[_key("method", r["label"])].get("role")] if u), "baseline") for r in rows if _key("method", r["label"]) in items} if as_methods else {}
+        dflt = "baseline" if as_methods else "row"
         ns = [r["n"].get(c) or 0 for r in rows for c in cols if val(r, c) is not None]
         holes = [(r["label"], _split(c, g)[0]) for r in rows for c in cols if val(r, c) is None]
         tl = x.get("tally")
-        rec["protocol"] = {"metric": main, "lower": lower, "target": target, "datasets": [d for d, _ in ds_cols], "ours": ours,
-                           "methods": [{"name": r["label"], "role": roles.get(r["label"], "baseline")} for r in rows],
+        rec["protocol"] = {"metric": main, "lower": lower, "target": target, "datasets": [d for d, _ in ds_cols], "ours": None if bench else ours,
+                           "study": "benchmark" if bench else "method",
+                           "rows": None if as_methods else {"kind": row_kind, "column": g.get("row_column"), "n": len(rows), "names": [r["label"] for r in rows[:12]]},
+                           "methods": [{"name": r["label"], "role": roles.get(r["label"], dflt)} for r in rows] if as_methods else [],
                            "seeds": [min(ns), max(ns)] if ns else None, "measures": g.get("measures") or [], "paper": [p_["name"] for p_ in x.get("paper") or []],
                            "last": x.get("last"), "note": x.get("note") or x.get("caption")}
         rec["grid"] = {"cols": cols, "datasets": [_split(c, g)[0] if _split(c, g)[0] not in (None, AVG) else c for c in cols],
-                       "rows": [{"label": r["label"], "role": roles.get(r["label"], "baseline"), "values": {c: val(r, c) for c in cols}, "n": {c: r["n"].get(c) for c in cols},
+                       "rows": [{"label": r["label"], "role": roles.get(r["label"], dflt), "values": {c: val(r, c) for c in cols}, "n": {c: r["n"].get(c) for c in cols},
                                  "best": [c for c in cols if val(r, c) is not None and _rank([val(o, c) for o in rows if val(o, c) is not None], val(r, c), lower, target) == 1]} for r in rows]}
         yes, no, ask = "yes", "no", "you"
         rec["checklist"] = [
-            {"k": "coverage", "q": "Every method has a result on every dataset", "a": no if holes else yes,
+            {"k": "coverage", "q": "Every method has a result on every dataset" if as_methods else "Every row has a value in every column", "a": no if holes else yes,
              "why": ("Missing: " + ", ".join("%s on %s" % h for h in holes[:4]) + (" and %d more" % (len(holes) - 4) if len(holes) > 4 else "")) if holes else "%d of %d cells filled." % (len(rows) * len(cols), len(rows) * len(cols))},
             {"k": "seeds", "q": "More than one run per result, so a spread can be reported", "a": yes if ns and min(ns) >= 2 else no,
              "why": ("%d run%s per cell." % (min(ns), "" if min(ns) == 1 else "s") if ns and min(ns) == max(ns) else "%d to %d runs per cell." % (min(ns), max(ns))) if ns else "No results."},
@@ -366,6 +395,8 @@ def build(E, G=None, trees=None):
             it["ours_best"] = sum(1 for u in cmpd if u["rank"] == 1)
             it["compared"] = len(cmpd)
             it["metrics"] = list(dict.fromkeys(u["metric"] for u in U))
+            if bench:
+                it["field"] = sum(1 for u in U if u.get("best_other"))
             miss = sorted({m for u in U for m in u.get("missing") or []})
             if miss:
                 it["checks"].append({"k": "missing", "t": "Not run for " + ", ".join(miss[:4]) + (" and %d more" % (len(miss) - 4) if len(miss) > 4 else "")})
@@ -373,6 +404,8 @@ def build(E, G=None, trees=None):
             others = [u for u in U if not u["ours_here"]]
             it["wins"] = sum(u["wins"] for u in others)
             it["compared"] = sum(u["compared"] for u in others)
+            if bench:      # how often it is the best of the field, over the columns it has a value in
+                it["best_in"], it["ranked"] = sum(u.get("best_in") or 0 for u in U), sum(u.get("of_cols") or 0 for u in U)
             miss = sorted({d for u in U for d in u["missing"]})
             if miss:
                 it["checks"].append({"k": "missing", "t": "No result on " + ", ".join(miss[:4]) + (" and %d more" % (len(miss) - 4) if len(miss) > 4 else "")})
@@ -385,14 +418,15 @@ def build(E, G=None, trees=None):
         elif has_paper and it["paper"]["appendix_only"]:
             it["checks"].append({"k": "appendix", "t": "Named only in the appendix"})
 
-    rank_role = {"ours": 0, "base": 1, "baseline": 2, "variant": 3}
+    rank_role = {"ours": 0, "base": 1, "baseline": 2, "compared": 2, "variant": 3}
     ordered = sorted((items[k] for k in order), key=lambda it: (KINDS.index(it["kind"]), rank_role.get(it.get("role"), 0), -len(it["experiments"]), it["name"].lower()))
     for cid, c in claims.items():
         c["items"] = list(dict.fromkeys(i for xid in c["experiments"] for rec in exps if rec["id"] == xid for i in rec["items"]))
     counts = {k: sum(1 for it in ordered if it["kind"] == k) for k in KINDS}
     counts["baselines"] = sum(1 for it in ordered if it.get("role") == "baseline")
+    counts["compared"] = sum(1 for it in ordered if it.get("role") == "compared")
     counts["checks"] = sum(1 for it in ordered if it["checks"])
     counts["experiments"] = len(exps)
     counts["without_files"] = sum(1 for r in exps if not r["items"])
-    return {"schema": SCHEMA, "method": method, "base": base, "items": ordered, "experiments": exps,
+    return {"schema": SCHEMA, "study": "benchmark" if bench else "method", "method": None if bench else method, "base": None if bench else base, "items": ordered, "experiments": exps,
             "claims": [c for c in claims.values() if c["experiments"]], "counts": counts, "mapped": E.get("unmapped") is not None, "has_paper": has_paper}

@@ -35,6 +35,8 @@ INSTRUCTIONS = ("Lemmata checks that a paper's text, appendix, references, code 
                 "then alarms (what to re-check after changes) and findings (integrity problems with file:line evidence). "
                 "Paths are repo-relative; the paper repo is 'paper' and the code repo is 'code'. To help Lemmata understand a project (what the method "
                 "is called, which questions it tests, which result files form which experiment), call project_brief, then propose_map. "
+                "Call study to learn whether the work has a method of its own or is a benchmark study with none. To trace the numbers a "
+                "report quotes to the files that store them, use key_numbers. "
                 "For experiments that were never committed, use runs. To say what a block of work was for, read sessions and "
                 "propose one sentence with session_summary; the researcher confirms it.")
 
@@ -216,14 +218,28 @@ def t_project_status(ctx, args):
         extra.append("GitHub %s" % meta["code_repo"])
     if extra:
         lines.append(" · ".join(extra))
+    if st.get("study"):
+        lines.append("study: %s (%s)%s" % (st["study"]["word"].lower(), {"you": "set by the researcher", "map": "from the confirmed map", "rule": "Lemmata's reading, not confirmed"}.get(st["study"]["by"], st["study"]["by"]),
+                     "; nothing is called 'ours', claims are decided by their own tests" if st["study"]["kind"] == "benchmark" else ""))
+    lines += _behind_lines(st.get("sync"))
     if not st["capabilities"]["paper"]:
-        lines.append("no paper uploaded yet: paper checks are not applicable")
+        lines.append("no paper uploaded yet: paper checks are not applicable, so an empty findings list says nothing about a paper")
     if st["warnings"]:
         lines.append("scan warnings: %d (first: %s)" % (len(st["warnings"]), _short(st["warnings"][0].get("message", ""), 120)))
     data = dict(st)
     data["project_id"] = pid
     data["hub"] = meta
     return "\n".join(lines), data, "Nothing to narrow."
+
+
+def _behind_lines(sync):
+    """What to say while the hub cannot sync: Lemmata's copy is behind GitHub, so "not there" may only mean "not pulled"."""
+    if not sync or not sync.get("failing"):
+        return []
+    return ["SYNC IS FAILING since %s: %s Lemmata still shows commit %s%s. Until a sync works, a commit, run or result file "
+            "Lemmata does not have is not known to be missing from GitHub." % (
+                (sync.get("since") or "?")[:16].replace("T", " "), _short(sync.get("message") or "", 300), (sync.get("head") or "?")[:7],
+                " (last good sync %s)" % sync["last_ok"][:16].replace("T", " ") if sync.get("last_ok") else "")]
 
 
 def _cause_label(cause):
@@ -259,9 +275,10 @@ def _alarm_line(g, nodes, tri):
 def t_alarms(ctx, args):
     pid, eng = _project(ctx, args)
     al = eng.alarms()
+    behind = _behind_lines(eng.project().get("sync"))
     if not al.get("checkpoint"):
-        return ("No checkpoint yet, so there are no alarms. A checkpoint (the last known good state) is created in the Lemmata app.",
-                al, "Nothing to narrow.")
+        return ("\n".join(["No checkpoint yet, so there are no alarms: this empty list is not evidence that nothing changed. A checkpoint (the last "
+                           "known good state) is created in the Lemmata app."] + behind), al, "Nothing to narrow.")
     nodes, tri = _nodes(eng), eng.triage()
     cp = al["checkpoint"]
     head = "Since checkpoint %s (%s — %s): %d alarm group(s). Use explain(project, node) for the chain and diff." % (
@@ -269,7 +286,7 @@ def t_alarms(ctx, args):
     body = [_alarm_line(g, nodes, tri) for g in al["groups"]]
     if not body:
         body = ["Nothing changed since the checkpoint."]
-    return head + "\n" + "\n".join(body), al, "Ask explain(project, node, group) for one node instead."
+    return head + "\n" + "\n".join(body + behind), al, "Ask explain(project, node, group) for one node instead."
 
 
 def t_explain(ctx, args):
@@ -331,7 +348,14 @@ def t_findings(ctx, args):
     tri = eng.triage()
     summary = "; ".join("%s %s" % (c["check"], c["count"] if c["status"] == "ran" else "n/a (%s)" % c.get("note", ""))
                         for c in doc["checks"] if not check or c["check"] == check)
-    text = "%d finding(s). Checks: %s\n%s" % (len(fs), summary, "\n".join(_finding_text(f, tri) for f in fs))
+    st = eng.project()
+    ran = [c for c in doc["checks"] if c["status"] == "ran"]
+    caveat = []
+    if not st["capabilities"]["paper"]:
+        caveat.append("No paper is linked to this project, so the paper checks did not run: %d finding(s) here is not evidence about a paper." % len(fs))
+    elif not ran:
+        caveat.append("No check could run, so an empty list is not evidence of anything.")
+    text = "%d finding(s). Checks: %s\n%s" % (len(fs), summary, "\n".join(caveat + _behind_lines(st.get("sync")) + [_finding_text(f, tri) for f in fs]))
     return text, {"checks": [c for c in doc["checks"] if not check or c["check"] == check], "findings": fs}, \
         "Pass `check` (one of: %s) to narrow." % ", ".join(names)
 
@@ -468,6 +492,10 @@ def t_sync(ctx, args):
     except NotFound as e:
         raise _Fail(str(e))
     except Exception as e:
+        msg = getattr(e, "message", None)
+        if msg:      # the hub names the cause and the fix (a sign-in that expired or covers public repositories only, a branch that is gone)
+            head = next((r.get("head") for r in eng.project()["repos"] if r["role"] == "code"), None)
+            raise _Fail("Sync failed. %s Lemmata still shows commit %s; what it lists as not in GitHub may only be not pulled yet." % (_short(msg, 400), (head or "?")[:7]))
         raise _Fail("Sync failed: %s: %s" % (type(e).__name__, _short(e, 300)))
     _, eng2 = ctx.resolve(pid)
     g1, f1 = snap(eng2)
@@ -583,6 +611,8 @@ def t_setup(ctx, args):
             bits.append("ours best in %d of %d" % (it["ours_best"], it["compared"]))
         if it["kind"] == "method" and it.get("compared"):
             bits.append("beats ours in %d of %d comparisons" % (it["wins"], it["compared"]))
+        if it["kind"] == "method" and it.get("ranked"):
+            bits.append("best in %d of %d columns" % (it["best_in"], it["ranked"]))
         bits.append("used by " + ", ".join(names.get(x, x) for x in it["experiments"][:5]))
         if it["paper"]["lines"]:
             l0 = it["paper"]["lines"][0]
@@ -593,8 +623,12 @@ def t_setup(ctx, args):
             bits.append("CHECK: " + "; ".join(c["t"] for c in it["checks"]))
         lines.append(" · ".join(bits))
     c = d["counts"]
-    head = ("%d metrics, %d datasets, %d methods (%d baselines) across %d experiments; %d items to check.%s"
-            % (c["metric"], c["dataset"], c["method"], c["baselines"], c["experiments"], c["checks"], "" if d["mapped"] else " No confirmed project map: rough."))
+    if d.get("study") == "benchmark":
+        head = ("Benchmark study: nothing is 'ours'. %d metrics, %d datasets, %d compared methods across %d experiments; %d items to check.%s"
+                % (c["metric"], c["dataset"], c["method"], c["experiments"], c["checks"], "" if d["mapped"] else " No confirmed project map: each result file is read on its own, so the list is rough."))
+    else:
+        head = ("%d metrics, %d datasets, %d methods (%d baselines) across %d experiments; %d items to check.%s"
+                % (c["metric"], c["dataset"], c["method"], c["baselines"], c["experiments"], c["checks"], "" if d["mapped"] else " No confirmed project map: rough."))
     return head + "\n" + "\n".join(lines), d, "Filter with kind=metric|dataset|method."
 
 
@@ -647,7 +681,8 @@ def t_session_summary(ctx, args):
 
 def _run_line(r):
     nums = ", ".join("%s=%s" % (k, ("%.4g" % v)) for k, v in list(r["metrics"].items())[:6])
-    bits = [(r.get("time") or "")[:16].replace("T", " "), r["state"].upper(), (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else ""),
+    state = "NOT PULLED YET (sync failing)" if r.get("unsure") else r["state"].upper()
+    bits = [(r.get("time") or "")[:16].replace("T", " "), state, (r.get("git_sha") or "no commit")[:7] + ("+changes" if r.get("dirty") else "") + (" (first commit of the results, not the start commit)" if r.get("sha_basis") == "results_commit" else ""),
             _short(r.get("command") or "(seen by the results watcher)", 140)]
     if nums:
         bits.append(nums)
@@ -663,6 +698,8 @@ def t_runs(ctx, args):
         raise _Fail("Argument 'limit' must be a number from 1 to 200.")
     d = eng.runs(1000)
     rows = d["runs"]
+    if args.get("commands") is not True:      # the hook logs every Python command; one that wrote no file and no number is not an experiment
+        rows = [r for r in rows if r["kind"] == "experiment"]
     q = args.get("contains")
     if q is not None:
         if not isinstance(q, str):
@@ -671,10 +708,15 @@ def t_runs(ctx, args):
         rows = [r for r in rows if low in (r.get("command") or "").lower() or low in r["run_id"].lower() or (r.get("git_sha") or "").startswith(low)
                 or any(low in a["path"].lower() for a in r["artifacts"]) or any(low in k.lower() for k in r["metrics"])]
     c = d["counts"]
-    head = ("%d runs logged from the editor or a coding agent: %d on uncommitted code, %d on commits not in GitHub, %d failed, %d with numbers."
-            % (c["total"], c["uncommitted"], c["not_in_github"], c["failed"], c["with_numbers"]))
+    behind = d.get("behind")
+    head = ("%d experiment runs logged from the editor or a coding agent (plus %d commands that wrote no file and no number%s): %d on uncommitted code, "
+            "%d on commits %s, %d failed, %d with numbers."
+            % (c["experiments"], c["commands"], "" if args.get("commands") is True or not c["commands"] else "; pass commands=true to list them", c["uncommitted"], c["not_in_github"],
+               "Lemmata has not pulled (sync is failing, so they may well be in GitHub)" if behind else "not in GitHub", c["failed"], c["with_numbers"]))
+    if behind:
+        head += "\n" + _behind_lines(dict(behind, failing=True, message=behind.get("why")))[0]
     body = _quote([_run_line(r) for r in rows[:limit]]) if rows else "No runs match."
-    return head + "\n" + NOTICE + "\n" + body, {"counts": c, "runs": rows[:limit]}, "Pass contains=<part of the command, a file path, a metric name or a commit> or a smaller limit."
+    return head + "\n" + NOTICE + "\n" + body, {"counts": c, "runs": rows[:limit], "behind": behind}, "Pass contains=<part of the command, a file path, a metric name or a commit> or a smaller limit."
 
 
 def t_log_run(ctx, args):
@@ -774,11 +816,15 @@ def _map_text(d):
     m = d.get("proposed") or d.get("confirmed")
     lines = ["Map state: %s." % d["state"]]
     if m:
-        lines.append("Method: %s. Questions kept: %d. Experiments kept: %d." % ((m["method"] or {}).get("name") or "not set", len(m["questions"]), len(m["experiments"])))
+        if m.get("study") == "benchmark":
+            roles = "; ".join("%s: %s" % (k, ", ".join(v)) for k, v in (m.get("roles") or {}).items())
+            lines.append("Study: benchmark (no method of its own; nothing is 'ours'). Column roles: %s. Questions kept: %d. Experiments kept: %d." % (roles or "the default column names", len(m["questions"]), len(m["experiments"])))
+        else:
+            lines.append("Method: %s. Questions kept: %d. Experiments kept: %d." % ((m["method"] or {}).get("name") or "not set", len(m["questions"]), len(m["experiments"])))
         for q in m["questions"]:
             lines.append("  %s %s (%s): %s" % (q["id"], q["label"], q["kind"], _short(q["text"], 140)))
         for x in m["experiments"]:
-            lines.append("  %s [%s] tests %s · %d files · metric %s · paper %s" % (x["id"], x["type"], ", ".join(x["tests"]) or "nothing", x["matched"], x["metric"] or "?", ", ".join(x["paper"]) or "none"))
+            lines.append("  %s [%s] tests %s · %s · metric %s · paper %s" % (x["id"], x["type"], ", ".join(x["tests"]) or "nothing", "WAITING for its files" if x.get("waiting") else "%d files" % x["matched"], x["metric"] or "?", ", ".join(x["paper"]) or "none"))
     for r in d.get("report") or []:
         lines.append("%s · %s: %s" % (r["level"].upper(), r["where"], _short(r["why"], 220)))
     cov = d.get("coverage")
@@ -851,6 +897,74 @@ def t_propose_map(ctx, args):
         d = eng.propose_map(args["map"], "agent")
     return (_map_text(d) + "\nThis is a proposal. Fix what was dropped and propose again if needed; it replaces the previous proposal. Only the "
             "researcher can confirm it, on the Experiments page of Lemmata. Tell them it is ready for review."), d, "Nothing to narrow."
+
+
+def t_study(ctx, args):
+    pid, eng = _project(ctx, args)
+    d = eng.study()
+    lines = ["%s (%s). %s" % (d["word"], {"you": "set by the researcher", "map": "from the confirmed map", "rule": "Lemmata's reading; the researcher has not chosen"}[d["by"]], d["why"])]
+    if d["kind"] == "benchmark":
+        lines.append("Nothing is called 'ours'. The methods in the result files are compared methods; a claim is decided by its own test (a row of the "
+                     "project's test table), and the numbers the report quotes are tracked as key numbers.")
+    else:
+        lines.append("Ours: %s. Experiments rank it against the baselines; a claim is supported when ours is at least as good as the comparator." % (d.get("ours") or "not named yet"))
+    if d.get("roles"):
+        lines.append("Column roles from the map: " + "; ".join("%s: %s" % (k, ", ".join(v)) for k, v in d["roles"].items()))
+    if d.get("note"):
+        lines.append(d["note"])
+    lines.append("Only the researcher changes the kind, in Lemmata (Home or Setup). In a project map you may say \"study\": \"benchmark\" or \"method\"; it counts once they confirm the map.")
+    return "\n".join(lines), d, "Nothing to narrow."
+
+
+def _numbers_text(d, only=None):
+    c = d["counts"]
+    lines = ["Key numbers: %d (%d ok, %d mismatch, %d missing, %d known gap, %d not compared with the report). State: %s.%s" % (
+        c["total"], c["ok"], c["mismatch"], c["missing"], c["gap"], c["unquoted"], d["state"],
+        " A proposal of %d is waiting for the researcher." % c["proposed"] if c["proposed"] else "")]
+    if d.get("behind"):
+        lines.append(_behind_lines(dict(d["behind"], failing=True, message=d["behind"].get("why")))[0])
+    for g in d["groups"]:
+        if only and only.lower() not in (g["label"] or "").lower():
+            continue
+        lines.append("%s%s: %s" % (g["label"], " [%s]" % g["stage"] if g.get("stage") else "", _short(g["text"], 140)))
+        for n in g["numbers"]:
+            src = "%s%s" % (n["file"], " (%s %s)" % (n["commit"]["short"], (n["commit"]["time"] or "")[:10]) if n.get("commit") else " (not committed)")
+            who = (" · run " + ", ".join(r["run_id"] for r in n["runs"][:2])) if n["runs"] else " · no logged run" if n["found"] is not None else ""
+            lines.append("  %s %s: report %s, file %s · %s%s%s%s" % (n["status"].upper(), n["label"], (n.get("quoted") or {}).get("text") or "-", n["found"] if n["found"] is not None else "-", src, who,
+                                                          " · proposed" if n["state"] == "proposed" else "", " · " + _short(n["why"] or n.get("gap") or "", 160) if n["status"] in ("mismatch", "missing", "gap") else ""))
+        for r in g["runs"][:8]:
+            lines.append("  run %s %s %s %s" % (r["run_id"], r["state"].upper(), r["sha"] or "no commit", _short(r["command"], 100)))
+    if d["gaps"]:
+        lines.append("Open provenance gaps (%d):" % len(d["gaps"]))
+        lines += ["  - [%s] %s" % (g["k"], _short(g["t"], 260)) for g in d["gaps"][:40]]
+    for r in d.get("report") or []:
+        lines.append("%s · %s: %s" % (r["level"].upper(), r["where"], _short(r["why"], 220)))
+    return "\n".join(lines)
+
+
+def t_key_numbers(ctx, args):
+    from lemmata.engine import numbers as nm
+    pid, eng = _project(ctx, args)
+    if args.get("brief") is True:
+        b = eng.numbers_brief()
+        return nm.GUIDE + "\n" + _quote([json.dumps({k: b[k] for k in ("claims", "report", "notes", "test_tables", "result_files", "already")}, ensure_ascii=False, indent=1)]), b, \
+            "Open the report and the result files themselves, then call propose_numbers."
+    d = eng.numbers()
+    return _numbers_text(d, _need_str(args, "claim", required=False)), d, "Pass claim=<H1> for one claim, or brief=true for how to propose numbers."
+
+
+def t_propose_numbers(ctx, args):
+    pid, eng = _project(ctx, args)
+    if not isinstance(args.get("numbers"), list):
+        raise _Fail("Argument 'numbers' must be a list. Call key_numbers with brief=true for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.propose_numbers({"numbers": args["numbers"]}, "agent")
+    else:
+        d = eng.propose_numbers({"numbers": args["numbers"]}, "agent")
+    return (_numbers_text(d) + "\nThis is a proposal. Fix what was dropped and propose again if needed; it replaces the previous proposal. Only the "
+            "researcher can confirm it, on the Review page of Lemmata. Tell them it is ready."), d, "Nothing to narrow."
 
 
 def _hf_text(d):
@@ -1019,11 +1133,14 @@ TOOLS = [
                     "it ran on (and whether there were uncommitted changes), the numbers it wrote and which tracked result files it wrote. "
                     "Use it to answer 'which run produced this number?' and 'what did I run last week?' instead of guessing from logs.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "contains": {"type": "string", "description": "Filter: part of the command, a file path, a metric name or a commit hash."},
-                             "limit": {"type": "integer", "description": "How many runs (default 30, at most 200)."}}, ["project"]), "annotations": dict(_RO)},
+                             "limit": {"type": "integer", "description": "How many runs (default 30, at most 200)."},
+                             "commands": {"type": "boolean", "description": "Also list commands that wrote no file and no number (checks, looks at a file). Default false."}}, ["project"]), "annotations": dict(_RO)},
     {"name": "log_run", "fn": t_log_run, "title": "Log a run",
      "description": "Record one experiment run you just executed for the user: run_id (date-time plus a short suffix), command, git_sha, dirty, "
                     "metrics (name to number), artifacts ([{path}] of files written), started, ended, exit_code. Only log runs that really "
-                    "happened, with the numbers the run printed or wrote. Skip it when the project has the Lemmata hook, which logs runs itself.",
+                    "happened, with the numbers the run printed or wrote. Skip it when the project has the Lemmata hook, which logs runs itself. "
+                    "For a run logged after the fact, add backfilled: true and sha_basis: 'start' (git_sha is the commit the run started from) "
+                    "or 'results_commit' (the start commit was not recorded; git_sha is the commit that first held the results).",
      "inputSchema": _schema({"project": _PROJECT_PROP, "run": {"type": "object", "description": "The run manifest."}}, ["project", "run"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "tasks", "fn": t_tasks, "title": "Tasks from feedback",
@@ -1058,6 +1175,26 @@ TOOLS = [
                     "what fails, and stores the rest as a proposal for the researcher to confirm. It never edits the paper or code. Only call "
                     "it when the user asked you to map or understand the project.",
      "inputSchema": _schema({"project": _PROJECT_PROP, "map": {"type": "object", "description": "The map: method, questions, experiments, ignore."}}, ["project", "map"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "study", "fn": t_study, "title": "Method paper or benchmark study",
+     "description": "What kind of study the project is. Method paper: the work has a method of its own ('ours') and experiments rank it "
+                    "against baselines. Benchmark study: the work compares existing methods, datasets or measures; nothing is 'ours', claims "
+                    "are decided by their own tests and the report's numbers are tracked as key numbers. Read it before you describe results.",
+     "inputSchema": _schema({"project": _PROJECT_PROP}, ["project"]), "annotations": dict(_RO)},
+    {"name": "key_numbers", "fn": t_key_numbers, "title": "Key numbers and where each is stored", "max_text": 30000,
+     "description": "The numbers the study rests on, by hypothesis or question: what the report says, what the committed result file holds "
+                    "(read again at every scan), the commit that last wrote the file, the runs that wrote it, and the open provenance gaps "
+                    "(a number no file stores, a file no logged run wrote, a mismatch). Use it to answer 'where does this number come from?'. "
+                    "With brief=true it returns how to propose the list.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "claim": {"type": "string", "description": "Only this hypothesis or claim, e.g. H1."},
+                             "brief": {"type": "boolean", "description": "Return the format and the context for proposing key numbers."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "propose_numbers", "fn": t_propose_numbers, "title": "Propose key numbers",
+     "description": "Submit a list of key numbers in the format given by key_numbers(brief=true): for each, the claim, the result file, how "
+                    "the number is read from it, and what the report says with a quote. Lemmata reads every file itself, drops what it "
+                    "cannot read, and stores the rest as a proposal for the researcher to confirm. It never edits the repository. Only call "
+                    "it when the user asked you to trace or list the project's numbers.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "numbers": {"type": "array", "items": {"type": "object"}, "description": "The key numbers."}}, ["project", "numbers"]),
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "hypotheses", "fn": t_hypotheses, "title": "Problem, hypotheses and tests",
      "description": "Hypothesis-first view of a project: the problem the research tries to solve, each hypothesis with its tier "

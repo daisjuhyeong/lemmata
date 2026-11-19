@@ -662,6 +662,51 @@ class HubTest(HubBase):
         self.assertEqual((s, d["sources"]["hypothesis_source"]), (200, ["protocol/short.md"]))
         self.assertEqual(self.api("POST", "/api/hub/projects/%s/sync" % pid)[0], 200)
 
+    def test_sync_failure_is_named_and_recorded(self):
+        """S29: git only says GitHub wanted a user name. The hub says which of three things it means, records that the
+        project is behind, and clears the record on the next sync that works."""
+        self.fake.state = "approved"
+        self.signin()
+        pid = self.make_project()
+        sync = lambda: self.api("POST", "/api/hub/projects/%s/sync" % pid)
+        state = lambda: self.api("GET", "/p/%s/api/project" % pid)[1]["sync"]
+        self.assertEqual(sync()[0], 200)
+        self.assertFalse(state()["failing"])
+        self.fake.git_deny = True
+        try:
+            s, b = sync()      # the sign-in works and covers private repositories: GitHub will not serve this repository to it
+            self.assertEqual((s, b["error"]["code"]), (403, "github_access"), b)
+            self.assertIn("alice/demo-code", b["error"]["message"])
+            st = state()
+            self.assertTrue(st["failing"])
+            self.assertEqual((st["code"], st["fails"]), ("github_access", 1))
+            self.assertTrue(st["last_ok"] and st["head"])
+            since = st["since"]
+            self.hub.gh._patch(None, scope="read:user")      # a sign-in made for public repositories only
+            s, b = sync()
+            self.assertEqual((s, b["error"]["code"]), (403, "github_scope"), b)
+            self.assertIn("allow private repositories", b["error"]["message"])
+            self.assertEqual((state()["fails"], state()["since"]), (2, since), "one failing streak, its start kept")
+            self.fake.fail = "revoked"      # GitHub refuses the token itself
+            s, b = sync()
+            self.assertEqual((s, b["error"]["code"]), (401, "github_signin"), b)
+            self.assertNotIn("could not read Username", b["error"]["message"])
+            self.assertTrue(self.hub.gh.stored()["needs_reauth"])
+            # while it fails, the project's pages say the copy is behind
+            s, r = self.api("POST", "/p/%s/api/runs" % pid, {"runs": [{"run_id": "2026-11-19T10-00-00_x1", "source": "agent", "command": "python a.py", "git_sha": "0123456789abcdef", "artifacts": [{"path": "results/a.csv"}]}]})
+            self.assertEqual(s, 201, r)
+            runs = self.api("GET", "/p/%s/api/runs" % pid)[1]
+            self.assertTrue(runs["behind"] and runs["runs"][0]["unsure"])
+            self.assertEqual(runs["counts"]["unsure"], 1)
+            self.assertIn("sync", [i["kind"] for i in self.api("GET", "/p/%s/api/todo" % pid)[1]["items"]])
+        finally:
+            self.fake.git_deny, self.fake.fail = False, None
+            self.hub.gh._patch(None, scope="repo read:user")
+        self.assertEqual(sync()[0], 200)
+        self.assertFalse(state()["failing"])
+        self.assertFalse(self.api("GET", "/p/%s/api/runs" % pid)[1]["runs"][0]["unsure"])
+        self.assertFalse(self.hub.gh.stored()["needs_reauth"])
+
     def test_online_refs_default_off_and_check_status(self):
         from unittest import mock
         self.signin()

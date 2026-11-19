@@ -217,6 +217,7 @@ class FakeGitHub:
                 u = urlsplit(self.path)
                 ok = any(self.headers.get("Authorization") == "Basic " + base64.b64encode(("x-access-token:%s" % t).encode()).decode()
                          for t in [fake.token] + list(fake.accounts))
+                ok = ok and not getattr(fake, "git_deny", False)      # S29: GitHub answers the API but will not serve the repository
                 fake.git_requests.append((u.path, ok))
                 if not ok:
                     fake.unauth_git += 1

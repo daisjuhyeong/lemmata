@@ -6,25 +6,45 @@ result is compared with the paper's table and followed through the git history. 
 counted, never guessed at.
 """
 from . import code as codemod
+from . import study as studymod
 from . import understand as und
 from .claims import _Ctx
 from .errors import NotFound
-from .experiments import DATA_COLS, LABEL_COLS, SEED_COLS, align, history, lower_better, norm, num, paper_cells, pick_ours, records, summarise
+from .experiments import DATA_COLS, LABEL_COLS, SEED_COLS, align, field_summary, history, lower_better, norm, num, paper_cells, pick_ours, records, summarise
 from .tree import GitTree
 
 SCHEMA = "lemmata.experiments/2"
 MAX_FILES, MAX_DAYS = 300, 15
+MAX_ROWS = 20000      # a long table (one row per run) is read whole: 18 methods x 61 datasets x 3 seeds is 3,294 rows
 ORDER = {t: i for i, t in enumerate(("main", "ablation", "sensitivity", "analysis", "efficiency", "other", "tuning"))}
 AVG = "Average"
 
 
-def combine(found, read, spec, tuning=False):
+def _row_column(keys, recs, spec, roles, dcol):
+    """Benchmark study (S29): the column that names each row. The experiment's own method or row column first, then a
+    column with the method role; failing that a condition, group or dataset column, then the first text column.
+    Never a guess from a list of likely names: a "name" or "test" column is a row, not a method."""
+    for k in (spec.get("method_column"), spec.get("row_column")):
+        if k in keys:
+            return k
+    for role in ("method", "condition", "group", "dataset"):
+        k = studymod.first([k for k in keys if k != dcol], roles, role)
+        if k:
+            return k
+    return next((k for k in keys if k != dcol and norm(k) not in SEED_COLS and num(recs[0].get(k)) is None and str(recs[0].get(k) or "").strip()), None)
+
+
+def combine(found, read, spec, tuning=False, roles=None, bench=False):
     """Fold the files of one experiment into one table.
-    found: [(path, {field: value})]; read(path) -> bytes. -> table like experiments.parse_result, plus "metric_by"."""
+    found: [(path, {field: value})]; read(path) -> bytes. -> table like experiments.parse_result, plus "metric_by".
+    roles: column names by role (study.roles_of). bench: a benchmark study, where no row is "ours" and a row is a method
+    only when its column has the method role."""
     cells, methods, datasets, metric, metric_by, n_files, measures = {}, [], [], spec.get("metric"), "map", 0, []
+    roles = roles or studymod.roles_of(None)
+    row_column = None
     for path, fields in found[:MAX_FILES]:
         try:
-            recs = records(path, read(path))
+            recs = records(path, read(path), MAX_ROWS)
         except Exception:
             recs = None
         if not recs:
@@ -32,8 +52,19 @@ def combine(found, read, spec, tuning=False):
         n_files += 1
         keys = list(dict.fromkeys(str(k) for r in recs for k in r))
         pick = lambda names: next((k for k in keys if norm(k) in names), None)
-        mcol = spec.get("method_column") if spec.get("method_column") in keys else pick(LABEL_COLS)
-        dcol = spec.get("dataset_column") if spec.get("dataset_column") in keys else pick(DATA_COLS)
+        if bench:
+            # the experiment's own row column first: when it names datasets (a table with one row per source), nothing is pivoted
+            named = next((spec.get(k) for k in ("method_column", "row_column") if spec.get(k) in keys), None)
+            rest = [k for k in keys if k != named]
+            dcol = spec.get("dataset_column") if spec.get("dataset_column") in rest else None
+            if dcol is None and studymod.role_of(named, roles) != "dataset":
+                dcol = studymod.first(rest, roles, "dataset") or next((k for k in rest if norm(k) in DATA_COLS), None)
+            mcol = named or _row_column(keys, recs, spec, roles, dcol)
+        else:
+            dcol = spec.get("dataset_column") if spec.get("dataset_column") in keys else pick(DATA_COLS)
+            mcol = spec.get("method_column") if spec.get("method_column") in keys else pick(LABEL_COLS)
+        if row_column is None and (mcol or "method" in fields):
+            row_column = "{method}" if "method" in fields else mcol
         for k in keys:
             if k not in measures and k not in (mcol, dcol) and norm(k) not in SEED_COLS and num(recs[0].get(k)) is not None:
                 measures.append(k)
@@ -45,7 +76,10 @@ def combine(found, read, spec, tuning=False):
             if metric is None:
                 continue
         extra = {k: v for k, v in fields.items() if k not in ("method", "dataset", "seed")}
+        only = {k: set(v) for k, v in (spec.get("where") or {}).items() if k in keys}
         for r in recs:
+            if only and any(str(r.get(k, "")).strip() not in vs for k, vs in only.items()):
+                continue
             got = num(r.get(metric))
             if got is None:
                 continue
@@ -76,7 +110,8 @@ def combine(found, read, spec, tuning=False):
             vals[AVG], ns[AVG], stds[AVG] = sum(vals.values()) / len(vals), min(ns.values()), None
         rows.append({"label": lab, "values": vals, "std": stds, "n": ns})
     return {"cols": ([AVG] if len(cols) > 1 else []) + cols, "rows": rows, "seeds": any(n > 1 for r in rows for n in r["n"].values()),
-            "datasets": datasets, "metrics": [metric], "metric": metric, "measures": measures[:24], "metric_by": metric_by, "files": n_files}
+            "datasets": datasets, "metrics": [metric], "metric": metric, "measures": measures[:24], "metric_by": metric_by, "files": n_files,
+            "row_column": row_column, "row_kind": "method" if row_column == "{method}" else studymod.role_of(row_column, roles)}
 
 
 def toward(tab, target):
@@ -113,9 +148,12 @@ def names_match(labels, who, skip=None):
     return min(loose, key=len) if loose else None
 
 
-def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=None, detail=None, state=None):
-    """-> the Experiments document driven by the map; with detail=<'map:id'>, that one experiment in full."""
+def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=None, detail=None, state=None, study=None, roles=None):
+    """-> the Experiments document driven by the map; with detail=<'map:id'>, that one experiment in full.
+    study "benchmark" (S29): no row is "ours"; an experiment is summarised as the field of what it compares."""
     P, github = G.paper, github or {}
+    bench = study == "benchmark"
+    roles = roles or studymod.roles_of(m)
     ctx = _Ctx(G, alarms, findings)
     ents = (store or {}).get("entries", {})
     led = {r["node_id"]: r for r in ledger["rows"]}
@@ -132,7 +170,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
         tuning = spec["type"] == "tuning"
         sp = dict(spec, metric=e.get("metric") or spec.get("metric"), fallback=method["name"] if method else None)
         tr = trees.get(repo)
-        tab = combine([(p, f) for _, p, _, f in hit], tr.read, sp, tuning) if tr and hit else None
+        tab = combine([(p, f) for _, p, _, f in hit], tr.read, sp, tuning, roles, bench) if tr and hit else None
         papers = [p for p in spec["paper"] if p in G.nodes]
         tnode = next((p for p in papers if G.nodes[p]["kind"] == "table"), None)
         cells = paper_cells(P, tnode) if (P is not None and tnode) else None
@@ -145,6 +183,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
              "why": [{"id": qs[t].get("claim_id") or qs[t]["id"], "label": qs[t]["label"], "text": qs[t]["text"]} for t in spec["tests"] if t in qs]}
         if not x["why"]:
             x["caveats"].append({"k": "why", "t": "Tests no claim"})
+        x["waiting"] = bool(spec.get("waiting")) and not hit
         stale = [led[n] for _, _, n, _ in hit if n in led and led[n]["status"] == "stale"]
         if stale:
             x["stale"] = {"file": stale[0]["name"] + (" and %d more" % (len(stale) - 1) if len(stale) > 1 else ""), "newer": stale[0]["newer"][:3]}
@@ -161,12 +200,15 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             raw, tab = tab, toward(tab, target)
             # the raw numbers per method and column, small enough for every list: the Setup page reads them
             x["grid"] = {"cols": raw["cols"], "rows": [{"label": r["label"], "values": r["values"], "n": r["n"]} for r in raw["rows"][:40]],
-                         "datasets": raw["datasets"], "metric": raw["metric"], "measures": raw["measures"], "tuning": tuning}
+                         "datasets": raw["datasets"], "metric": raw["metric"], "measures": raw["measures"], "tuning": tuning,
+                         "row_kind": raw.get("row_kind"), "row_column": raw.get("row_column")}
             if tuning:
                 vals = [(r["label"], r["values"][col]) for r in tab["rows"] if col in r["values"]]
                 best = (min if lower else max)(vals, key=lambda v: v[1]) if vals else None
                 x["tuning"] = {"runs": len(vals), "best": {"label": best[0], "value": best[1]} if best else None, "metric": tab["metric"], "lower": lower}
                 ours, how, s = (best[0] if best else None), "best setting", None
+            elif bench:
+                ours, how, s = None, None, field_summary(tab, col, lower)
             else:
                 ours, how = ours_of(tab, method, spec, e.get("ours"), bold)
                 s = summarise(tab, ours, col, lower)
@@ -177,14 +219,15 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                         s["base"] = {"label": bl, "value": bv, "gap": round((bv - s["ours"]) if lower else (s["ours"] - bv), 10)}
             x["summary"] = dict(s or {"ours": None, "gap": None, "best": None}, ours_label=ours, ours_by=how, metric=col, measure=tab["metric"] if target is None else "|%s − %g|" % (tab["metric"], target), measures=tab["measures"],
                                 lower=lower, target=target, metric_by=tab["metric_by"] if not e.get("metric") else "you", methods=[r["label"] for r in tab["rows"]],
-                                baselines=[] if tuning else [r["label"] for r in tab["rows"] if r["label"] != ours], cols=tab["cols"], datasets=tab["datasets"])
+                                study=study or "method", row_kind=raw.get("row_kind"), row_column=raw.get("row_column"),
+                                baselines=[] if tuning or bench else [r["label"] for r in tab["rows"] if r["label"] != ours], cols=tab["cols"], datasets=tab["datasets"])
             rx = [und.compile_pattern(p) for p in spec["files"]]
 
             def table_at(ev):
                 t = GitTree(infos[repo]["abs_path"], repo, ev["rev"])
                 try:
                     found = [(p, mm.groupdict()) for p in t.list_files() for mm in [next((r.match(p) for r, _ in rx if r.match(p)), None)] if mm]
-                    return toward(combine(found, t.read, sp, tuning), target)
+                    return toward(combine(found, t.read, sp, tuning, roles, bench), target)
                 finally:
                     t.close()
 
@@ -194,17 +237,17 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                     last[(ev.get("time") or "")[:10]] = ev
                 return list(last.values())[-MAX_DAYS:]
             hist = history(events, infos, G.nodes, repo, None, ours, col, lower, is_result=lambda p: any(r.match(p) for r, _ in rx),
-                           table_at=table_at, versions=per_day, ref=((s or {}).get("base") or {}).get("label")) if not tuning else []
+                           table_at=table_at, versions=per_day, ref=((s or {}).get("base") or {}).get("label"), field=bench) if not tuning else []
             x["history_n"] = len(hist)
             x["spark"] = [{"o": h["ours"], "b": h["best"], "s": h["ref"], "r": h["ruler"], "c": bool(h["changes"]), "t": h["time"]} for h in hist]
             if not tuning:
-                if s and s["n"] <= 1 and s.get("std") is None:
+                if s and s["n"] <= 1 and s.get("std") is None and not (bench and raw.get("row_kind") != "method"):      # a table of tests or sources has no seeds to repeat
                     x["caveats"].append({"k": "seeds", "t": "One run, no spread"})
                 if any(h["ruler"] or "evaluation" in h["cats"] for h in hist[1:]):
                     x["caveats"].append({"k": "ruler", "t": "Evaluation changed"})
-                if how not in ("you", "map", "name"):
+                if how not in ("you", "map", "name") and not bench:
                     x["caveats"].append({"k": "guess", "t": "“Ours” is a guess"})
-                if s is None:
+                if s is None and not bench:
                     x["caveats"].append({"k": "guess", "t": "“Ours” not found in these files"})
             if tab["metric_by"] != "map" and not e.get("metric"):
                 x["caveats"].append({"k": "guess", "t": "Metric is a guess"})
@@ -212,7 +255,8 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                 x["table"] = {"cols": raw["cols"], "rows": raw["rows"][:60], "seeds": raw["seeds"]}
                 x["history"] = hist
         elif hit:
-            x["caveats"].append({"k": "untraced", "t": "Files could not be read as tables"})
+            flt = ", ".join("%s = %s" % (k, " or ".join(v)) for k, v in (spec.get("where") or {}).items())
+            x["caveats"].append({"k": "untraced", "t": ("No row of its files matches its filter (%s)" % flt) if flt else "Files could not be read as tables"})
         if cells:
             grid, tally, problems = align(cells, raw if tab else None, x["summary"]["lower"] if x["summary"] and x["summary"].get("target") is None else None)
             if x["summary"] and x["summary"].get("target") is not None:     # "best" in a column is the value nearest the target: skip the bold check
@@ -223,7 +267,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             if full:
                 x["cells"] = grid
         if not hit:
-            x["caveats"].append({"k": "untraced", "t": "No result file"})
+            x["caveats"].append({"k": "untraced", "t": "Waiting for its result files" if x["waiting"] else "No result file"})
         x["attention"] = bool(x["stale"] or (x["tally"] and (x["tally"]["differs"] or x["tally"]["untraced"])) or not hit
                               or any(p["kind"] == "bold" for p in x["problems"]))
         if full:
@@ -275,9 +319,10 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
                          "state": "confirmed", "recheck": False, "experiments": rest, "suggested": [], "evidence": []})
     cov = und.coverage(m, G, trees)
     allx = list(built.values())
-    return {"schema": SCHEMA, "sections": sections, "unassigned": [], "unmapped": cov,
+    return {"schema": SCHEMA, "sections": sections, "unassigned": [], "unmapped": cov, "study": study or "method",
             "extends": {"base": base, "goal": m.get("goal")} if base else None,
-            "map": {"state": state or "confirmed", "method": method, "questions": len(m["questions"]), "experiments": len(m["experiments"])},
+            "map": {"state": state or "confirmed", "method": method, "study": m.get("study"), "roles": m.get("roles") or {},
+                    "questions": len(m["questions"]), "experiments": len(m["experiments"]), "waiting": sum(1 for x in allx if x.get("waiting"))},
             "counts": {"questions": len(m["questions"]), "no_claim": len(rest), "untested": sum(1 for s in sections if s["kind"] != "other" and s["status"] == "unsupported"),
                        "experiments": len(allx), "attention": sum(1 for x in allx if x["attention"]), "versions": sum(x["history_n"] for x in allx),
                        "files": cov["matched"], "unmapped": cov["n_files"]}}

@@ -28,9 +28,11 @@ def snooze(store, key, until):
     return store
 
 
-def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, today):
-    """E: experiments doc, C: claims doc, S: setup doc. today: 'YYYY-MM-DD'. -> the To-do document."""
+def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, today, numbers=None, sync=None):
+    """E: experiments doc, C: claims doc, S: setup doc. today: 'YYYY-MM-DD'. -> the To-do document.
+    numbers: the Key numbers document; sync: the hub's sync state (S29)."""
     items = []
+    bench = E.get("study") == "benchmark"
 
     def add(group, kind, key, text, why, target, rule):
         items.append({"key": kind + ":" + key, "kind": kind, "group": group, "text": text, "why": why, "target": target, "rule": rule})
@@ -44,7 +46,12 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
         cl = (t.get("claims") or [None])[0]
         target = {"view": "claims", "sel": cl} if cl else ({"view": "node", "id": tg["node_id"]} if tg.get("node_id") else {"view": "tasks"})
         add("person", "feedback", t["id"], t["text"][:200], "Feedback from %s." % (t.get("source") or "someone"), dict(target, task=t["id"]), "feedback is open")
+    # 1b. Lemmata's copy is behind GitHub: everything below may be out of date
+    if sync and sync.get("failing"):
+        add("stale", "sync", "failing", "Sync with GitHub is failing", (sync.get("message") or "The last sync failed.")[:300], {"view": "digest"}, "sync failing since %s" % (sync.get("since") or "?")[:10])
     # 2. your confirmation
+    if numbers and numbers.get("counts", {}).get("proposed"):
+        add("confirm", "numbers", "proposed", "Confirm the %d proposed key numbers" % numbers["counts"]["proposed"], "A list of key numbers was proposed and is not confirmed yet.", {"view": "numbers"}, "key numbers proposed")
     if mapdoc.get("proposed"):
         add("confirm", "map", "proposed", "Confirm the proposed project map", "A map was proposed and is not confirmed yet.", {"view": "experiments"}, "map proposed")
     for c in C.get("claims", []):
@@ -59,10 +66,12 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
         cid = sec.get("claim_id") or sec["id"]
         for x in sec["experiments"]:
             link = (sec.get("links") or {}).get(x["id"])
-            if link and sec.get("kind") != "other" and link["status"] == "contradicts":
+            if link and sec.get("kind") != "other" and link["status"] == "contradicts" and not bench:      # benchmark: a claim its test does not support is a result, not a task
                 add("gap", "contradicts", cid + "|" + x["id"], "%s contradicts %s" % (x["name"], short.get(cid, sec["label"])), link["why"], {"view": "experiments", "sel": "x:" + x["id"]}, link["rule"])
             if link and sec.get("kind") != "other" and link["status"] == "not_run":
-                add("gap", "not_run", cid + "|" + x["id"], "Run %s (planned for %s)" % (x["name"], short.get(cid, sec["label"])), "No result file yet.", {"view": "experiments", "sel": "x:" + x["id"]}, "L1")
+                add("gap", "not_run", cid + "|" + x["id"], "Run %s (planned for %s)" % (x["name"], short.get(cid, sec["label"])),
+                    "Its result files are not in Lemmata's copy of the repository. Sync is failing, so they may only be not pulled yet." if sync and sync.get("failing") else "No result file yet.",
+                    {"view": "experiments", "sel": "x:" + x["id"]}, "L1")
             if x["id"] in seen:
                 continue
             seen.add(x["id"])
@@ -85,6 +94,18 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
             loc = f.get("loc") or {}
             add("paper", "finding", str(f.get("id") or f.get("check")), str(f.get("title") or f.get("message") or f["check"])[:160], str(f.get("message") or "")[:200],
                 {"view": "checks", "loc": loc if loc.get("path") else None}, f["check"])
+    # the numbers the report quotes (S29): a mismatch is the paper being wrong today; a number no file holds is a gap
+    for g in (numbers or {}).get("groups", []):
+        for n in g["numbers"]:
+            if n["state"] == "proposed":
+                continue
+            tg = {"view": "numbers", "sel": n["id"]}
+            if n["status"] == "mismatch":
+                add("paper", "number", n["id"], "%s: the report and the file disagree (%s)" % (g["label"], n["label"][:80]), n["why"] or "", tg, "key number differs")
+            elif n["status"] == "missing":
+                add("gap", "number_missing", n["id"], "%s: %s cannot be read from %s" % (g["label"], n["label"][:80], n["file"]), n["why"] or "", tg, "key number missing")
+            elif n["status"] == "gap":
+                add("gap", "number_gap", n["id"], "%s: no file stores %s" % (g["label"], n["label"][:80]), n.get("gap") or "", tg, "key number with no file")
     n_alarm = ((alarms or {}).get("summary") or {}).get("flagged_nodes") or 0
     if n_alarm:
         add("stale", "changes", "alarms", "%d changed item%s to look at" % (n_alarm, "" if n_alarm == 1 else "s"), "Changed since you last looked.", {"view": "changes"}, "changes not looked at")

@@ -155,7 +155,7 @@ class App:
         snap = {"exported_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "project": e.project(), "graph": graph, "events": e.events(), "findings": findings, "alarms": alarms,
                 "checkpoints": e.checkpoints(), "triage": e.triage(), "analyses": {}, "files": {}}
-        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "setup", "project_map", "review", "todo", "trail"):   # research views (absent on fixture data)
+        for name in ("claims", "timeline", "ledger", "tasks", "tree", "notation", "experiments", "setup", "project_map", "review", "todo", "trail", "study", "numbers"):   # research views (absent on fixture data)
             fn = getattr(e, name, None)
             if fn is not None:
                 try:
@@ -368,7 +368,8 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans"), "/hypothesis": need("hypothesis")}
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans"), "/hypothesis": need("hypothesis"),
+                "/study": need("study"), "/numbers": need("numbers"), "/numbers/brief": need("numbers_brief")}
         if method == "GET":
             # engine reads wait for a running (re)scan: a half-built scan state must never be served
             if r in gets:
@@ -458,7 +459,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change")
+        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change", "/study", "/numbers")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -487,6 +488,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("add_claim")(txt("text", True), txt("kind") or "claim"), 201)
                 if r == "/claims/remove":
                     return self._json(need("remove_claim")(txt("id", True)))
+                if r == "/study":      # S29: method paper or benchmark study (or auto: let the map or the rule decide)
+                    return self._json(need("set_study")(txt("kind", True)))
+                if r == "/numbers":      # S29: propose a list of key numbers, or confirm / discard the proposal, or remove one
+                    if body.get("numbers") is not None:
+                        return self._json(need("propose_numbers")({"numbers": body["numbers"]}, "you"), 201)
+                    return self._json(need("decide_numbers")(txt("action", True), txt("number")))
                 if r == "/map":
                     if not isinstance(body.get("map"), dict):
                         raise ApiError(400, "bad_request", "map must be an object")

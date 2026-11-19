@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from lemmata.engine.errors import BadRequest, NotFound
 from lemmata.server import App
 
-from .config import read_json
+from .config import read_json, write_private
 from .github import git_auth_header, scrub
 from .overleaf import Overleaf, OverleafError, parse_project
 
@@ -360,7 +360,7 @@ class Manager:
         except ProjectError:
             versions = 0
         return {"id": pid, "name": m.get("name", pid), "paper_source": self.paper_source(m), "online_refs": bool(m.get("online_refs", False)), "code_repo": m.get("code_repo"), "branch": m.get("branch"),
-                "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"),
+                "paper_versions": versions, "last_sync": m.get("last_sync"), "scanned_at": st.get("scanned_at"), "sync": self.sync_state(pid), "study": st.get("study"),
                 "owner": m.get("owner") or self.cfg.load().get("owner"), "digest": self.digest_settings(pid),
                 "counts": {"recheck": todo_changes(al, ents), "findings": st["counts"]["findings"], "claims": claims}}
 
@@ -733,8 +733,69 @@ class Manager:
         git(dest, ["commit", "-q", "--allow-empty", "-m", "Imported from %s/%s" % (cur["repo"], cur["subdir"])], extra_env=AUTHOR)
 
     # --- sync
+    # --- sync state (S29): a failed sync leaves Lemmata's copy behind GitHub, and every page must be able to say so
+    AUTH_RE = re.compile(r"could not read Username|Authentication failed|terminal prompts disabled|returned error: 40[13]|HTTP 40[13]|Repository not found", re.I)
+
+    def sync_state(self, pid):
+        d = read_json(self.root(pid) / ".lemmata" / "sync.json", None)
+        return d if isinstance(d, dict) else None
+
+    def _sync_mark(self, pid, err=None):
+        """Record how the last sync went in the project's own data, where the engine reads it."""
+        root = self.root(pid)
+        old = self.sync_state(pid) or {}
+        try:
+            head = git(root / "code", ["rev-parse", "HEAD"])
+        except ProjectError:
+            head = None
+        now = now_iso()
+        if err is None:
+            d = {"schema": "lemmata.sync/1", "failing": False, "at": now, "last_ok": now, "head": head}
+        else:
+            d = {"schema": "lemmata.sync/1", "failing": True, "at": now, "last_ok": old.get("last_ok") or self.meta(pid).get("last_sync"),
+                 "since": old.get("since") if old.get("failing") else now, "code": err.code, "message": err.message, "head": head,
+                 "fails": (old.get("fails") or 0) + 1 if old.get("failing") else 1}
+        try:
+            (root / ".lemmata").mkdir(parents=True, exist_ok=True)
+            write_private(root / ".lemmata" / "sync.json", json.dumps(d, indent=1) + "\n")
+        except OSError:
+            pass
+        return d
+
+    def _fetch_error(self, pid, m, e):
+        """Say what a failed fetch means. git only reports that GitHub wanted a user name; the cause is one of three."""
+        if e.code != "git_failed":
+            return e
+        repo = m.get("code_repo") or "the repository"
+        if "remote ref" in e.message:
+            return ProjectError(404, "branch_not_found", "GitHub has no branch %r in %s any more. Choose the branch to track on the Thesis page." % (m.get("branch"), repo))
+        if not self.AUTH_RE.search(e.message):
+            return e
+        owner = self.owner_of(pid)
+        who = owner or "the project's owner"
+        ok = self.gh.check(owner)      # asks GitHub; marks the account as needing a new sign-in when the token is refused
+        if ok is False:
+            return ProjectError(401, "github_signin", "GitHub no longer accepts the saved sign-in of %s. Sign in to GitHub again in Lemmata (Settings), then sync. Nothing on the hub computer needs changing." % who)
+        scope = ((self.gh.stored(owner) or {}).get("scope") or "").split()
+        if "repo" not in scope:
+            return ProjectError(403, "github_scope", "The saved GitHub sign-in of %s covers public repositories only, and GitHub would not serve %s to it. Sign in again and allow private repositories, then sync." % (who, repo))
+        return ProjectError(403, "github_access", "GitHub would not serve %s to the saved sign-in of %s%s. Check that this account can still read the repository (and, for an organisation, that it allows the Lemmata app), then sync." % (
+            repo, who, "" if ok is None else "; the sign-in itself still works"))
+
     def sync(self, pid):
         self.root(pid)
+        try:
+            res = self._sync(pid)
+        except ProjectError as e:
+            self._sync_mark(pid, e)
+            raise
+        self._sync_mark(pid)
+        owner = self.owner_of(pid)
+        if (self.gh.stored(owner) or {}).get("needs_reauth"):      # GitHub served the repository, so the saved sign-in works after all
+            self.gh._patch(owner, needs_reauth=False)
+        return res
+
+    def _sync(self, pid):
         code = self.root(pid) / "code"
         paper = self.root(pid) / "paper"
         token = self._token(pid)
@@ -743,7 +804,10 @@ class Manager:
         with self.oplock(pid):
             m = self.meta(pid)  # read under the project lock: the throttle check-and-set below is atomic
             before = git(code, ["rev-parse", "HEAD"])
-            git(code, ["fetch", "--no-tags", "origin", m["branch"]], token=token, scope_url=self.cfg.load()["github_web"])
+            try:
+                git(code, ["fetch", "--no-tags", "origin", m["branch"]], token=token, scope_url=self.cfg.load()["github_web"])
+            except ProjectError as e:
+                raise self._fetch_error(pid, m, e)
             a = self.app(pid)
             with a.lock:
                 try:

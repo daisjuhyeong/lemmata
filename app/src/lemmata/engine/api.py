@@ -11,6 +11,7 @@ from . import checks as checksmod
 from . import claims as claimsmod
 from . import experiments as expmod
 from . import notation as notationmod
+from . import numbers as numbersmod
 from . import process as processmod
 from . import graph as graphmod
 from . import history as historymod
@@ -24,6 +25,7 @@ from . import plans as plansmod
 from . import runs as runsmod
 from . import sessions as sessionsmod
 from . import setup as setupmod
+from . import study as studymod
 from . import board as boardmod
 from . import todo as todomod
 from . import trail as trailmod
@@ -138,6 +140,7 @@ class Engine:
                        "events": len(s["events"]), "findings": len(s["findings"]["findings"]), "alarm_groups": len(s["alarms"]["groups"])},
             "checkpoint": {"id": cp["id"], "created_at": cp["created_at"], "note": cp["note"]} if cp else None,
             "capabilities": {"paper": s["G"].paper is not None, "online_lookup": self.online, "ask_ai": False, "research": True},
+            "study": self._study_brief(), "sync": self.sync_state(),
             "warnings": s["warnings"],
         }
 
@@ -259,6 +262,11 @@ class Engine:
                                               for x in sec["experiments"]]
         claimsmod.restage(doc, claimsmod.load(self.hub), tests, meta)
         self._hf_stages(doc)
+        if self.study()["kind"] == "benchmark":      # no "ours" to be ahead or behind: say what would decide the claim instead (rule C10)
+            for c in doc["claims"]:
+                if not c.get("hypothesis") and c.get("stage_rule") == "C5":
+                    c["stage_why"] = "%s. A benchmark claim is decided by its own test, and none is set for it yet." % c["stage_why"].replace(", none with a comparison yet.", " with results")
+                    c["stage_rule"] = c["stage_rule_auto"] = "C10"
         # stages over time: what the stored results show for the past, then what Lemmata has recorded since it started watching
         log = self.hub.read_json("stages.json", None)
         if not isinstance(log, dict) or not isinstance(log.get("log"), dict):
@@ -315,7 +323,7 @@ class Engine:
                 return (st.st_mtime_ns, st.st_size)
             except OSError:
                 return None
-        key = (id(s["G"]), s["scanned_at"]) + tuple(stamp(n) for n in ("map.json", "experiments.json", "claims.json", "runs.json"))
+        key = (id(s["G"]), s["scanned_at"]) + tuple(stamp(n) for n in ("map.json", "experiments.json", "claims.json", "runs.json", "study.json", "hypothesis.json"))
         c = getattr(self, "_exp_cache", None)
         if c is None or c[0] != key:
             c = self._exp_cache = (key, self._exp())
@@ -523,14 +531,131 @@ class Engine:
         m = d["confirmed"]
         if detail is not None and str(detail).startswith("map:") and not m:
             raise NotFound("unknown experiment %r" % detail)
+        st = self.study()
         if m and (detail is None or str(detail).startswith("map:")):
             return trackmod.build(m, s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.ledger(),
-                                  expmod.load(self.hub), self._github(), detail, "proposed" if d["proposed"] else "confirmed")
+                                  expmod.load(self.hub), self._github(), detail, "proposed" if d["proposed"] else "confirmed",
+                                  study=st["kind"], roles=studymod.roles_of(m))
         doc = expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self._claims_base(), self.ledger(),
-                           expmod.load(self.hub), self._github(), detail)
+                           expmod.load(self.hub), self._github(), detail, study=st["kind"], roles=studymod.roles_of(None))
         if detail is None:
             doc["map"] = {"state": "proposed" if d["proposed"] else "none"}
         return doc
+
+    # ------------------------------------------------------------------ sync state (S29)
+    def sync_state(self):
+        """How the hub's last sync with GitHub went, or None for a local project. While it is failing, Lemmata's copy is
+        behind GitHub: a commit or a file it does not have is not known to be missing."""
+        d = self.hub.read_json("sync.json", None)
+        if not isinstance(d, dict):
+            return None
+        return {k: d.get(k) for k in ("failing", "at", "last_ok", "since", "code", "message", "head", "fails")}
+
+    def _behind(self):
+        st = self.sync_state()
+        return st if st and st.get("failing") else None
+
+    def _study_brief(self):
+        try:
+            st = self.study()
+            return {"kind": st["kind"], "by": st["by"], "word": st["word"]}
+        except Exception:      # the project summary must never fail because of this
+            return None
+
+    # ------------------------------------------------------------------ key numbers (S29)
+    def _numbers_ctx(self):
+        s, files, src, has_paper = self._hf_ctx()
+        hd = hypomod.load(self.hub)
+        live = [h for h in hd["hypotheses"] if not h.get("archived")]
+        C = self.claims()
+        claims, known, taken = [], {}, set()
+        nm = lambda t: expmod.norm(t or "")
+        for i, h in enumerate(live):
+            c = next((c for c in C["claims"] if c.get("hypothesis") == h["id"]), None)
+            key = "h:" + h["id"]
+            claims.append({"key": key, "label": h["id"], "text": h["statement"], "stage": (c or {}).get("stage"), "stage_why": (c or {}).get("stage_why"),
+                           "tier": h.get("tier"), "claim_id": h.get("claim_id"), "order": i})
+            for name in [h["id"], h.get("claim_id")] + list(h.get("aliases") or []):
+                if nm(name):
+                    known[nm(name)] = key
+            taken.add(h.get("claim_id"))
+        for j, c in enumerate(c for c in C["claims"] if c["state"] != "rejected" and c["id"] not in taken and not c.get("formal")):
+            key = "c:" + c["id"]
+            claims.append({"key": key, "label": c.get("ref") or c.get("short") or c["label"], "text": c["text"], "stage": c.get("stage"), "stage_why": c.get("stage_why"),
+                           "tier": None, "claim_id": c["id"], "order": 1000 + j})
+            for name in (c["id"], c.get("ref"), c.get("short"), c.get("label")):
+                if nm(name) and nm(name) not in known:
+                    known[nm(name)] = key
+        return s, files, hd, live, claims, known
+
+    def numbers(self):
+        """The numbers the study rests on, by claim: each read again from its file and compared with what the report says."""
+        s, files, hd, live, claims, known = self._numbers_ctx()
+        made = {}
+        for r in self.ledger()["rows"]:
+            n = s["G"].nodes.get(r["node_id"]) or {}
+            if (n.get("loc") or {}).get("path"):
+                made[n["loc"]["path"]] = r
+        doc = numbersmod.build(numbersmod.load(self.hub), files, claims, live, hd["experiments"], s["events"], made, self.runs(1000)["runs"], self.sync_state())
+        doc["study"] = self._study_brief()
+        return doc
+
+    def numbers_brief(self):
+        """What an agent needs to list the key numbers: the format, the claims, the report and the test tables."""
+        s, files, hd, live, claims, known = self._numbers_ctx()
+        src = self._hf_ctx()[2]
+        return {"schema": "lemmata.numbers.brief/1", "guide": numbersmod.GUIDE,
+                "claims": [{"claim": c["label"], "text": c["text"], "stage": c["stage"]} for c in claims],
+                "report": src.get("report") or [], "notes": src.get("notes") or [], "test_tables": src.get("test_tables") or [],
+                "result_files": [c for c in (undmod.clusters(undmod.result_files(s["G"]), s["trees"], limit=40))],
+                "already": [{"id": n["id"], "claim": n["claim"], "label": n["label"], "file": n["file"]} for n in numbersmod.load(self.hub)["confirmed"]]}
+
+    def propose_numbers(self, doc, by=None):
+        """A list written by an agent (or by hand). Checked by rules, stored as a proposal; nothing counts until confirmed."""
+        s, files, hd, live, claims, known = self._numbers_ctx()
+        clean, report = numbersmod.verify(doc, files, known)
+        st = numbersmod.load(self.hub)
+        st.update(proposed=clean, report=report, proposed_at=now_iso(), proposed_by=(by or "agent")[:60])
+        self.hub.write_json("numbers.json", st)
+        return self.numbers()
+
+    def decide_numbers(self, action, number=None):
+        """confirm: the proposal joins the list. discard: the proposal is dropped. remove: one number leaves the list."""
+        st = numbersmod.load(self.hub)
+        if action == "confirm":
+            if not st["proposed"]:
+                raise NotFound("there is no proposed list to confirm")
+            st.update(confirmed=numbersmod.merge(st["confirmed"], st["proposed"]), proposed=None, confirmed_at=now_iso())
+        elif action == "discard":
+            st.update(proposed=None, report=[])
+        elif action == "remove":
+            numbersmod.remove(st, number)
+        else:
+            raise BadRequest("action must be confirm, discard or remove")
+        self.hub.write_json("numbers.json", st)
+        return self.numbers()
+
+    # ------------------------------------------------------------------ the kind of study (S29, ADR-009)
+    def study(self):
+        """method (the work has a method of its own, "ours") or benchmark (it compares existing methods; nothing is "ours")."""
+        s, files, src, has_paper = self._hf_ctx()
+        hd = hypomod.load(self.hub)
+        hf = hd["enabled"] if hd["enabled"] is not None else hypomod.wanted(src, has_paper)
+        m = undmod.load(self.hub)["confirmed"]
+        st = studymod.load(self.hub)
+        out = studymod.resolve(st, m, hf)
+        out.update(word=studymod.WORDS[out["kind"]], kinds=[{"k": k, "word": studymod.WORDS[k]} for k in studymod.KINDS], chosen=st["kind"],
+                   roles={r: list((m or {}).get("roles", {}).get(r) or []) for r in studymod.ROLES if (m or {}).get("roles", {}).get(r)},
+                   map_study=(m or {}).get("study"), ours=((m or {}).get("method") or {}).get("name") if out["kind"] == "method" else None)
+        if out["kind"] == "benchmark" and (m or {}).get("method"):
+            out["note"] = "The confirmed map names %s as the work's own method. As a benchmark study it is listed with the other compared methods." % m["method"]["name"]
+        return out
+
+    def set_study(self, kind):
+        st = studymod.choose(studymod.load(self.hub), kind, now_iso())
+        self.hub.write_json("study.json", st)
+        self._exp_cache = None
+        return self.study()
 
     LINK_WORDS = ("supports", "contradicts", "inconclusive", "not_run")
 
@@ -634,6 +759,26 @@ class Engine:
         why = ("Ours is level with %s%s (a tie counts as support)." % (vs, on)) if state == "tie" else "Ours is ahead of %s by %s%s." % (vs, g, on)
         return dict(out, status="supports", rule="L3", why=why, gap=gap)
 
+    @staticmethod
+    def _link_test(x, c):
+        """A claim-experiment link in a benchmark study (rule L5, ADR-009): nothing is "ours", so the experiment does not
+        rank a method. The claim's own test decides, and every experiment that feeds it carries that verdict."""
+        out = {"criterion": {"kind": "test"}, "criterion_by": "test"}
+        has_files = (x.get("files_n") or 0) > 0 if x.get("map") else bool(x.get("connected"))
+        if not has_files:
+            return dict(out, status="not_run", rule="L1", why="Waiting for its result files." if x.get("waiting") else "No result file yet.")
+        c = c or {}
+        rule, stage, why = c.get("stage_rule"), c.get("stage"), c.get("stage_why") or ""
+        name = c.get("hypothesis") or c.get("short") or "this claim"
+        if not c.get("hypothesis"):
+            return dict(out, status="inconclusive", rule="L5",
+                        why="A benchmark study has no method of its own to rank. Give %s a test (a row of the project's test table) and that decides it." % name)
+        if rule == "R1" or (rule == "R0" and stage == "finding"):
+            return dict(out, status="supports", rule="L5", why="%s: its test is met. %s" % (name, why))
+        if rule == "R2" or (rule == "R0" and stage == "refuted"):
+            return dict(out, status="contradicts", rule="L5", why="%s: its test is not met. %s" % (name, why))
+        return dict(out, status="inconclusive", rule="L5", why="%s has no verdict: %s." % (name, why.rstrip(".") or "no test rule yet"))
+
     def _criteria(self):
         """-> crit(section, experiment) -> (criterion or None, who set it): yours (experiments.json) wins over the confirmed map's."""
         m = undmod.load(self.hub)["confirmed"] or {}
@@ -658,14 +803,20 @@ class Engine:
         links = dict.fromkeys(self.LINK_WORDS, 0)
         tested = set()
         crit = self._criteria()
+        bench = E.get("study") == "benchmark"
+        E["study_info"] = self.study()
         for sec in E["sections"]:      # each section is a claim: show where that claim stands
             cid = sec.get("claim_id") or sec["id"]
             c = by.get(cid)
             if c:
-                sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"], loc=c.get("loc"))
+                sec.update(stage=c["stage"], stage_by=c["stage_by"], stage_why=c["stage_why"], short=c["short"], loc=c.get("loc"),
+                           stage_rule=c.get("stage_rule"), hypothesis=c.get("hypothesis"), tier=c.get("tier"))
             # the link of each experiment to this claim; kept on the section, because one experiment can test two claims
             own = ext and sec.get("scope") != "base"
-            sec["links"] = {x["id"]: self._link(x, own, base if own else "the best other method", *crit(sec, x)) for x in sec["experiments"]}
+            if bench:
+                sec["links"] = {x["id"]: self._link_test(x, c) for x in sec["experiments"]}
+            else:
+                sec["links"] = {x["id"]: self._link(x, own, base if own else "the best other method", *crit(sec, x)) for x in sec["experiments"]}
             sec["bar"] = dict.fromkeys(self.LINK_WORDS, 0)
             for l in sec["links"].values():
                 sec["bar"][l["status"]] += 1
@@ -692,6 +843,7 @@ class Engine:
         s = self._ensure()
         E = self.experiments()
         doc = setupmod.build(E, s["G"], s["trees"])
+        doc["study_info"] = E.get("study_info")
         self._setup_context(doc, E, s)
         doc["board"] = self._board(doc, E)
         return doc
@@ -789,15 +941,25 @@ class Engine:
         return self._exp(exp_id)
 
     # ------------------------------------------------------------------ review: should I continue?
+    def _numbers_by_claim(self, E):
+        """Key-number counts per claim, for a benchmark study's checklist."""
+        if E.get("study") != "benchmark":
+            return None
+        try:
+            return {g["claim_id"]: g["counts"] for g in self.numbers()["groups"] if g.get("claim_id")}
+        except Exception:      # the Review page must never fail because of this
+            return {}
+
     def review(self, days=30, now=None):
-        return reviewmod.build(self.experiments(), reviewmod.load(self.hub), days, now)
+        E = self.experiments()
+        return reviewmod.build(E, reviewmod.load(self.hub), days, now, self._numbers_by_claim(E))
 
     def set_review(self, hoped=None, question=None, resolve=None, mine=None, days=30):
         E = self.experiments()
         st = reviewmod.load(self.hub)
         reviewmod.decide(st, {s["id"] for s in E["sections"]}, hoped, question, resolve, mine, now_iso())
         self.hub.write_json("review.json", st)
-        return reviewmod.build(E, st, days)
+        return reviewmod.build(E, st, days, None, self._numbers_by_claim(E))
 
     def confound_brief(self):
         return reviewmod.brief(self._exp(), self._exp)
@@ -864,7 +1026,10 @@ class Engine:
     def draft_map(self):
         """A proposal made by rules alone, for when no agent has read the project."""
         s = self._ensure()
-        return self._propose(undmod.draft(s["G"], s["trees"], s["infos"], s["events"], self.claims()), "rules")
+        doc = undmod.draft(s["G"], s["trees"], s["infos"], s["events"], self.claims())
+        if self.study()["kind"] == "benchmark":
+            doc.update(study="benchmark", method=None)
+        return self._propose(doc, "rules")
 
     def edit_map(self, patch):
         d = undmod.load(self.hub)
@@ -1096,8 +1261,13 @@ class Engine:
         s = self._ensure()
         today = today or now_iso()[:10]
         d = undmod.load(self.hub)
+        try:
+            nums = self.numbers()
+        except Exception:      # the to-do list must never fail because of this
+            nums = None
         return todomod.build(self.experiments(), self.claims(), self.setup(), self.tasks(), s["findings"], s["alarms"], self.plans(),
-                             {"proposed": d.get("proposed")}, trailmod.load_deadlines(self.hub)["deadlines"], todomod.load(self.hub), today)
+                             {"proposed": d.get("proposed")}, trailmod.load_deadlines(self.hub)["deadlines"], todomod.load(self.hub), today,
+                             numbers=nums, sync=self.sync_state())
 
     def snooze_todo(self, key, until=None):
         self._ensure()
@@ -1215,7 +1385,7 @@ class Engine:
     # ------------------------------------------------------------------ runs logged outside GitHub (editor, agent)
     def runs(self, limit=200):
         s = self._ensure()
-        return runsmod.view(runsmod.load(self.hub), s["G"].nodes, s["events"], self._roles(), limit)
+        return runsmod.view(runsmod.load(self.hub), s["G"].nodes, s["events"], self._roles(), limit, self._behind())
 
     def add_runs(self, runs, by=None):
         self._ensure()

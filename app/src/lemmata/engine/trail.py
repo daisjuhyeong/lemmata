@@ -127,11 +127,13 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
         moved = []
         for x in exps or []:
             sp = x.get("spark") or []
+            field = (x.get("summary") or {}).get("study") == "benchmark"      # no "ours": follow the best of what is compared
+            k = "b" if field else "o"
             for i, pt in enumerate(sp):
-                if pt.get("t") == ev["time"] and pt.get("o") is not None:
-                    prev = next((q["o"] for q in reversed(sp[:i]) if q.get("o") is not None), None)
-                    moved.append({"x": x["id"], "name": x["name"], "claims": x.get("_claims") or [], "before": prev, "after": pt["o"], "best_other": pt.get("b"),
-                                  "metric": (x.get("summary") or {}).get("metric"), "lower": (x.get("summary") or {}).get("lower")})
+                if pt.get("t") == ev["time"] and pt.get(k) is not None:
+                    prev = next((q[k] for q in reversed(sp[:i]) if q.get(k) is not None), None)
+                    moved.append({"x": x["id"], "name": x["name"], "claims": x.get("_claims") or [], "before": prev, "after": pt[k], "best_other": None if field else pt.get("b"),
+                                  "field": field, "metric": (x.get("summary") or {}).get("metric"), "lower": (x.get("summary") or {}).get("lower")})
         out[-1]["detail"] = {"files": {k: v[:8] for k, v in grp.items() if v}, "files_n": {k: len(v) for k, v in grp.items() if v}, "results": moved,
                              "affects": [a_.get("label") or a_.get("id") for a_ in (st.get("affects") or []) if isinstance(a_, dict)][:6]}
     names = {c["id"]: (c.get("short") or c.get("label") or c["id"]) for c in (claims_doc.get("claims") or [])}
