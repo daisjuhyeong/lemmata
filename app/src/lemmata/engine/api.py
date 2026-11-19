@@ -13,6 +13,7 @@ from . import experiments as expmod
 from . import notation as notationmod
 from . import numbers as numbersmod
 from . import baselines as baselinesmod
+from . import bench as benchmod
 from . import texout as latexmod
 from . import process as processmod
 from . import graph as graphmod
@@ -1005,19 +1006,26 @@ class Engine:
             return boardmod.from_hypothesis(H, files, doc, c[1])
         return boardmod.from_setup(doc, E.get("thesis"), waiting=hf)
 
-    def _setup_context(self, doc, E, s):
-        """S26: for each experiment the where, how, when and who behind it (the why and what are its claim and protocol)."""
+    def _runs_of(self, exps):
+        """exps: [(experiment id, its result path or None)] -> ({id: [(run, fields, how)] oldest first}, {id: matchers}).
+        A run belongs to an experiment when it wrote a file matching the experiment's result pattern (how "wrote"), when its
+        command names the result folder ("names"), when it is another run of a script known to write these results ("script"),
+        or when the researcher attached it by hand ("attached", S35). A run attached by hand counts for that experiment only."""
         pats = self._exp_patterns(undmod.load(self.hub))
-        full = {x["id"]: x for sec in E["sections"] for x in sec["experiments"]}
-        led = {r["node_id"]: r for r in self.ledger()["rows"]}
         runs = (runsmod.load(self.hub).get("runs") or [])
-        for x in doc["experiments"]:
-            f = full.get(x["id"]) or {}
-            res = f.get("result") or {}
-            ms = [sessionsmod.matcher(p_) for p_ in pats.get(x["id"]) or ([res["path"]] if res.get("path") else [])]
-            probe = [dict(x, _match=ms)]
+        att = benchmod.load(self.hub)["attached"]
+        out, matchers = {}, {}
+        for xid, path in exps:
+            ms = matchers[xid] = [sessionsmod.matcher(p_) for p_ in pats.get(xid) or ([path] if path else [])]
+            probe = [{"id": xid, "_match": ms}]
             mine = []
             for r in runs:
+                a = att.get(r.get("run_id"))
+                if a:
+                    if a == xid:
+                        hit = sessionsmod.experiments_of(r, probe)
+                        mine.append((r, hit[0][1] if hit else self._arg_fields(r), "attached"))
+                    continue
                 hit = sessionsmod.experiments_of(r, probe)
                 if hit and (hit[0][2] == "wrote" or sessionsmod.read_command(r.get("command"))["type"] == "script"):
                     mine.append((r, hit[0][1], hit[0][2]))
@@ -1025,9 +1033,26 @@ class Engine:
             have = {id(r) for r, _, _ in mine}
             for r in runs:            # another run of a script that is known to write these results (it may have failed before writing)
                 rd = sessionsmod.read_command(r.get("command"))
-                if id(r) not in have and rd["type"] == "script" and rd.get("script") in wrote:
-                    mine.append((r, {k: [v] for k, v in rd["args"].items() if k in ("dataset", "method", "seed") and isinstance(v, str)}, "script"))
+                if id(r) not in have and not att.get(r.get("run_id")) and rd["type"] == "script" and rd.get("script") in wrote:
+                    mine.append((r, self._arg_fields(r), "script"))
             mine.sort(key=lambda m: m[0].get("ended") or m[0].get("started") or "")
+            out[xid] = mine
+        return out, matchers
+
+    @staticmethod
+    def _arg_fields(run):
+        rd = sessionsmod.read_command(run.get("command"))
+        return {k: [v] for k, v in (rd.get("args") or {}).items() if k in ("dataset", "method", "seed") and isinstance(v, str)}
+
+    def _setup_context(self, doc, E, s):
+        """S26: for each experiment the where, how, when and who behind it (the why and what are its claim and protocol)."""
+        full = {x["id"]: x for sec in E["sections"] for x in sec["experiments"]}
+        led = {r["node_id"]: r for r in self.ledger()["rows"]}
+        mine_of, ms_of = self._runs_of([(x["id"], ((full.get(x["id"]) or {}).get("result") or {}).get("path")) for x in doc["experiments"]])
+        for x in doc["experiments"]:
+            f = full.get(x["id"]) or {}
+            res = f.get("result") or {}
+            ms, mine = ms_of[x["id"]], mine_of[x["id"]]
             who, hosts, scripts = {}, [], []
             for r, _, _ in mine:
                 w = sessionsmod.who_of(r)
@@ -1400,7 +1425,7 @@ class Engine:
         return processmod.timeline(s["events"], s["G"].nodes, self._roles(), self.claims())
 
     # ------------------------------------------------------------------ to-do and trail (S24 steps 4-5)
-    def todo(self, today=None):
+    def todo(self, today=None, _docs=None):
         """What to do next, by rule, each item with the page it opens (ADR-008 section 5.1)."""
         s = self._ensure()
         today = today or now_iso()[:10]
@@ -1409,9 +1434,33 @@ class Engine:
             nums = self.numbers()
         except Exception:      # the to-do list must never fail because of this
             nums = None
-        return todomod.build(self.experiments(), self.claims(), self.setup(), self.tasks(), s["findings"], s["alarms"], self.plans(),
+        E, S = _docs or (self.experiments(), self.setup())
+        return todomod.build(E, self.claims(), S, self.tasks(), s["findings"], s["alarms"], self.plans(),
                              {"proposed": d.get("proposed")}, trailmod.load_deadlines(self.hub)["deadlines"], todomod.load(self.hub), today,
                              numbers=nums, sync=self.sync_state())
+
+    # ------------------------------------------------------------------ the bench (S35, ADR-011): what VS Code shows
+    def bench(self, today=None):
+        """Runs, experiments, their setup and what to run next, as rows ready to draw (engine/bench.py)."""
+        self._ensure()
+        today = today or now_iso()[:10]
+        E, S = self.experiments(), self.setup()
+        ids = []
+        for sec in E["sections"]:
+            for x in sec["experiments"]:
+                if x["id"] not in [i for i, _ in ids]:
+                    ids.append((x["id"], (x.get("result") or {}).get("path")))
+        mine_of, _ = self._runs_of(ids)
+        return benchmod.build(E, S, self.todo(today, _docs=(E, S)), self.plans(), self.runs(400)["runs"], mine_of, today, self.project().get("name"))
+
+    def attach_run(self, run_id, exp_id=None):
+        """The researcher says which experiment a run belongs to (or, with no experiment, takes that back)."""
+        self._ensure()
+        E = self.experiments()
+        st = benchmod.attach(benchmod.load(self.hub), {r.get("run_id") for r in runsmod.load(self.hub).get("runs") or []},
+                             {x["id"] for sec in E["sections"] for x in sec["experiments"]}, run_id, exp_id)
+        self.hub.write_json(benchmod.STORE, st)
+        return self.bench()
 
     def snooze_todo(self, key, until=None):
         self._ensure()

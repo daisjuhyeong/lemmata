@@ -1967,7 +1967,8 @@ function restoreUI() {
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
     S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'baselines', 'settings', 'latex'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
-  if (!S.tabs.length) { S.tabs = [{ k: 'digest' }]; S.active = 0; }
+  if (window.LEMMATA_EMBED) { const act = S.tabs[S.active]; S.tabs = S.tabs.filter(t => BENCH_PAGES.includes(t.k)); S.active = Math.max(0, S.tabs.indexOf(act)); }
+  if (!S.tabs.length) { S.tabs = [{ k: window.LEMMATA_EMBED ? 'setup' : 'digest' }]; S.active = 0; }
   if (S.active >= S.tabs.length || S.active < 0) S.active = 0;
 }
 function pruneTabs() {
@@ -1986,8 +1987,31 @@ function tabTitle(t) {
   return '';
 }
 const TAB_GLYPH = { digest: '',  changes: '◔', graph: '◉', checks: '!', history: '⚑', item: '▤', node: '{ }', review: '◎', claims: '◆', timeline: '⚑', experiments: '▦', setup: '⊞', tasks: '☑', ask: '?', notation: '𝑥' };
+/* S35 (ADR-011): VS Code is the experiment bench. Inside its tab only the experiment pages are shown (Thesis, Setup and the
+   detail of one item or file); every other page opens on the website. This lives here, not in the extension, because the
+   hub updates itself and the extension does not. */
+const BENCH_PAGES = ['experiments', 'setup', 'item', 'node'];
+const GO_PAGES = ['digest', 'experiments', 'setup', 'review', 'history', 'claims', 'baselines', 'numbers', 'changes', 'checks', 'graph', 'timeline', 'notation', 'tasks', 'latex', 'ask', 'settings'];
+function openOnSite(k) {
+  const site = window.LEMMATA_EMBED && window.LEMMATA_EMBED.site;
+  if (!site) { toast('That page is on the Lemmata website.'); return; }
+  const a = h('a', { href: site + (GO_PAGES.includes(k) ? '#go=' + k : ''), class: 'hidden' });
+  document.body.append(a); a.click(); a.remove();      // the tab's bridge hands web links to your browser
+}
+/* A link from VS Code (or anywhere) that opens one page, with something selected: <site>/p/<project>/#go=<page>&sel=<q:… | x:… | i:…> */
+function goFromLink() {
+  if (window.LEMMATA_EMBED || SNAP) return;
+  let hash = location.hash || '';
+  try { hash = decodeURIComponent(hash); } catch (e) { /* read it as it is */ }      // VS Code writes the link with = and & encoded
+  const m = /^#go=([a-z]+)(?:&sel=(.{1,400}))?$/.exec(hash); if (!m) return;
+  const sel = m[2] || null;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* the page still opens */ }
+  if (!GO_PAGES.includes(m[1])) return;
+  if (sel && /^[qxic]:/.test(sel) && typeof rxGoto === 'function') rxGoto(m[1], sel); else openTab(m[1]);
+}
 function openTab(k, id, opts) {
   opts = opts || {};
+  if (window.LEMMATA_EMBED && !BENCH_PAGES.includes(k)) { openOnSite(k); return; }
   const key = tabKey({ k, id });
   let i = S.tabs.findIndex(t => tabKey(t) === key);
   if (i < 0) {
@@ -2053,7 +2077,7 @@ function projectMenu(anchor) {
 
 /* S31: the title goes back to the first page. In a project that is Home; on a hub with no project open, the list of projects. */
 function goHome() {
-  if (S.project) { openTab('digest'); window.scrollTo(0, 0); }
+  if (S.project) { openTab(window.LEMMATA_EMBED ? 'setup' : 'digest'); window.scrollTo(0, 0); }
   else if (HUB_ON && !window.LEMMATA_EMBED) location.href = '/';
 }
 /* ---------- left sidebar ---------- */
@@ -2095,7 +2119,7 @@ function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;
   const t = S.tabs[S.active], cur = t ? NAV_OF[t.k] : null;
   const badge = k => navBadge(k);
-  NAV.forEach(([k, label]) => {
+  (window.LEMMATA_EMBED ? NAV.filter(([k]) => BENCH_PAGES.includes(k)) : NAV).forEach(([k, label]) => {
     const on = k === cur, n = badge(k);
     bar.append(h('button', { class: 'navtab' + (on ? ' on' : ''), role: 'tab', 'aria-selected': String(on), 'aria-label': label + (n ? ', ' + n + ' to look at' : ''), title: label, onclick: () => openTab(k) },
       h('span', { class: 'navl', 'data-full': label }, label), n ? h('span', { class: 'navn' }, ' ' + n) : null));
@@ -2188,7 +2212,7 @@ function renderStatus() {
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
   const more = [link('Baselines', () => openTab('baselines')), link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('LaTeX', () => openTab('latex')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher()), link('Settings', () => openTab('settings'))];
-  bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
+  bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, embed ? null : more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
       h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
       ' · ', plural(M.todo || 0, 'thing') + ' to look at',
@@ -2377,8 +2401,9 @@ function boot() {
   renderAll(); watchWidth(); rowKeys();
   detectHub().then(loadAll).then(() => {
     if (!READONLY) { setInterval(autoRefreshTick, 5000); document.addEventListener('visibilitychange', () => { if (!document.hidden) autoRefreshTick(); }); }
-    if (HUB_ON) { lsSet('lemmata.seen_intro', true); rxStartView().then(rxUsefulBar); }   // the hub's own tutorial already explained Lemmata
-    else intro(false);
+    if (HUB_ON) { lsSet('lemmata.seen_intro', true); rxStartView().then(rxUsefulBar).then(goFromLink, goFromLink); }   // the hub's own tutorial already explained Lemmata
+    else { intro(false); goFromLink(); }
+    window.addEventListener('hashchange', goFromLink);      // a link opened in a tab that already shows this project
   });
 }
 /* research.js is loaded after this file, so start once the whole document (both scripts) has been read. */

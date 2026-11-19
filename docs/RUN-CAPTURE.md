@@ -22,7 +22,7 @@ The hub needs the new `/api/runs` route and the `runs` / `log_run` MCP tools.
 
 ## Step 2. Install the extension (the machine where you run experiments)
 
-1. `code --install-extension vscode/lemmata-0.7.0.vsix` (or Extensions → `...` → **Install from VSIX...**). With Remote-SSH, install it in the remote window: it must run where the files are.
+1. `code --install-extension vscode/lemmata-0.8.0.vsix` (or Extensions → `...` → **Install from VSIX...**). With Remote-SSH, install it in the remote window: it must run where the files are.
 2. If you have not connected before: Command Palette → **Lemmata: Connect to Server**, paste a token (`uv run lemmata hub token --device "VS Code"` on the Mac mini).
 3. Open your code repository as the workspace folder. The status bar should read `Lemmata: N to recheck`, not `no project`.
 
@@ -30,7 +30,7 @@ The hub needs the new `/api/runs` route and the `runs` / `log_run` MCP tools.
 
 1. Open the integrated terminal (`` Ctrl+` ``) in the repository.
 2. Run any experiment command, for example `python train.py --config configs/default.yaml`.
-3. Open the Lemmata panel in the activity bar. Under **Runs** the command appears with the time and the commit; while it runs it says `running`.
+3. Open Lemmata in the activity bar (the beaker). In the **Now** list the command appears under **Running** with the time and the commit; when it ends it moves to **Finished today**, with the experiment it belongs to once the hub has it.
 4. When it ends, the row shows the exit state. If the run wrote a metrics file into a results folder, its numbers are on the row (`f1=0.851 ...`).
 5. After a few seconds `not sent yet` disappears: the record is on the hub.
 

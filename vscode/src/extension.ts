@@ -1,52 +1,103 @@
+// Lemmata in VS Code: the experiment bench (S35, ADR-011).
+// The website is where you read, decide and write. VS Code is where experiments run, so this extension shows runs,
+// experiments, their setup and what to run next, in VS Code's own lists and status bar, and sends everything else to the website.
+// The hub prepares the rows (GET /p/<pid>/api/bench); this file draws them and adds the runs made on this machine.
 import * as vscode from 'vscode';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import { execFile } from 'child_process';
 import { HubClient, HubError } from './core/client';
 import { Binding, FolderRemotes, matchProjects, parseGitConfigRemotes, unmatchedRepos } from './core/remotes';
-import { Diag, LocRef, Model, NodeItem, FindingItem, toDiagnostics } from './core/model';
-import { loadModel } from './core/load';
-import { mapPath, hubPath } from './core/mapping';
-import { formatWhy } from './core/why';
+import { mapPath } from './core/mapping';
 import { isPrivateHost, normalizeServerUrl } from './core/url';
 import { oneLine } from './core/text';
 import { DEFAULT_URL, TOKEN_PREFIX, serverFromInspect, tokenFor, tokenKey } from './core/settings';
-import { HubProject, TriageState } from './core/types';
+import { HubProject } from './core/types';
 import { RunCapture } from './runs';
-import { LemmataTab, isView } from './tab';
+import { LemmataTab } from './tab';
 import { View } from './core/embed';
 import { parseOpenLink } from './core/link';
+import { isoLocal } from './core/runs';
+import { BENCH_VERSION, Bench, Conn, LocalRun, Row, RunNote, Target, asBench, barOf, clickOf, contextOf, dayPlus, flashOf, isBenchView, isRunning, newer, nowRows, siteUrl } from './core/bench';
 
-const WHY_SCHEME = 'lemmata-why';
+interface Bound { binding: Binding; bench: Bench | null; error: string | null }
+/** One line in one of the three lists: a row from the hub (or a run on this machine) and the project it belongs to. */
+interface Node { row: Row; pid: string | null; path?: string }
+type ViewId = 'now' | 'experiments' | 'torun';
+const FLASH_MS = 5 * 60 * 1000, EXT_CHECK_MS = 6 * 3600 * 1000;
+const VSIX_PATH = '/api/hub/extension.vsix', SKIP_KEY = 'lemmata.update.skipped';
+const OLD_HUB = 'Your hub is older than this extension. Update the hub (on the Mac mini: lemmata hub update) to see experiments here.';
 
-interface Bound { binding: Binding; model: Model | null; error: string | null }
-type Status = 'unconfigured' | 'offline' | 'unauthorized' | 'ok';
+class RowTree implements vscode.TreeDataProvider<Node> {
+  private readonly changed = new vscode.EventEmitter<Node | undefined>();
+  readonly onDidChangeTreeData = this.changed.event;
+  constructor(private readonly view: ViewId, private readonly roots: () => Node[]) { }
+  refresh() { this.changed.fire(undefined); }
+  dispose() { this.changed.dispose(); }
+  /** A row's place in the list, not its id alone: the same experiment can stand under two claims, and VS Code needs every line to have its own id. */
+  getChildren(n?: Node): Node[] {
+    const list: Node[] = n ? (n.row.kids || []).map(k => ({ row: k, pid: k.pid || n.pid })) : this.roots();
+    const seen = new Map<string, number>(), base = n ? (n.path || n.row.id) + '\n' : this.view + '\n';
+    for (const k of list) {
+      const i = seen.get(k.row.id) || 0;
+      seen.set(k.row.id, i + 1);
+      k.path = base + (k.pid || '') + '\n' + k.row.id + (i ? '\n#' + i : '');
+    }
+    return list;
+  }
+  getTreeItem(n: Node): vscode.TreeItem {
+    const r = n.row, kids = !!(r.kids && r.kids.length), C = vscode.TreeItemCollapsibleState;
+    const it = new vscode.TreeItem(r.label, kids ? (r.expanded ? C.Expanded : C.Collapsed) : C.None);
+    it.id = n.path || this.view + '\n' + (n.pid || '') + '\n' + r.id;      // the list keeps its place and what is open across refreshes
+    it.description = r.description;
+    it.tooltip = r.tooltip || r.label + (r.description ? '\n' + r.description : '');      // plain text: hub text is never rendered as markdown
+    if (r.icon) it.iconPath = new vscode.ThemeIcon(r.icon);
+    it.contextValue = contextOf(r);
+    const click = clickOf(r);
+    if (click) it.command = { command: 'lemmata.row.' + click, title: 'Open', arguments: [n] };
+    return it;
+  }
+}
 
-class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentContentProvider {
-  status: Status = 'unconfigured';
+class Controller {
+  status: Conn = 'unconfigured';
   bound: Bound[] = [];
   projects: HubProject[] = [];
-  names = new Map<string, string>();   // node id -> name, for "Why?" documents
+  runs: RunCapture | null = null;
+  folderByKey = new Map<string, vscode.WorkspaceFolder>();
+  /** the extension version the hub can hand out, when it is newer than this one */
+  offer: { version: string; path: string } | null = null;
   private client: HubClient | null = null;
   private serverUrl = '';
   private busy: Promise<void> | null = null;
   private again = false;
   private timer: ReturnType<typeof setInterval> | undefined;
-  private saveTimer: ReturnType<typeof setTimeout> | undefined;
-  private readonly diags = vscode.languages.createDiagnosticCollection('lemmata');
+  private refreshSoon: ReturnType<typeof setTimeout> | undefined;
+  private drawSoon: ReturnType<typeof setTimeout> | undefined;
+  private flash: { id: string; until: number } | null = null;
+  private flashTimer: ReturnType<typeof setTimeout> | undefined;
+  private extChecked = 0;
+  private lastRefresh = 0;
   private readonly bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   private readonly out = vscode.window.createOutputChannel('Lemmata');
-  private readonly changed = new vscode.EventEmitter<Item | undefined>();
-  readonly onDidChangeTreeData = this.changed.event;
-  private readonly docChanged = new vscode.EventEmitter<vscode.Uri>();
-  readonly onDidChange = this.docChanged.event;
-  folderByKey = new Map<string, vscode.WorkspaceFolder>();
+  private readonly trees: { [k in ViewId]: RowTree };
+  private views: { [k in ViewId]?: vscode.TreeView<Node> } = {};
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
-    this.bar.command = 'lemmata.showPanel';
-    ctx.subscriptions.push(this.diags, this.bar, this.out, this.changed, this.docChanged);
+    this.trees = { now: new RowTree('now', () => this.nowRoots()), experiments: new RowTree('experiments', () => this.hubRoots('experiments')), torun: new RowTree('torun', () => this.hubRoots('to_run')) };
+    ctx.subscriptions.push(this.bar, this.out, this.trees.now, this.trees.experiments, this.trees.torun);
+  }
+  register() {
+    for (const [k, id] of [['now', 'lemmata.now'], ['experiments', 'lemmata.experiments'], ['torun', 'lemmata.torun']] as [ViewId, string][]) {
+      this.views[k] = vscode.window.createTreeView(id, { treeDataProvider: this.trees[k], showCollapseAll: k !== 'now' });
+      this.ctx.subscriptions.push(this.views[k]!);
+    }
   }
 
   log(msg: string) { this.out.appendLine(new Date().toISOString() + ' ' + msg); }   // never called with tokens or headers
   cfg() { return vscode.workspace.getConfiguration('lemmata'); }
+  version(): string { return String((this.ctx.extension.packageJSON as { version?: unknown }).version || ''); }
 
   async start() {
     this.bar.show();
@@ -56,20 +107,16 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
   restartTimer() {
     if (this.timer) clearInterval(this.timer);
     const s = Math.max(10, Number(this.cfg().get('refreshSeconds', 30)) || 30);
-    this.timer = setInterval(() => { void this.refresh(); }, s * 1000);
+    this.timer = setInterval(() => { if (vscode.window.state.focused) void this.refresh(); }, s * 1000);      // a window nobody looks at does not ask the hub
   }
-  dispose() { if (this.timer) clearInterval(this.timer); if (this.saveTimer) clearTimeout(this.saveTimer); }
-  scheduleSaveRefresh() {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => { void this.refresh(); }, 1000);
-  }
+  dispose() { for (const t of [this.refreshSoon, this.drawSoon, this.flashTimer]) if (t) clearTimeout(t); if (this.timer) clearInterval(this.timer); }
 
   /* ---------- connection ---------- */
   async setup(): Promise<boolean> {
     const url = this.serverSetting();
     const token = url.ok ? await tokenFor(url.url, k => this.ctx.secrets.get(k)) : undefined;   // token of THIS origin only
     if (!token || !url.ok) { this.client = null; this.status = 'unconfigured'; return false; }
-    if (!this.client || this.serverUrl !== url.url) { this.client = new HubClient(url.url, token); this.serverUrl = url.url; }
+    if (!this.client || this.serverUrl !== url.url) { this.client = new HubClient(url.url, token); this.serverUrl = url.url; this.extChecked = 0; }
     return true;
   }
   ctx_secrets(): vscode.SecretStorage { return this.ctx.secrets; }
@@ -105,200 +152,156 @@ class Controller implements vscode.TreeDataProvider<Item>, vscode.TextDocumentCo
     return out;
   }
 
+  /** Coming back to the window refreshes the lists, but not more than once in ten seconds (the hub rebuilds the rows on every ask). */
+  refreshIfOld() { if (Date.now() - this.lastRefresh > 10000) void this.refresh(); }
+
   private async doRefresh() {
+    this.lastRefresh = Date.now();
     await vscode.commands.executeCommand('setContext', 'lemmata.connected', await this.setup());
-    if (!this.client) { this.bound = []; this.diags.clear(); this.render(); return; }
+    if (!this.client) { this.bound = []; this.draw(); return; }
     try {
       this.projects = await this.client.projects();
       const folders = await this.folderRemotes();
       const bindings = matchProjects(folders, this.projects, String(this.cfg().get('project', '')));
       const bound: Bound[] = [];
-      this.names.clear();
       for (const b of bindings) {
         try {
-          const model = await loadModel(this.client, b.project.id);
-          for (const g of model.groups) for (const n of g.nodes) this.names.set(b.project.id + '\0' + n.nodeId, n.name);
-          bound.push({ binding: b, model, error: null });
+          const doc = asBench(await this.client.bench(b.project.id));
+          bound.push({ binding: b, bench: doc, error: doc ? null : 'The hub\'s answer could not be read.' });
         } catch (e) {
           if (e instanceof HubError && (e.offline || e.unauthorized)) throw e;
-          bound.push({ binding: b, model: null, error: e instanceof Error ? e.message : String(e) });
+          bound.push({ binding: b, bench: null, error: e instanceof HubError && e.status === 404 ? OLD_HUB : e instanceof Error ? e.message : String(e) });
         }
       }
       this.bound = bound;
       this.status = 'ok';
-      this.publish();
+      if (Date.now() - this.extChecked > EXT_CHECK_MS) void this.checkExtension(false);
     } catch (e) {
-      if (e instanceof HubError && e.unauthorized) { this.status = 'unauthorized'; this.diags.clear(); this.bound = []; }
-      else this.status = 'offline';   // keep the last diagnostics so the editor does not flicker
+      if (e instanceof HubError && e.unauthorized) { this.status = 'unauthorized'; this.bound = []; }
+      else this.status = 'offline';   // keep the last rows so the lists do not go blank
       this.log('refresh failed: ' + (e instanceof HubError ? 'HTTP ' + e.status + ' ' + e.code : 'error'));
     }
-    this.render();
+    this.draw();
   }
 
-  /* ---------- diagnostics ---------- */
-  diagnosticsFor(b: Bound): Diag[] {
-    return b.model ? toDiagnostics(b.model, b.binding.folders, b.binding.subdirs) : [];
+  /* ---------- what the lists show ---------- */
+  private note(id: string): { note: RunNote; pid: string } | undefined {
+    for (const b of this.bound) if (b.bench && b.bench.runs[id]) return { note: b.bench.runs[id], pid: b.binding.project.id };
+    return undefined;
   }
-  private publish() {
-    const per = new Map<string, { uri: vscode.Uri; list: vscode.Diagnostic[] }>();
+  private locals(): LocalRun[] { return this.runs ? this.runs.locals() : []; }
+  private nowRoots(): Node[] {
+    const elsewhere: Row[] = [];
+    for (const b of this.bound) if (b.bench) for (const r of b.bench.elsewhere) elsewhere.push({ ...r, pid: b.binding.project.id, attach: true });
+    const today = isoLocal(new Date()).slice(0, 10);
+    return nowRows({ local: this.locals(), note: id => { const n = this.note(id); return n && n.note; }, elsewhere, today, nowMs: Date.now(), hubKnows: this.status === 'ok' })
+      .map(row => ({ row, pid: null }));
+  }
+  private hubRoots(which: 'experiments' | 'to_run'): Node[] {
+    const out: Node[] = [];
+    const many = this.bound.length > 1;
     for (const b of this.bound) {
-      for (const d of this.diagnosticsFor(b)) {
-        const folder = this.folderByKey.get(d.folder);
-        if (!folder) continue;
-        const uri = vscode.Uri.joinPath(folder.uri, ...d.rel.split('/'));
-        const diag = new vscode.Diagnostic(new vscode.Range(d.line0, 0, d.line0, 10000), d.message,
-          d.severity === 'error' ? vscode.DiagnosticSeverity.Error : d.severity === 'information' ? vscode.DiagnosticSeverity.Information : vscode.DiagnosticSeverity.Warning);
-        diag.source = d.source; diag.code = d.code;
-        const k = uri.toString();
-        if (!per.has(k)) per.set(k, { uri, list: [] });
-        per.get(k)!.list.push(diag);
-      }
+      const pid = b.binding.project.id, name = oneLine(b.binding.project.name, 60);
+      const rows: Row[] = b.bench ? b.bench[which] : [{ id: 'err', label: oneLine(b.error || 'Not available', 160), icon: 'warning', tooltip: b.error || '' }];
+      if (b.bench && b.bench.version > BENCH_VERSION && which === 'experiments')
+        rows.unshift({ id: 'newer', label: 'The hub is newer than this extension: some rows may be missing', icon: 'info', tooltip: 'Use "Lemmata: Go to…" → Install the newer extension.' });
+      if (many) out.push({ row: { id: 'p|' + pid, label: name, icon: 'repo', kids: rows, expanded: true }, pid });
+      else for (const row of rows) out.push({ row, pid });
     }
-    this.diags.clear();
-    for (const { uri, list } of per.values()) this.diags.set(uri, list);
+    return out;
   }
-
-  /* ---------- status bar ---------- */
-  private render() {
-    const n = this.bound.reduce((s, b) => s + (b.model ? b.model.recheck : 0), 0);
-    let text: string, tip: string, warn = false;
-    if (this.status === 'unconfigured') { text = 'Lemmata: connect'; tip = 'Click to connect to your Lemmata server'; this.bar.command = 'lemmata.connect'; }
-    else if (this.status === 'unauthorized') { text = 'Lemmata: token rejected'; tip = 'The server did not accept the token. Click to connect again.'; warn = true; this.bar.command = 'lemmata.connect'; }
-    else if (this.status === 'offline') { text = 'Lemmata: offline'; tip = 'Cannot reach ' + this.serverUrl + '. Showing the last results. Click to open the panel.'; warn = true; this.bar.command = 'lemmata.showPanel'; }
-    else if (!this.bound.length) { text = 'Lemmata: no project'; tip = 'No Lemmata project matches this repository yet. Click to add it.'; this.bar.command = 'lemmata.addProject'; }
-    else { text = 'Lemmata: ' + n + ' to recheck'; tip = n + ' to recheck since ' + (this.bound[0].model && this.bound[0].model.checkpoint ? 'checkpoint ' + this.bound[0].model.checkpoint.toUpperCase() : 'the checkpoint') + '. Click to open the panel.'; warn = n > 0; this.bar.command = 'lemmata.showPanel'; }
-    this.bar.text = text; this.bar.tooltip = tip;
-    this.bar.backgroundColor = warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
-    this.changed.fire(undefined);
-  }
-
-  /* ---------- tree ---------- */
-  getTreeItem(e: Item) { return e; }
-  getChildren(e?: Item): Item[] {
-    if (!e) return this.roots();
-    return e.kids();
-  }
-  private roots(): Item[] {
-    if (this.status === 'unconfigured') return [];
-    const items: Item[] = [];
-    if (this.status === 'offline') items.push(new Item('Offline: showing the last results', 'message', { kind: 'info' }, 'warning'));
-    if (this.status === 'unauthorized') items.push(new Item('Token rejected: connect again', 'message', { kind: 'info' }, 'error'));
-    if (this.status === 'ok' && !this.bound.length) {
-      const o = String(this.cfg().get('project', ''));
-      items.push(new Item(o ? 'Project "' + oneLine(o, 40) + '" was not found on the server' : 'No hub project matches this workspace', 'message', { kind: 'info' }, 'info'));
-      items.push(new Item('Hub projects: ' + (this.projects.map(p => oneLine(p.name, 30)).join(', ') || 'none'), 'message', { kind: 'info' }, 'list-unordered'));
-      if (!o) items.push(new Item('Add this repository to Lemmata…', 'command', { kind: 'addProject' }, 'add'));
-      items.push(new Item('Open the project\'s GitHub clone, or set lemmata.project', 'command', { kind: 'settings' }, 'gear'));
-    }
-    for (const b of this.bound) {
-      if (b.error) { items.push(new Item(oneLine(b.binding.project.name, 40) + ': ' + oneLine(b.error, 80), 'message', { kind: 'info' }, 'error')); continue; }
-      if (!b.model) continue;
-      const wrap = this.bound.length > 1;
-      const kids = new Item(oneLine(b.binding.project.name, 60), 'project', { kind: 'project', b }, 'repo', this.bound.length > 1 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
-      items.push(...(wrap ? [kids] : kids.kids()));
-    }
-    return items;
-  }
-  /** Is this repo of the project open in the workspace? Used to dim panel-only rows. */
-  mapped(b: Bound, loc: LocRef | null): vscode.Uri | null {
-    if (!loc) return null;
-    const m = mapPath(b.binding.folders, loc.repo, loc.path, b.binding.subdirs);
+  /** Is this file of the project open in the workspace? */
+  mapped(pid: string, repo: string, rel: string): vscode.Uri | null {
+    const b = this.bound.find(x => x.binding.project.id === pid);
+    const m = b ? mapPath(b.binding.folders, repo, rel, b.binding.subdirs) : null;
     const f = m && this.folderByKey.get(m.folder);
     return m && f ? vscode.Uri.joinPath(f.uri, ...m.rel.split('/')) : null;
   }
-
-  /** Open a hub location (repo "code" or "paper", repo-relative path) of project `pid` in the editor, beside the current tab. */
-  async openLocation(pid: string, repo: string, rel: string, line: number): Promise<boolean> {
-    const b = this.bound.find(x => x.binding.project.id === pid);
-    const uri = b ? this.mapped(b, { repo, path: rel } as LocRef) : null;
+  /** Open a hub location (repo "code" or "paper", repo-relative path) of project `pid` in the editor. */
+  async openLocation(pid: string, repo: string, rel: string, line: number, beside = true): Promise<boolean> {
+    const uri = this.mapped(pid, repo, rel);
     if (!uri) return false;
     const l0 = Math.max(0, Math.floor(line) - 1);
-    try { await vscode.window.showTextDocument(uri, { selection: new vscode.Range(l0, 0, l0, 0), preview: true, viewColumn: vscode.ViewColumn.Beside }); return true; }
+    try { await vscode.window.showTextDocument(uri, { selection: new vscode.Range(l0, 0, l0, 0), preview: true, viewColumn: beside ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active }); return true; }
     catch { return false; }
   }
-  private refreshSoon: ReturnType<typeof setTimeout> | undefined;
-  /** The Lemmata tab changed something on the hub: refresh the panel and warnings shortly after. */
+  /** Something changed on the hub (the tab saved something, runs arrived): fetch the rows again shortly after. */
   hubChanged() { if (this.refreshSoon) clearTimeout(this.refreshSoon); this.refreshSoon = setTimeout(() => { void this.refresh(); }, 1500); }
 
-  /* ---------- virtual document for "Why?" ---------- */
-  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
-    const q = new URLSearchParams(uri.query);
-    const pid = q.get('pid') || '', group = q.get('group') || '', node = q.get('node') || '';
-    if (!this.client || !pid || !group || !node) return 'Not connected to a Lemmata server.\n';
+  /* ---------- runs on this machine (RunHost) ---------- */
+  runsChanged() { if (this.drawSoon) clearTimeout(this.drawSoon); this.drawSoon = setTimeout(() => this.draw(), 150); }
+  runsSent() { this.hubChanged(); }
+  runEnded(runId: string) {
+    this.flash = { id: runId, until: Date.now() + FLASH_MS };
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+    this.flashTimer = setTimeout(() => { this.flash = null; this.draw(); }, FLASH_MS + 500);
+    this.draw();
+  }
+
+  /* ---------- the lists, their counts, and the one status-bar item ---------- */
+  private draw() {
+    const local = this.locals(), now = Date.now();
+    const running = local.filter(r => isRunning(r, now)).length, unsent = local.filter(r => !r.sent && !isRunning(r, now)).length;
+    const toRun = this.bound.reduce((s, b) => s + (b.bench ? b.bench.counts.to_run : 0), 0);
+    let flash: string | null = null;
+    if (this.flash && now < this.flash.until) {
+      const r = local.find(x => x.id === this.flash!.id), n = this.note(this.flash.id);
+      if (r) flash = flashOf(r, n && n.note);
+    }
+    const b = barOf({ conn: this.status, server: this.serverUrl, projects: this.bound.length, running, unsent, toRun, flash });
+    this.bar.text = b.text; this.bar.tooltip = b.tooltip; this.bar.command = b.command;
+    this.bar.backgroundColor = b.warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+    const set = (k: string, v: boolean) => { void vscode.commands.executeCommand('setContext', k, v); };
+    set('lemmata.hasProject', this.bound.length > 0);
+    set('lemmata.hasExperiments', this.bound.some(x => !x.bench || x.bench.experiments.length > 0));
+    set('lemmata.hasToRun', this.bound.some(x => !x.bench || x.bench.to_run.length > 0));
+    const note = this.status === 'offline' ? 'Offline: showing what was last read from the hub.' : this.status === 'unauthorized' ? 'The hub did not accept the token. Connect again.' : undefined;
+    for (const k of ['now', 'experiments', 'torun'] as ViewId[]) {
+      const v = this.views[k];
+      if (v) v.message = k === 'now' && this.status === 'offline' ? 'Offline: runs are still logged here and sent when the hub is back.' : k === 'now' ? undefined : note;
+      this.trees[k].refresh();
+    }
+    if (this.views.now) this.views.now.badge = running ? { value: running, tooltip: running + ' running' } : undefined;
+    if (this.views.torun) this.views.torun.description = toRun ? String(toRun) : undefined;
+  }
+
+  /* ---------- a newer extension on the hub ---------- */
+  async checkExtension(manual: boolean) {
+    const client = this.client;
+    if (!client) return;
+    this.extChecked = Date.now();
     try {
-      const a = await this.client.analyze(pid, group, node);
-      return formatWhy(a, id => this.names.get(pid + '\0' + id) || id);
+      const ext = (await client.status()).extension, own = this.version();
+      this.offer = ext && typeof ext.version === 'string' && ext.path === VSIX_PATH && newer(ext.version, own) ? { version: ext.version, path: VSIX_PATH } : null;
+      if (!this.offer) { if (manual) void vscode.window.showInformationMessage('Lemmata: this extension (' + own + ') is the newest your hub has.'); return; }
+      if (!manual && this.ctx.globalState.get<string>(SKIP_KEY) === this.offer.version) return;      // asked once per version
+      const a = await vscode.window.showInformationMessage('Lemmata: your hub has a newer version of this extension (' + this.offer.version + '; this is ' + own + ').', 'Install', 'Not now');
+      if (a === 'Install') await this.installExtension();
+      else if (a === 'Not now') await this.ctx.globalState.update(SKIP_KEY, this.offer.version);
+    } catch (e) { if (manual) void fail('could not ask the hub', e); }
+  }
+  async installExtension() {
+    const client = this.client, offer = this.offer;
+    if (!client || !offer) return;
+    let file = '';
+    try {
+      const r = await client.raw('GET', offer.path, undefined, 40 * 1024 * 1024);
+      if (r.status !== 200 || r.data.length < 1000 || r.data[0] !== 0x50 || r.data[1] !== 0x4b) throw new Error('the hub did not send an extension file (HTTP ' + r.status + ')');
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lemmata-ext-'));
+      file = path.join(dir, 'lemmata-' + offer.version + '.vsix');
+      await fs.writeFile(file, r.data);
+      await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(file));
+      const a = await vscode.window.showInformationMessage('Lemmata ' + offer.version + ' is installed. Reload the window to use it.', 'Reload window');
+      if (a) await vscode.commands.executeCommand('workbench.action.reloadWindow');
     } catch (e) {
-      return 'Could not load the explanation: ' + (e instanceof Error ? e.message : String(e)) + '\n';
+      void vscode.window.showErrorMessage('Lemmata: the newer extension could not be installed (' + (e instanceof Error ? oneLine(e.message, 200) : 'error') + ').'
+        + (file ? ' Install it by hand: Extensions → ⋯ → Install from VSIX…, file ' + file : ''));
     }
   }
 }
-
-type Data =
-  | { kind: 'info' } | { kind: 'settings' } | { kind: 'addProject' }
-  | { kind: 'project'; b: Bound }
-  | { kind: 'alarms'; b: Bound } | { kind: 'findings'; b: Bound }
-  | { kind: 'group'; b: Bound; gi: number }
-  | { kind: 'check'; b: Bound; ci: number }
-  | { kind: 'node'; b: Bound; n: NodeItem; groupId: string; uri: vscode.Uri | null }
-  | { kind: 'finding'; b: Bound; f: FindingItem; uri: vscode.Uri | null };
 
 let CTRL: Controller;
 let TAB: LemmataTab;
-
-const STATE_LABEL: Record<TriageState, string> = { unreviewed: '', reviewed: 'reviewed', needs_fixing: 'needs fixing', ignored: 'ignored' };
-
-class Item extends vscode.TreeItem {
-  constructor(label: string, ctx: string, public data: Data, icon?: string, collapsible = vscode.TreeItemCollapsibleState.None) {
-    super(label, collapsible);
-    this.contextValue = ctx;
-    if (icon) this.iconPath = new vscode.ThemeIcon(icon);
-    if (data.kind === 'settings') this.command = { command: 'workbench.action.openSettings', title: 'Open settings', arguments: ['lemmata.project'] };
-    if (data.kind === 'addProject') this.command = { command: 'lemmata.addProject', title: 'Add this repository to Lemmata' };
-  }
-  kids(): Item[] {
-    const d = this.data;
-    const C = vscode.TreeItemCollapsibleState;
-    if (d.kind === 'project') {
-      return [this.mk('Alarms (' + (d.b.model ? d.b.model.groups.reduce((s, g) => s + g.nodes.length, 0) : 0) + ')', 'alarms', { kind: 'alarms', b: d.b }, 'history', C.Expanded),
-        this.mk('Findings (' + (d.b.model ? d.b.model.checks.reduce((s, c) => s + c.items.length, 0) : 0) + ')', 'findings', { kind: 'findings', b: d.b }, 'checklist', C.Expanded)];
-    }
-    if (d.kind === 'alarms' && d.b.model) {
-      const m = d.b.model;
-      if (!m.groups.length) return [new Item(m.checkpoint ? 'Nothing to recheck since ' + m.checkpoint.toUpperCase() : 'No checkpoint yet (use Set checkpoint)', 'message', { kind: 'info' }, 'pass')];
-      return m.groups.map((g, gi) => new Item(g.display + ' · ' + [g.short, g.subject].filter(Boolean).join(' '), 'group', { kind: 'group', b: d.b, gi }, 'git-commit', C.Expanded));
-    }
-    if (d.kind === 'group' && d.b.model) {
-      const g = d.b.model.groups[d.gi];
-      return g.nodes.map(n => {
-        const uri = CTRL.mapped(d.b, n.loc);
-        const it = new Item(n.name, 'node' + (n.role === 'removed' ? '' : '-triageable-why') + (uri ? '-mapped' : ''), { kind: 'node', b: d.b, n, groupId: g.id, uri }, n.role === 'changed' ? 'edit' : n.role === 'removed' ? 'trash' : 'arrow-down');
-        it.description = [n.relation, STATE_LABEL[n.triage] ? '[' + STATE_LABEL[n.triage] + ']' : '', n.loc && !uri ? '(' + hubPath(n.loc.repo, n.loc.path) + ': repo not open here)' : ''].filter(Boolean).join(' ');
-        it.tooltip = n.name + '\n' + (n.loc ? hubPath(n.loc.repo, n.loc.path) + (n.loc.line ? ':' + n.loc.line : '') : '') + (n.outdated ? '\nTriage is outdated: the item changed after you triaged it.' : '');
-        if (uri && n.loc) it.command = { command: 'lemmata.openItem', title: 'Open', arguments: [uri, (n.loc.line || 1) - 1] };
-        return it;
-      });
-    }
-    if (d.kind === 'findings' && d.b.model) {
-      const m = d.b.model;
-      if (!m.checks.length) return [new Item('No findings', 'message', { kind: 'info' }, 'pass')];
-      return m.checks.map((c, ci) => new Item(c.title + ' (' + c.items.length + ')', 'check', { kind: 'check', b: d.b, ci }, 'symbol-event', C.Collapsed));
-    }
-    if (d.kind === 'check' && d.b.model) {
-      return d.b.model.checks[d.ci].items.map(f => {
-        const first = f.locs[0] || null;
-        const uri = CTRL.mapped(d.b, first);
-        const it = new Item(f.message, 'finding-triageable' + (uri ? '-mapped' : ''), { kind: 'finding', b: d.b, f, uri }, f.severity === 'info' ? 'info' : 'warning');
-        it.description = [first ? hubPath(first.repo, first.path) + (first.line ? ':' + first.line : '') : '', STATE_LABEL[f.triage] ? '[' + STATE_LABEL[f.triage] + ']' : '', first && !uri ? '(repo not open here)' : ''].filter(Boolean).join(' ');
-        it.tooltip = f.message + (f.locs.length > 1 ? '\n' + f.locs.map(l => hubPath(l.repo, l.path) + (l.line ? ':' + l.line : '')).join('\n') : '');
-        if (uri && first) it.command = { command: 'lemmata.openItem', title: 'Open', arguments: [uri, (first.line || 1) - 1] };
-        return it;
-      });
-    }
-    return [];
-  }
-  private mk(label: string, ctx: string, data: Data, icon: string, c: vscode.TreeItemCollapsibleState) { return new Item(label, ctx, data, icon, c); }
-}
 
 /* ---------- git remotes ---------- */
 function gitRemotes(cwd: string): Promise<string[]> {
@@ -366,20 +369,15 @@ async function addProject() {
 }
 
 /* ---------- commands ---------- */
-function projectTarget(arg?: Item): { client: HubClient; pid: string } | null {
+const needConnect = () => { void vscode.window.showWarningMessage('Lemmata: connect to a server first.', 'Connect').then(a => a && vscode.commands.executeCommand('lemmata.connect')); };
+/** The project a command is about: the row's own, the only one, or the one you pick. */
+async function pickProject(pid?: string | null): Promise<{ client: HubClient; pid: string; name: string } | null> {
   const client = CTRL.clientOrNull();
-  if (!client) { void vscode.window.showWarningMessage('Lemmata: connect to a server first.', 'Connect').then(a => a && vscode.commands.executeCommand('lemmata.connect')); return null; }
-  const d = arg && arg.data;
-  if (d && 'b' in d) return { client, pid: d.b.binding.project.id };
-  return null;
-}
-async function pickProject(arg?: Item): Promise<{ client: HubClient; pid: string; name: string } | null> {
-  const client = CTRL.clientOrNull();
-  if (!client) { void vscode.window.showWarningMessage('Lemmata: connect to a server first.', 'Connect').then(a => a && vscode.commands.executeCommand('lemmata.connect')); return null; }
-  const t = projectTarget(arg);
-  if (t) return { ...t, name: '' };
-  if (!CTRL.bound.length) { void vscode.window.showInformationMessage('Lemmata: no hub project matches this workspace. Open the project\'s GitHub clone or set "lemmata.project".'); return null; }
-  if (CTRL.bound.length === 1) return { client, pid: CTRL.bound[0].binding.project.id, name: CTRL.bound[0].binding.project.name };
+  if (!client) { needConnect(); return null; }
+  const nameOf = (id: string) => { const b = CTRL.bound.find(x => x.binding.project.id === id); return b ? oneLine(b.binding.project.name, 40) : ''; };
+  if (pid) return { client, pid, name: nameOf(pid) };
+  if (!CTRL.bound.length) { void vscode.window.showInformationMessage('Lemmata: no hub project matches this workspace. Open the project\'s GitHub clone, add it with "Lemmata: Add This Repository", or set "lemmata.project".'); return null; }
+  if (CTRL.bound.length === 1) return { client, pid: CTRL.bound[0].binding.project.id, name: nameOf(CTRL.bound[0].binding.project.id) };
   const pick = await vscode.window.showQuickPick(CTRL.bound.map(b => ({ label: oneLine(b.binding.project.name, 60), pid: b.binding.project.id })), { placeHolder: 'Which Lemmata project?' });
   return pick ? { client, pid: pick.pid, name: pick.label } : null;
 }
@@ -413,22 +411,22 @@ async function connect() {
   }
 }
 
-function setTriage(state: TriageState) {
-  return async (it?: Item) => {
-    const d = it && it.data;
-    if (!d || (d.kind !== 'node' && d.kind !== 'finding')) return;
-    const client = CTRL.clientOrNull(); if (!client) return;
-    const note = await vscode.window.showInputBox({ title: 'Lemmata: ' + STATE_LABEL[state], prompt: 'Optional note (kept in the project\'s triage file on the server)', ignoreFocusOut: true });
-    if (note === undefined) return;   // Escape cancels
-    try {
-      if (d.kind === 'node') await client.setTriage(d.b.binding.project.id, 'node', d.n.nodeId, state, note);
-      else await client.setTriage(d.b.binding.project.id, 'finding', d.f.id, state, note);
-      await CTRL.refresh();
-    } catch (e) { void fail('could not save triage', e); }
-  };
+/** Open a page: the experiment pages in VS Code's tab, every other page on the website. */
+async function openPage(t: Target, pid?: string | null, where: 'tab' | 'site' | 'auto' = 'auto') {
+  const p = await pickProject(pid); if (!p) return;
+  if (where !== 'site' && isBenchView(t.view)) await TAB.open(p.client, CTRL.serverBase(), p.pid, p.name, t.view as View, t.sel || (t.view === 'setup' ? 'page' : null));
+  else await vscode.env.openExternal(vscode.Uri.parse(siteUrl(CTRL.serverBase(), p.pid, t), true));
+}
+/** The map alone, in a wide editor tab (or a window of its own). On the hub the map is the top of Setup; "map" asks the page for it alone. */
+async function openMap(ownWindow: boolean, pid?: string | null) {
+  const p = await pickProject(pid); if (!p) return;
+  await TAB.open(p.client, CTRL.serverBase(), p.pid, p.name, 'setup', 'map');
+  if (!ownWindow) return;
+  try { await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow'); }
+  catch { void vscode.window.showInformationMessage('Lemmata: this VS Code cannot move a tab into its own window. Drag the tab out of the window instead.'); }
 }
 
-/** "Open in VS Code" on the website: open the Lemmata tab on that page, with the claim or experiment selected. */
+/** "Open in VS Code" on the website: an experiment page opens in the tab with the claim or experiment selected; any other page opens on the website. */
 async function openFromLink(u: vscode.Uri) {
   const l = parseOpenLink(u.path, u.query);
   if (!l) { void vscode.window.showWarningMessage('Lemmata: that link is not one Lemmata understands.'); return; }
@@ -438,69 +436,126 @@ async function openFromLink(u: vscode.Uri) {
   if (!projects.some(p => p.id === l.pid)) { try { projects = await client.projects(); } catch (e) { void fail('could not reach the server', e); return; } }
   const p = projects.find(x => x.id === l.pid);
   if (!p) { void vscode.window.showWarningMessage('Lemmata: that project is not on the server this VS Code is connected to (' + CTRL.serverBase() + ').'); return; }
-  await TAB.open(client, CTRL.serverBase(), p.id, oneLine(p.name, 40), l.view, l.sel);
+  if (isBenchView(l.view)) await TAB.open(client, CTRL.serverBase(), p.id, oneLine(p.name, 40), l.view, l.sel);
+  else await vscode.env.openExternal(vscode.Uri.parse(siteUrl(CTRL.serverBase(), p.id, { view: l.view, sel: l.sel || undefined }), true));
 }
+
+async function syncHub(pid?: string | null) {
+  const t = await pickProject(pid); if (!t) return;
+  await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: the hub is reading your code and paper from GitHub…' }, async () => {
+    try {
+      const r = await t.client.sync(t.pid);
+      const code = r.code ? r.code.changed : !!r.changed, paper = !!(r.paper && r.paper.changed);
+      const perr = r.paper && r.paper.error;
+      if (perr) void vscode.window.showWarningMessage('Lemmata: paper sync: ' + oneLine(perr, 200) + (code ? ' (code was synced)' : ''));
+      else void vscode.window.showInformationMessage(code || paper ? 'Lemmata: synced' + (code ? ' code' : '') + (paper ? ' paper' : '') + ' and rescanned.' : 'Lemmata: already up to date.');
+      await CTRL.refresh();
+    } catch (e) { void fail('sync failed', e); }
+  });
+}
+
+/** One picker instead of a command per page. */
+async function goTo() {
+  type It = vscode.QuickPickItem & { run?: () => unknown };
+  const sep = (label: string): It => ({ label, kind: vscode.QuickPickItemKind.Separator });
+  const focus = (id: string) => () => vscode.commands.executeCommand(id + '.focus');
+  const site = (view: string) => () => openPage({ view }, null, 'site');
+  const cmd = (id: string) => () => vscode.commands.executeCommand(id);
+  const connected = !!CTRL.clientOrNull();
+  const items: It[] = [
+    sep('In VS Code'),
+    { label: '$(beaker) Now', description: 'runs on this machine', run: focus('lemmata.now') },
+    { label: '$(target) Experiments', description: 'each claim, its experiments and their setup', run: focus('lemmata.experiments') },
+    { label: '$(checklist) To run', description: 'what to run next', run: focus('lemmata.torun') },
+    { label: '$(type-hierarchy) Map', description: 'thesis, claims, experiments and what they use, in a wide tab', run: () => openMap(false) },
+    { label: '$(empty-window) Map in its own window', run: () => openMap(true) },
+    { label: '$(table) Setup', description: 'measures, datasets, methods and coverage, in a tab', run: () => openPage({ view: 'setup' }) },
+    { label: '$(list-tree) Thesis', description: 'claims and experiments, top down, in a tab', run: () => openPage({ view: 'experiments' }) },
+    sep('On the website (opens your browser)'),
+    { label: 'Home', description: 'thesis, calendar, next to do', run: site('digest') },
+    { label: 'Baselines', description: 'paper, code, idea and published numbers', run: site('baselines') },
+    { label: 'Key numbers', run: site('numbers') },
+    { label: 'LaTeX', description: 'tables, paragraphs and captions to paste', run: site('latex') },
+    { label: 'Review', description: 'paper checks and changes', run: site('review') },
+    { label: 'Trail', description: 'deadlines and what was done', run: site('history') },
+    { label: 'Settings and FAQ', run: site('settings') },
+    sep('Do'),
+    { label: '$(cloud-upload) Send runs to the hub now', run: cmd('lemmata.runs.sync') },
+    { label: '$(sync) Sync the hub with GitHub now', run: () => syncHub() },
+    { label: '$(hubot) Set up the coding agent (Claude Code)', run: cmd('lemmata.setupAgent') },
+    { label: '$(add) Add this repository to Lemmata', run: cmd('lemmata.addProject') },
+    CTRL.offer ? { label: '$(arrow-up) Install the newer extension from the hub', description: CTRL.offer.version, run: () => CTRL.installExtension() }
+      : { label: '$(arrow-up) Check the hub for a newer extension', description: 'this is ' + CTRL.version(), run: () => CTRL.checkExtension(true) },
+    connected ? { label: '$(debug-disconnect) Disconnect (forget the token)', run: cmd('lemmata.disconnect') } : { label: '$(plug) Connect to your server', run: cmd('lemmata.connect') },
+  ];
+  const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Lemmata: go to…', matchOnDescription: true });
+  if (pick && pick.run) await pick.run();
+}
+
+/* ---------- what a row can do ---------- */
+const rowOf = (n?: Node): Row | null => (n && n.row && typeof n.row.id === 'string' ? n.row : null);
+
+async function rowOpen(n?: Node) {
+  const r = rowOf(n); if (!r || !r.open || !n || !n.pid) return;
+  if (!(await CTRL.openLocation(n.pid, r.open.repo, r.open.path, r.open.line, false)))
+    void vscode.window.showInformationMessage('Lemmata: ' + r.open.path + ' is not in a folder open in this window (or this checkout is older than the hub\'s copy: pull).');
+}
+async function rowCopy(n?: Node) {
+  const r = rowOf(n); if (!r || !r.copy) return;
+  await vscode.env.clipboard.writeText(r.copy.text);
+  vscode.window.setStatusBarMessage('Lemmata: copied ' + r.copy.what + (/prompt/.test(r.copy.what) ? '. Paste it into Claude Code.' : '.'), 5000);
+  const client = CTRL.clientOrNull();
+  if (client && n && n.pid && r.kind === 'plan' && r.id.startsWith('plan:')) { try { await client.planCopied(n.pid, r.id.slice(5)); CTRL.hubChanged(); } catch { /* the prompt is on the clipboard either way */ } }
+}
+async function rowSnooze(n?: Node) {
+  const r = rowOf(n), client = CTRL.clientOrNull(); if (!r || !r.snooze || !n || !n.pid || !client) return;
+  const b = CTRL.bound.find(x => x.binding.project.id === n.pid);
+  const today = (b && b.bench && /^\d{4}-\d{2}-\d{2}$/.test(b.bench.today) ? b.bench.today : isoLocal(new Date()).slice(0, 10));
+  const pick = await vscode.window.showQuickPick([{ label: 'Until tomorrow', days: 1 }, { label: 'For a week', days: 7 }, { label: 'For a month', days: 30 }].map(o => ({ ...o, description: 'back on ' + dayPlus(today, o.days) })),
+    { placeHolder: 'Hide "' + oneLine(r.label, 60) + '" from the list for how long? (It also leaves the website\'s to-do list.)' });
+  if (!pick) return;
+  try { await client.snooze(n.pid, r.snooze, dayPlus(today, pick.days)); await CTRL.refresh(); }
+  catch (e) { void fail('could not snooze it', e); }
+}
+async function runAttach(n?: Node) {
+  const r = rowOf(n), client = CTRL.clientOrNull(); if (!r || !r.run || !n || !client) return;
+  const pid = n.pid || r.pid; if (!pid) return;
+  const b = CTRL.bound.find(x => x.binding.project.id === pid);
+  if (!b || !b.bench) { void vscode.window.showInformationMessage('Lemmata: ' + (b && b.error ? b.error : 'the hub has not been read yet.')); return; }
+  if (r.file && CTRL.runs && !(await CTRL.runs.ensureSent(r.run))) { void vscode.window.showWarningMessage('Lemmata: this run is not on the hub yet, so it cannot be attached. Try "Send runs to the hub now".'); return; }
+  const cur = b.bench.runs[r.run];
+  const items: (vscode.QuickPickItem & { x: string | null })[] = b.bench.pick.map(p => ({ label: p.label, description: p.description + (cur && cur.x === p.id ? ' · now' : ''), x: p.id }));
+  if (!items.length) { void vscode.window.showInformationMessage('Lemmata: this project has no experiments yet. Confirm the project map on the website first.'); return; }
+  if (cur && cur.how === 'attached') items.push({ label: 'Take my choice back', description: 'let Lemmata\'s rules decide again', x: null });
+  const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Which experiment does this run belong to?', matchOnDescription: true });
+  if (!pick) return;
+  try { await client.attachRun(pid, r.run, pick.x); await CTRL.refresh(); }
+  catch (e) { void fail('could not attach the run', e); }
+}
+
 export async function activate(ctx: vscode.ExtensionContext) {
   CTRL = new Controller(ctx);
   const c = vscode.commands.registerCommand;
   ctx.subscriptions.push(vscode.window.registerUriHandler({ handleUri: u => { void openFromLink(u); } }));
+  CTRL.register();
   ctx.subscriptions.push(
-    vscode.window.createTreeView('lemmata.panel', { treeDataProvider: CTRL, showCollapseAll: true }),
-    vscode.workspace.registerTextDocumentContentProvider(WHY_SCHEME, CTRL),
     c('lemmata.connect', connect),
     c('lemmata.disconnect', async () => { const u = CTRL.serverSetting(); if (u.ok) await ctx.secrets.delete(tokenKey(u.url)); CTRL.resetClient(); await CTRL.refresh(); void vscode.window.showInformationMessage('Lemmata: token removed from this computer.'); }),
-    c('lemmata.refresh', () => CTRL.refresh()),
+    c('lemmata.refresh', async () => { if (CTRL.runs) await CTRL.runs.refresh(); await CTRL.refresh(); }),
     c('lemmata.showPanel', async () => { await vscode.commands.executeCommand('workbench.view.extension.lemmata'); void CTRL.refresh(); }),
-    c('lemmata.openItem', async (uri: vscode.Uri, line0: number) => {
-      try { await vscode.window.showTextDocument(uri, { selection: new vscode.Range(line0, 0, line0, 0), preview: true }); }
-      catch { void vscode.window.showWarningMessage('Lemmata: ' + vscode.workspace.asRelativePath(uri) + ' is not in this checkout (try Sync now, then pull).'); }
-    }),
-    c('lemmata.markReviewed', setTriage('reviewed')),
-    c('lemmata.markNeedsFixing', setTriage('needs_fixing')),
-    c('lemmata.markIgnored', setTriage('ignored')),
-    c('lemmata.why', async (it?: Item) => {
-      const d = it && it.data; if (!d || d.kind !== 'node') return;
-      const uri = vscode.Uri.from({ scheme: WHY_SCHEME, path: '/Why ' + d.n.name.replace(/[\\/]/g, ' ') + '.diff',
-        query: new URLSearchParams({ pid: d.b.binding.project.id, group: d.groupId, node: d.n.nodeId }).toString() });
-      const doc = await vscode.workspace.openTextDocument(uri);
-      try { await vscode.languages.setTextDocumentLanguage(doc, 'diff'); } catch { /* plain text is fine */ }
-      await vscode.window.showTextDocument(doc, { preview: true });
-    }),
+    c('lemmata.goto', goTo),
     c('lemmata.addProject', addProject),
-    c('lemmata.openInLemmata', async (it?: Item) => {
-      const t = await pickProject(it); if (!t) return;
-      await vscode.env.openExternal(vscode.Uri.parse(CTRL.serverBase() + '/p/' + encodeURIComponent(t.pid) + '/'));
-    }),
-    ...(['', 'digest', 'review', 'claims', 'experiments', 'setup', 'history'] as const).map(v => c('lemmata.openTab' + (v ? '.' + v : ''), async (arg?: Item | string) => {
-      const t = await pickProject(typeof arg === 'string' ? undefined : arg); if (!t) return;
-      const view: View | undefined = v || (isView(arg) ? arg : undefined);
-      const b = CTRL.bound.find(x => x.binding.project.id === t.pid);
-      await TAB.open(t.client, CTRL.serverBase(), t.pid, t.name || (b ? oneLine(b.binding.project.name, 40) : ''), view);
-    })),
-    c('lemmata.sync', async (it?: Item) => {
-      const t = await pickProject(it); if (!t) return;
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Lemmata: syncing your code and paper from GitHub…' }, async () => {
-        try {
-          const r = await t.client.sync(t.pid);
-          const code = r.code ? r.code.changed : !!r.changed, paper = !!(r.paper && r.paper.changed);
-          const perr = r.paper && r.paper.error;
-          if (perr) void vscode.window.showWarningMessage('Lemmata: paper sync: ' + oneLine(perr, 200) + (code ? ' (code was synced)' : ''));
-          else void vscode.window.showInformationMessage(code || paper ? 'Lemmata: synced' + (code ? ' code' : '') + (paper ? ' paper' : '') + ' and rescanned.' : 'Lemmata: already up to date.');
-          await CTRL.refresh();
-        } catch (e) { void fail('sync failed', e); }
-      });
-    }),
-    c('lemmata.checkpoint', async (it?: Item) => {
-      const t = await pickProject(it); if (!t) return;
-      const note = await vscode.window.showInputBox({ title: 'Lemmata: set checkpoint', prompt: 'A note for this checkpoint (optional)', ignoreFocusOut: true });
-      if (note === undefined) return;
-      const ok = await vscode.window.showWarningMessage('Set a new checkpoint? Code and paper as they are on the server now become your last known good state. Alarms restart from here; older checkpoints are kept.', { modal: true }, 'Set checkpoint');
-      if (ok !== 'Set checkpoint') return;
-      try { await t.client.checkpoint(t.pid, note); void vscode.window.showInformationMessage('Lemmata: checkpoint set.'); await CTRL.refresh(); }
-      catch (e) { void fail('could not set the checkpoint', e); }
-    }),
-    vscode.window.onDidChangeWindowState(s => { if (s.focused) void CTRL.refresh(); }),
-    vscode.workspace.onDidSaveTextDocument(() => CTRL.scheduleSaveRefresh()),
+    c('lemmata.openMap', () => openMap(false)),
+    c('lemmata.openSetup', () => openPage({ view: 'setup' })),
+    c('lemmata.openWebsite', () => openPage({ view: 'digest' }, null, 'site')),
+    c('lemmata.row.record', async (n?: Node) => { const r = rowOf(n); if (r && r.file) await vscode.window.showTextDocument(vscode.Uri.file(r.file), { preview: true }); }),
+    c('lemmata.row.open', rowOpen),
+    c('lemmata.row.tab', async (n?: Node) => { const r = rowOf(n); if (r && r.tab && n) await openPage(r.tab, n.pid, 'tab'); }),
+    c('lemmata.row.site', async (n?: Node) => { const r = rowOf(n); if (r && r.site && n) await openPage(r.site, n.pid || r.pid, 'site'); }),
+    c('lemmata.row.copy', rowCopy),
+    c('lemmata.row.snooze', rowSnooze),
+    c('lemmata.run.attach', runAttach),
+    vscode.window.onDidChangeWindowState(s => { if (s.focused) CTRL.refreshIfOld(); }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => void CTRL.refresh()),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('lemmata.refreshSeconds')) CTRL.restartTimer();
@@ -511,9 +566,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
   TAB = new LemmataTab(ctx, CTRL);
   const runs = new RunCapture(ctx, CTRL);
+  CTRL.runs = runs;
   runs.register();
   await CTRL.start();
   await runs.start();
 }
 
 export function deactivate() { /* disposables are registered on the context */ }
+/** For the tests only: the controller behind the lists and the status bar. */
+export const internals = () => ({ controller: CTRL, RowTree });

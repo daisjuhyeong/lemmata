@@ -10,14 +10,21 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { HubClient, HubError } from './core/client';
 import { oneLine } from './core/text';
+import { LocalRun } from './core/bench';
 import { AGENT_RULES_BEGIN, DEFAULT_COMMAND_PATTERN, DEFAULT_METRIC_FILES, DEFAULT_RESULT_GLOBS, RunManifest, RunWindow, addArtifact, asManifest, configArgs,
-  experimentPart, isMetricFile, isoLocal, mergeAgentRules, mergeHookSettings, metricsLine, parseMetrics, pickRun, runId, sameRun, sha256 } from './core/runs';
+  experimentPart, isMetricFile, isoLocal, mergeAgentRules, mergeHookSettings, parseMetrics, pickRun, runId, sameRun, sha256 } from './core/runs';
 
 export interface RunHost {
   log(msg: string): void;
   /** The hub client and project for a workspace folder that is a project's code repository, or null. */
   projectFor(folderKey: string): { client: HubClient; pid: string } | null;
   serverBase(): string;
+  /** The runs on this machine changed (a run started, ended, was sent): redraw the "Now" list and the status bar. */
+  runsChanged(): void;
+  /** A run ended, or a detached job wrote its result: say so in the status bar. */
+  runEnded(runId: string): void;
+  /** Run records reached the hub: its view of them (experiment, last comparable run) is worth fetching again. */
+  runsSent(): void;
 }
 
 interface Entry { man: RunManifest; folder: string; root: string; file: string; digest: string }
@@ -30,7 +37,7 @@ function git(cwd: string, args: string[], maxBuffer = 4 * 1024 * 1024): Promise<
   });
 }
 
-export class RunCapture implements vscode.TreeDataProvider<Entry> {
+export class RunCapture {
   private readonly entries = new Map<string, Entry>();            // run_id -> entry
   private readonly open = new Map<vscode.TerminalShellExecution, string>();   // execution -> run_id
   private readonly roots = new Map<string, string>();             // folder key -> repository root (fs path)
@@ -38,14 +45,8 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
   private syncTimer: ReturnType<typeof setTimeout> | undefined;
   private retryTimer: ReturnType<typeof setInterval> | undefined;
   private syncing = false;
-  private readonly changed = new vscode.EventEmitter<Entry | undefined>();
-  readonly onDidChangeTreeData = this.changed.event;
-  private readonly bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
 
-  constructor(private readonly ctx: vscode.ExtensionContext, private readonly host: RunHost) {
-    this.bar.command = 'lemmata.runs.show';
-    ctx.subscriptions.push(this.changed, this.bar);
-  }
+  constructor(private readonly ctx: vscode.ExtensionContext, private readonly host: RunHost) { }
 
   private cfg() { return vscode.workspace.getConfiguration('lemmata.runs'); }
   private enabled(): boolean { return this.cfg().get<boolean>('capture', true); }
@@ -155,6 +156,7 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
       for (let i = 0; !entry && i < 20; i++) { await new Promise(r => setTimeout(r, 250)); entry = this.entries.get(id); }   // onStart still reading git
       if (!entry) return;
       await this.save({ ...entry.man, ended, exit_code: typeof e.exitCode === 'number' ? e.exitCode : null }, entry.folder, entry.root);
+      this.host.runEnded(id);
     } catch (err) { this.host.log('run capture (end) failed: ' + (err instanceof Error ? err.message : String(err))); }
   }
 
@@ -255,6 +257,7 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
       if (prev) {
         if (prev.man.artifacts[0].hash === hash) return;
         await this.save({ ...addArtifact({ ...prev.man, metrics: {} }, rel, hash, metrics), ended: isoLocal(new Date(st.mtimeMs)) }, key, root);
+        this.host.runEnded(prev.man.run_id);
         return;
       }
       const when = new Date(st.mtimeMs);
@@ -262,6 +265,7 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
         configs: [], metrics, artifacts: [{ path: rel, hash }], started: null, ended: isoLocal(when), exit_code: null,
         note: 'Seen by the results watcher: the command was not run in this editor\'s terminal.' };
       await this.save(man, key, root);
+      this.host.runEnded(man.run_id);
     } catch (err) { this.host.log('run capture (results) failed: ' + (err instanceof Error ? err.message : String(err))); }
   }
 
@@ -308,51 +312,34 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
       }
     } finally { this.syncing = false; }
     this.render();
+    if (sent) this.host.runsSent();
     return { sent, waiting: this.pending().length, reason };
   }
 
-  /* ---------- panel and status bar ---------- */
+  /* ---------- what the "Now" list and the status bar read ---------- */
   private render() {
-    const today = isoLocal(new Date()).slice(0, 10);
-    const all = [...this.entries.values()];
-    const n = all.filter(e => (e.man.started || e.man.ended || '').slice(0, 10) === today).length;
-    const waiting = this.pending().length;
-    this.bar.text = '$(beaker) ' + n + (waiting ? ' $(cloud-upload) ' + waiting : '');
-    this.bar.tooltip = 'Lemmata runs: ' + n + ' logged today' + (waiting ? ', ' + waiting + ' waiting to be sent to the hub' : ', all sent to the hub') + '. Click to open the list.';
-    if (all.length || !this.enabled()) this.bar.show(); else this.bar.hide();
-    void vscode.commands.executeCommand('setContext', 'lemmata.hasRuns', all.length > 0);
-    this.changed.fire(undefined);
+    void vscode.commands.executeCommand('setContext', 'lemmata.hasRuns', this.entries.size > 0);
+    this.host.runsChanged();
   }
-  getChildren(e?: Entry): Entry[] {
-    if (e) return [];
-    return [...this.entries.values()].sort((a, b) => b.man.run_id.localeCompare(a.man.run_id)).slice(0, 100);
+  /** Every run on this machine, as the bench shows it (core/bench.ts). */
+  locals(): LocalRun[] {
+    const synced = this.synced();
+    return [...this.entries.values()].map(e => {
+      const m = e.man, t = this.host.projectFor(e.folder);
+      return { id: m.run_id, command: m.command, source: m.source, host: m.host || null, started: m.started, ended: m.ended, exit: m.exit_code, sha: m.git_sha, dirty: m.dirty,
+        patch: !!m.diff_hash, metrics: m.metrics, artifacts: m.artifacts.map(a => a.path), configs: m.configs.map(c => c.path), sent: synced[m.run_id] === e.digest, file: e.file, pid: t ? t.pid : null };
+    });
   }
-  getTreeItem(e: Entry): vscode.TreeItem {
-    const m = e.man;
-    const running = m.source !== 'watcher' && !m.ended;
-    const waiting = this.synced()[m.run_id] !== e.digest;
-    const it = new vscode.TreeItem(oneLine(m.command || 'Results watcher: ' + (m.artifacts[0] ? m.artifacts[0].path : ''), 80));
-    it.iconPath = new vscode.ThemeIcon(running ? 'sync' : m.exit_code ? 'error' : m.source === 'agent' ? 'hubot' : m.source === 'watcher' ? 'eye' : 'pass');
-    const when = (m.started || m.ended || '').slice(5, 16).replace('T', ' ');
-    it.description = [when, (m.git_sha || 'no commit').slice(0, 7) + (m.dirty ? '+changes' : ''), metricsLine(m.metrics), running ? 'running' : m.exit_code ? 'exit ' + m.exit_code : '',
-      waiting ? 'not sent yet' : ''].filter(Boolean).join(' · ');
-    it.tooltip = [oneLine(m.command || '(command not seen)', 400), 'Source: ' + m.source + (m.host ? ' on ' + oneLine(m.host, 60) : ''),
-      'Commit: ' + (m.git_sha || 'unknown') + (m.dirty ? ' with uncommitted changes' + (m.diff_hash ? ' (patch kept in .lemmata/patches)' : '') : ''),
-      m.configs.length ? 'Settings: ' + m.configs.map(c => c.path).join(', ') : '', m.artifacts.length ? 'Wrote: ' + m.artifacts.map(a => a.path).slice(0, 8).join(', ') : '',
-      Object.keys(m.metrics).length ? 'Numbers: ' + metricsLine(m.metrics, 12) : '', waiting ? 'Not sent to the hub yet.' : 'Sent to the hub.'].filter(Boolean).join('\n');
-    it.contextValue = 'run';
-    it.command = { command: 'lemmata.runs.open', title: 'Open the run record', arguments: [e] };
-    return it;
+  /** Send what is waiting, then say whether this run is on the hub (needed before it can be attached to an experiment). */
+  async ensureSent(runId: string): Promise<boolean> {
+    if (this.pending().some(e => e.man.run_id === runId)) await this.sync();
+    return !this.pending().some(e => e.man.run_id === runId) && this.entries.has(runId);
   }
 
   /* ---------- commands ---------- */
   register() {
     const c = vscode.commands.registerCommand;
     this.ctx.subscriptions.push(
-      vscode.window.createTreeView('lemmata.runs', { treeDataProvider: this }),
-      c('lemmata.runs.show', () => vscode.commands.executeCommand('lemmata.runs.focus')),
-      c('lemmata.runs.refresh', async () => { await this.reload(); this.syncSoon(0); }),
-      c('lemmata.runs.open', async (e?: Entry) => { if (e) await vscode.window.showTextDocument(vscode.Uri.file(e.file), { preview: true }); }),
       c('lemmata.runs.sync', async () => {
         await this.reload();
         const r = await this.sync();
@@ -361,6 +348,8 @@ export class RunCapture implements vscode.TreeDataProvider<Entry> {
       }),
       c('lemmata.setupAgent', () => this.setupAgent()));
   }
+  /** Read the run records again and retry sending (part of Refresh). */
+  async refresh() { await this.reload(); this.syncSoon(0); }
 
   /** Install the Claude Code hook in one repository and show how to connect the hub's MCP server. Touches only files it names. */
   private async setupAgent() {

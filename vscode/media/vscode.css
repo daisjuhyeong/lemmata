@@ -85,3 +85,9 @@ html.embed .hm-card, html.embed .su-sh, html.embed .tr-day { border-radius: 4px;
 html.embed .hm-h h3, html.embed .tm-h h3 { font-size: 14px; }
 html.embed .tm-c { min-height: 40px; }
 html.embed .su-cl-h { margin-top: 20px; }
+
+/* S35: the map. Its lines take the editor's text colour, so they show in every theme (a theme may leave the panel border
+   undefined or transparent). The map alone ("Open the Map (large)") uses the whole tab. */
+html.embed .bd-e { stroke: var(--vscode-descriptionForeground, var(--vscode-foreground, var(--border-strong))); stroke-opacity: .55; }
+html.embed .bd-e.lit { stroke: var(--vscode-focusBorder, var(--vscode-foreground, var(--accent-dark))); stroke-opacity: 1; }
+html.embed #page.wide:has(.bd-solo) { max-width: none; }

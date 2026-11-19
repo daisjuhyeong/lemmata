@@ -64,16 +64,18 @@ function setup(root: string) {
   const client = { postRuns: async (_pid: string, runs: any[]) => { if (mode.offline) throw new HubError(0, 'offline', 'offline'); posted.push(runs); return { added: runs.length, updated: 0, total: 0 }; } };
   const ctx = { subscriptions: [] as unknown[], extensionPath: path.resolve(__dirname, '..', '..', '..'),
     workspaceState: { get: (k: string, d: unknown) => (k in ws ? ws[k] : d), update: async (k: string, v: unknown) => { ws[k] = v; } } };
-  const cap = new RunCapture(ctx as any, { log() { /* */ }, serverBase: () => 'http://hub', projectFor: () => (mode.target ? { client: client as any, pid: 'p1' } : null) }) as any;
+  const seen = { changed: 0, ended: [] as string[], sent: 0 };
+  const cap = new RunCapture(ctx as any, { log() { /* */ }, serverBase: () => 'http://hub', projectFor: () => (mode.target ? { client: client as any, pid: 'p1' } : null),
+    runsChanged() { seen.changed++; }, runEnded(id: string) { seen.ended.push(id); }, runsSent() { seen.sent++; } }) as any;
   const exec = (cmd: string, cwd: string) => ({ commandLine: { value: cmd }, cwd: Uri.file(cwd) });
   const runs = () => { const d = path.join(root, '.lemmata', 'runs'); return fs.existsSync(d) ? fs.readdirSync(d).filter(n => n.endsWith('.json')).sort().map(n => JSON.parse(fs.readFileSync(path.join(d, n), 'utf8'))) : []; };
-  return { cap, exec, runs, posted, mode };
+  return { cap, exec, runs, posted, mode, seen };
 }
 const stopTimers = (cap: any) => { clearTimeout(cap.syncTimer); clearInterval(cap.retryTimer); };
 
 test('terminal run: commit, settings hash, numbers from the metrics file, exit code, then sent once', async () => {
   const { root, g } = repo();
-  const { cap, exec, runs, posted } = setup(root);
+  const { cap, exec, runs, posted, seen } = setup(root);
   try {
     const head = g('rev-parse', 'HEAD').trim();
     const e = exec('CUDA_VISIBLE_DEVICES=0 python train.py --config configs/mcd.yaml', root);
@@ -101,9 +103,15 @@ test('terminal run: commit, settings hash, numbers from the metrics file, exit c
     assert.equal(posted.length, 1);
     assert.equal(posted[0][0].run_id, r[0].run_id);
     assert.equal(JSON.stringify(posted).includes('lr: 0.001'), false, 'file contents are never sent');
-    // the tree shows it
-    const item = cap.getTreeItem(cap.getChildren()[0]);
-    assert.match(item.description, /f1=0\.851 auroc=0\.912/);
+    // the "Now" list reads it from here, and the status bar is told when it ended and when it reached the hub
+    const local = cap.locals();
+    assert.deepEqual([local.length, local[0].id, local[0].sent, local[0].pid, local[0].exit], [1, r[0].run_id, true, 'p1', 0]);
+    assert.deepEqual([local[0].metrics, local[0].artifacts, local[0].configs], [{ f1: 0.851, auroc: 0.912 }, ['results/s2/metrics.json'], ['configs/mcd.yaml']]);
+    assert.equal(local[0].file, path.join(root, '.lemmata', 'runs', r[0].run_id + '.json'));
+    assert.deepEqual([seen.ended, seen.sent], [[r[0].run_id], 1]);
+    assert.ok(seen.changed > 0);
+    assert.equal(await cap.ensureSent(r[0].run_id), true);
+    assert.equal(await cap.ensureSent('nope'), false);
     assert.equal(state.context['lemmata.hasRuns'], true);
   } finally { stopTimers(cap); fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -161,7 +169,7 @@ test('results watcher: a detached job gets one entry per file and commit; files 
     fs.writeFileSync(path.join(root, 'results', 'old', 'metrics.json'), '{"f1": 0.6}');     // a committed result file is rewritten: that is a run
     await cap.onResult(path.join(root, 'results', 'old', 'metrics.json'));
     assert.equal(runs().length, 2);
-    assert.match(cap.getTreeItem(cap.getChildren()[0]).label, /^Results watcher: results\//);
+    assert.deepEqual([cap.locals()[0].source, cap.locals()[0].command], ['watcher', null]);
   } finally { stopTimers(cap); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -186,7 +194,7 @@ test('sync: runs wait while the hub is unreachable or the folder is not a hub pr
     assert.deepEqual(await cap.sync(), { sent: 1, waiting: 0, reason: undefined });
     assert.equal(posted.length, 2);
     assert.equal(posted[1][0].exit_code, 2);
-    assert.match(cap.getTreeItem(cap.getChildren()[0]).description, /exit 2/);
+    assert.equal(cap.locals()[0].exit, 2);
   } finally { stopTimers(cap); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -198,8 +206,8 @@ test('hook manifests on disk are picked up; a terminal run the hook already logg
       { input: JSON.stringify({ tool_name: 'Bash', tool_use_id: 't1', cwd: root, hook_event_name: 'PreToolUse', tool_input: { command: 'python train.py --seed 7' } }), env: { ...process.env, CLAUDE_PROJECT_DIR: root } });
     fs.writeFileSync(path.join(root, '.lemmata', 'runs', 'junk.json'), '{"not": "a run"}');
     await cap.reload();
-    assert.equal(cap.getChildren().length, 1);
-    assert.equal(cap.getChildren()[0].man.source, 'agent');
+    assert.equal(cap.locals().length, 1);
+    assert.equal(cap.locals()[0].source, 'agent');
     assert.equal(cap.pending().length, 1);
     await cap.onStart({ execution: exec('python train.py --seed 7', root), shellIntegration: {} });
     assert.equal(runs().filter((r: any) => r.run_id).length, 1);

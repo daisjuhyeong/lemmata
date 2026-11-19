@@ -73,6 +73,14 @@ export class HubClient {
     this.req<unknown>('POST', this.p(pid, 'triage'), { target_type: type, target_id: id, state, note });
   runs = (pid: string) => this.req<{ runs: unknown[]; counts: Record<string, number> }>('GET', this.p(pid, 'runs'));
   postRuns = (pid: string, runs: unknown[]) => this.req<{ added: number; updated: number; total: number }>('POST', this.p(pid, 'runs'), { runs });
+  /** S35: everything the bench shows, in rows ready to draw (checked by core/bench.ts asBench). 404 on a hub older than S35. */
+  bench = (pid: string) => this.req<unknown>('GET', this.p(pid, 'bench'), undefined, 60000);
+  /** The researcher attaches a run to an experiment by hand; null takes it back. */
+  attachRun = (pid: string, run: string, experiment: string | null) => this.req<unknown>('POST', this.p(pid, 'bench'), { action: 'attach', run, experiment: experiment || '' }, 60000);
+  snooze = (pid: string, key: string, until: string) => this.req<unknown>('POST', this.p(pid, 'todo'), { key, snooze_until: until }, 60000);
+  planCopied = (pid: string, id: string) => this.req<unknown>('POST', this.p(pid, 'plans'), { id, state: 'copied' });
+  /** Hub status. For a signed-in device it names the extension the hub can hand out. */
+  status = () => this.req<{ version?: string; extension?: { version?: string; path?: string } }>('GET', '/api/hub/status');
   checkpoint = (pid: string, note: string) => this.req<unknown>('POST', this.p(pid, 'checkpoints'), { note, at: null });
   sync = (pid: string) => this.req<{ changed?: boolean; code?: { changed: boolean }; paper?: { changed: boolean; error?: string } }>('POST', '/api/hub/projects/' + encodeURIComponent(pid) + '/sync', {});
 }

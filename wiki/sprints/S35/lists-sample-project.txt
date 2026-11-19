@@ -1,0 +1,22 @@
+status bar: $(beaker) 2 to run
+
+NOW
+  ▾ Not attached to an experiment   — 1
+    · python train.py --seed 7   — 01:10 · f1=0.8 · 0b2edca
+
+EXPERIMENTS
+  ▾ C1 · Can a tiny transformer match a larger baseline?   — finding
+    ▸ Table 2   — out of date · ours 0.912 · best other 0.871 (baseline) · 2 to run
+      · Tests C1   — Can a tiny transformer match a larger baseline?
+      · Measure   — f1 · higher is better
+      · Methods   — 2 · baseline, ours (ours)
+      · Runs per result   — one, so no spread can be reported
+      · Result   — ours 0.912 · best other 0.871 (baseline) · on f1
+      · Out of date   — The code or settings changed after this result was written.
+      · Files   — results
+      · Last written   — 2026-09-25 · 1 update · commit 48b1919
+
+TO RUN
+  ▾ Table 2   — 2 to run
+    · Rerun Table 2   — The code or settings changed after this result was written.
+    · Table 2 has one run only   — One run per cell: no spread.

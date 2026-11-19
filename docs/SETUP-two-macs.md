@@ -185,12 +185,12 @@ uv run lemmata hub token --device "Claude Code" --host 100.111.135.94
 Each token is shown once.
 
 **Extension:**
-1. Install it: `code --install-extension ~/lemmata/vscode/lemmata-0.7.0.vsix`, or Extensions → `...` → Install from VSIX….
+1. Install it: `code --install-extension ~/lemmata/vscode/lemmata-0.8.0.vsix`, or Extensions → `...` → Install from VSIX….
 2. ⌘⇧P → **Lemmata: Connect to Server**.
 3. Server: `http://100.111.135.94:8765` (the default).
 4. Token: paste the first token.
 
-The status bar then shows e.g. "Lemmata: 5 to recheck". More detail: `vscode/README.md`.
+The status bar then shows a beaker with what is running and what is to run, and the Lemmata side bar has three lists: Now, Experiments and To run. Everything about the paper is on the website (**Lemmata: Go to…** opens any page). More detail: `vscode/README.md`.
 
 **Claude Code:** run the line printed for the second token. It looks like this:
 ```
@@ -218,4 +218,4 @@ Then, in Claude Code with both folders open, try:
 | VS Code: "latexmk: command not found" | Quit VS Code with ⌘Q and reopen it. Check `ls /Library/TeX/texbin/latexmk`. With BasicTeX: `sudo tlmgr install latexmk` |
 | ``File `acmart.cls' not found`` or another `.sty` | BasicTeX: `sudo tlmgr install acmart`, or the package that `tlmgr search --global --file <file>` names |
 | PDF does not jump to the source | Build once after adding the settings (SyncTeX data is written by the build). Use double-click in the PDF tab, and ⌘⌥J in the source |
-| Paper alarms in the Lemmata panel but no squiggles in the paper | The paper folder is not open in this workspace, or your clone is behind the hub (pull). Extension 0.1.0 matches only Overleaf paper remotes, so GitHub paper repos get squiggles only once the update from ADR-005 ships |
+| The Experiments list says "Your hub is older than this extension" | The hub has not updated to S35 yet. Let its auto-update run (or `uv run lemmata hub update` on the Mac mini), then run **Lemmata: Refresh** |

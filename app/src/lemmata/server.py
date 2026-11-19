@@ -368,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
         gets = {"/health": lambda: {"ok": True, "version": __version__},
                 "/project": eng.project, "/graph": eng.graph, "/findings": eng.findings, "/alarms": eng.alarms,
                 "/checkpoints": eng.checkpoints, "/triage": eng.triage,
-                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans"), "/hypothesis": need("hypothesis"),
+                "/claims": need("claims"), "/timeline": need("timeline"), "/ledger": need("ledger"), "/tasks": need("tasks"), "/tree": need("tree"), "/notation": need("notation"), "/experiments": need("experiments"), "/setup": need("setup"), "/todo": need("todo"), "/map": need("project_map"), "/brief": need("brief"), "/runs": need("runs"), "/plans": need("plans"), "/bench": need("bench"), "/hypothesis": need("hypothesis"),
                 "/study": need("study"), "/numbers": need("numbers"), "/numbers/brief": need("numbers_brief"),
                 "/baselines": need("baselines"), "/baselines/brief": need("baselines_brief"), "/latex": need("latex")}
         if method == "GET":
@@ -460,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change", "/study", "/numbers", "/baselines", "/latex")
+        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change", "/study", "/numbers", "/baselines", "/latex", "/bench")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -548,6 +548,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("set_plan")(txt("id", True), txt("state"), sp, txt("title")))
                 if r == "/todo":
                     return self._json(need("snooze_todo")(txt("key", True), txt("snooze_until")))
+                if r == "/bench":     # S35: the researcher attaches a run to an experiment by hand (an empty experiment undoes it)
+                    if txt("action", True) != "attach":
+                        raise ApiError(400, "bad_request", "action must be attach")
+                    return self._json(need("attach_run")(txt("run", True), txt("experiment")))
                 if r == "/session":
                     return self._json(need("session_note")(txt("id", True), txt("text"), txt("action")))
                 if r == "/deadlines":

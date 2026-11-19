@@ -1064,7 +1064,11 @@ table.tbl.rx-bt td:first-child .linkbtn { text-align:left; }
 .bd-more { align-self:flex-start; margin-top:2px; } .bd-none { margin:0; }
 .bd-tr { margin:var(--s-2) 0 0; font-size:var(--fs-14); } .bd-tr.muted { font-size:var(--fs-13); } .bd .su-detail { margin-top:var(--s-2); } .bd-names { margin:var(--s-2) 0 0; overflow-wrap:anywhere; } .bd-ut .chip-btn { white-space:nowrap; } .bd-flt { margin:var(--s-3) 0 0; }
 @container app (max-width: 980px) { .bd-b { gap:0 28px; padding:var(--s-2); } .bd-cs { display:none; } .bd-c { padding:5px 8px; } }
-@container app (max-width: 640px) { .bd-b { grid-template-columns:minmax(0,1fr); gap:var(--s-3) 0; } .bd-w { display:none; } .bd-its { flex-direction:row; flex-wrap:wrap; } .bd-c.it { width:auto; max-width:100%; } }
+/* S35: a map is its connections. In a narrow window (a VS Code tab, a phone) the four columns keep their place and the board scrolls sideways; it no longer stacks and drops its lines. */
+.bd-sc { overflow-x:auto; overflow-y:visible; border-radius:var(--r-sm); } .bd-sc:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.bd-hint { display:none; margin:var(--s-1) 0 0; }
+.bd-solo-h { display:flex; align-items:baseline; gap:var(--s-3); } .bd-solo .bd-h .bd-t { display:none; } .doc.wide.bd-solo { max-width:none; }
+@container app (max-width: 760px) { .bd-b { min-width:720px; gap:0 24px; } .bd-hint { display:block; } }
 /* S29: the kind of study (method paper or benchmark study), the sync note, and the Key numbers page */
 .st-line { display:flex; gap:var(--s-2); align-items:baseline; flex-wrap:wrap; margin:0 0 var(--s-3); padding:6px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); font-size:var(--fs-13); }
 .st-line.unsure { border-bottom-color:var(--warning); }

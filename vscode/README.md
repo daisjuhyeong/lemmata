@@ -1,17 +1,26 @@
-# Lemmata for VS Code
+# Lemmata for VS Code: the experiment bench
 
-Shows what Lemmata found in your ML paper and code where you edit: a status bar count, warnings on the exact lines, and a panel of alarms ("recheck this, something upstream changed") and findings (main text, appendix and references disagree).
+The Lemmata website is where you read, decide and write: the thesis, baselines, LaTeX, review, the trail. VS Code is where experiments run, so this extension shows only what you need there:
 
-Since 0.2.0 it also **logs the experiments you run**, because most of them never reach GitHub: commands in the integrated terminal, result files written by detached jobs, and commands run by Claude Code. See "Runs" below and `docs/RUN-CAPTURE.md` for the step-by-step set-up.
+1. Was my run captured, and is it on the hub?
+2. What is running, and what just finished?
+3. What is this experiment for, and what is its setup?
+4. Is this result in line with the last comparable one?
+5. What should I run next?
+
+It answers them in VS Code's own lists and status bar, not in a web page squeezed into a column. Every other page opens on the website, one click away (**Lemmata: Go to…**).
+
+It also **logs the experiments you run**, because most of them never reach GitHub: commands in the integrated terminal, result files written by detached jobs, and commands run by Claude Code. See "Runs" below and `docs/RUN-CAPTURE.md` for the step-by-step set-up.
 
 The extension only talks to your own Lemmata hub (the Mac mini). No telemetry, no third-party servers.
 
 ## Install
 
-The packaged file is `vscode/lemmata-0.7.0.vsix`.
+The packaged file is `vscode/lemmata-0.8.0.vsix`.
 
-- Command line: `code --install-extension vscode/lemmata-0.7.0.vsix`
+- Command line: `code --install-extension vscode/lemmata-0.8.0.vsix`
 - Or in VS Code: Extensions view -> `...` menu (top right) -> **Install from VSIX...** -> pick the file.
+- From 0.8.0 on, the extension asks the hub whether it has a newer version and offers to install it (see "Updates" below). The first install of 0.8.0 is still by hand, on every machine you use (with Remote-SSH: on the server).
 
 Requires VS Code 1.93 or newer and `git` on your PATH. Run capture from the terminal needs VS Code's shell integration (on by default for bash, zsh, fish and PowerShell).
 
@@ -34,31 +43,44 @@ For every folder in your workspace the extension reads its git remotes and match
 
 Overleaf remotes are not matched any more. (Only a project that was set up with Overleaf in an older version keeps that match, from its own data.)
 
-A hub path such as `code/configs/default.yaml` or `paper/main.tex` is mapped onto the folder that matched that repo. Paths of a repo you have not opened are listed in the panel but get no squiggle. To force a project, set `lemmata.project` to its hub project id.
+A hub path such as `code/configs/default.yaml` is mapped onto the folder that matched that repo, so **Open the File** on a row opens your own checkout. A file of a repo you have not opened cannot be opened here; the row says so. To force a project, set `lemmata.project` to its hub project id.
 
 ## What you will see
 
-- **Status bar**: `Lemmata: 5 to recheck` (click to open the panel), `Lemmata: offline` when the server cannot be reached (the last results stay visible).
-- **Problems / squiggles** (source "Lemmata"):
-  - alarms: Warning at the item's file and line, "Recheck: Table 2 - 9f1c2e7 change learning rate 3e-4 to 1e-3 (downstream of configs/default.yaml)", code `A1`, `A2`...
-  - findings: Warning or Information at every evidence line, code = the check name.
-  - items you marked **Reviewed** or **Ignore** disappear; **Needs fixing** shows as an Error.
-- **Lemmata panel** (activity bar): Alarms (groups, then items) and Findings (by check). Click an item to open the file at the line. Right-click for **Mark Reviewed / Needs fixing / Ignore** (optional note), **Why?** (read-only document with the chain and the diff) and **Open in Lemmata** (the web page). Toolbar: **Refresh**, **Sync now** (pull your code and paper from GitHub on the server), **Set checkpoint**.
-- Refresh runs every 30 s (`lemmata.refreshSeconds`), when the window gets focus and when you save a file.
+Three lists in the Lemmata side bar (the beaker in the activity bar):
 
-## The Lemmata tab (since 0.3.0)
+| List | Shows | On a row |
+|---|---|---|
+| **Now** | The runs on this machine, each in one group: Running, Not sent to the hub, Failed today, Not attached to an experiment, Finished today, On other machines today, Earlier | Click: open the run record. Right-click: **Attach to an Experiment…** |
+| **Experiments** | Each claim, the experiments that test it, and under an experiment its setup in one line each: what it tests, the measure and its direction, datasets, methods, runs per result, the result per dataset, what is out of date, its files, its last runs | **Copy** a prompt for Claude Code, **Open in Setup**, **Open on the Website**, **Open the File** |
+| **To run** (collapsed) | Planned experiments, results older than their code, results with a single run, under their experiment. Only for experiments that test a claim | **Copy** the run prompt, **Snooze…** (it also leaves the website's to-do list) |
 
-**Lemmata: Open Lemmata (in a tab)**, or the button at the top of the panel, opens the hub's own pages inside VS Code: Home (thesis, calendar, next to do), Thesis (claims and experiments, top down), Setup (protocol sheets and traces), Review and Trail (deadlines and what was done), plus Tasks, Notation, Changes and the graph. **Open Home**, **Open Thesis**, **Open Setup**, **Open Review** and **Open Trail** go straight to one page. The Google Calendar link is made on the website. It is the same app as the website, so what you edit here (a hoped conclusion, a confirmed claim, a checklist item) is saved on the hub.
+- **One status-bar item.** `2 running · 1 not sent · 3 to run`. When a run ends it shows that run for five minutes: `fp 30, was 31.2 (lower is better) · Main comparison`. "Was" appears only when there is an earlier run of the same experiment with the same dataset, method, seed and measure; otherwise only the new number is shown. Nothing is coloured better or worse.
+- **Lemmata: Go to…** is one picker for everything else: the three lists, the map, Setup and Thesis (in a tab), every website page (opens your browser), and the actions (send runs now, sync the hub with GitHub, set up the coding agent, add this repository, connect).
+- **Eight commands in the Command Palette**: Connect to Server, Go to…, Refresh, Send Runs to the Hub Now, Set Up Coding Agent (Claude Code), Add This Repository, Open the Map (large), Disconnect.
+- The hub prepares every row (its words, its tooltip, what it can do), so a change of wording or rules reaches VS Code when the hub updates, without reinstalling the extension.
+- Refresh runs every 30 s (`lemmata.refreshSeconds`) while the window is in front, when the window gets focus, and after a run is sent.
+
+**Left VS Code in 0.8.0** (they are on the website): the "Alarms and findings" list, the warnings in the Problems panel, Mark Reviewed / Needs fixing / Ignore, Why?, Set checkpoint, and the Home, Review, Claims and Trail pages in the tab.
+
+## The map and the tab
+
+**Lemmata: Open the Map (large)** shows the map alone (thesis, claims, experiments and what they use, with the lines between them) in a full editor tab. **Go to… → Map in its own window** moves that tab into a window of its own, for a second screen. In a narrow tab the map keeps its four columns and its lines and scrolls sideways.
+
+The tab shows two pages of the hub, **Setup** and **Thesis**. A link to any other page opens that page in your browser.
 
 - **It works over Remote-SSH.** The page has no network access of its own. Every request it makes is passed to the extension, which calls the hub with your token. Only the extension needs to reach the hub.
 - **The token never enters the page**, and the page can only reach its own project: requests for other projects, tokens, devices or users are refused by the extension.
-- File pages have an **Open in editor** link that opens the file beside the tab when its repository is open in the window. `.md` downloads open as a document; pictures open in an editor tab; web links open in your browser.
-- The tab is at least 1024 px wide inside; in a narrower editor column it scrolls sideways.
+- File pages have an **Open in editor** link that opens the file beside the tab when its repository is open in the window. `.md` downloads open as a document; pictures open in an editor tab, which has its own zoom; web links open in your browser.
 - It needs a hub that has this change (the tab says so when the hub is older). After a hub update, close the tab and open it again to get the new pages.
+
+## Updates
+
+The hub's own update does not rebuild this extension, so the packaged file is kept next to its source (`vscode/lemmata-<version>.vsix`) and the hub hands it out to signed-in devices. A few times a day the extension asks the hub which version it has. When the hub's is newer, it asks once per version: **Install** downloads the file from your hub, installs it and offers to reload the window; **Not now** stays quiet until the next version. **Go to… → Check the hub for a newer extension** asks at once.
 
 ## Runs
 
-The **Runs** list (below "Alarms and findings") shows every experiment logged in this repository, newest first: the command, the commit (`+changes` when the tree had uncommitted edits), the numbers it wrote, and whether the record has been sent to the hub. Click a run to open its record.
+Every experiment logged in this repository is in the **Now** list: the command, the commit (`+changes` when the tree had uncommitted edits), the numbers it wrote, the experiment it belongs to, and whether the record has been sent to the hub. Click a run to open its record.
 
 Three sources write the same record, one JSON file per run in `<repo>/.lemmata/runs/`:
 
@@ -87,7 +109,9 @@ Settings: `lemmata.runs.capture` (off switch), `lemmata.runs.commandPattern`, `l
 - **"Lemmata: offline"**: is the hub running on the Mac mini, and Tailscale connected on this computer? Test `curl http://100.111.135.94:8765/api/hub/status`.
 - **"token rejected"**: the token was revoked or mistyped. Create a new one and run Connect again.
 - **"no project"**: no workspace folder has a GitHub remote that matches the code repo or the paper repo of a hub project. Check `git remote -v`, or set `lemmata.project`.
-- **Items in the panel but no squiggles**: the repo is not open in this workspace (the row says so), or the clone is on an older commit than the server's (pull, or Sync now on the server and pull).
+- **"Your hub is older than this extension"** in the Experiments list: update the hub (on the Mac mini: `lemmata hub update`, or let its auto-update run), then Refresh.
+- **A run sits under "Not attached to an experiment"**: it wrote files or numbers that match no experiment's result files. Right-click it and choose **Attach to an Experiment…**; your choice counts at once and can be taken back the same way.
+- **The map has no lines**: the hub is older than S35. Update the hub and reopen the tab.
 - **Paper errors after Sync now**: the hub could not read the paper repo or folder (renamed, or you lost access). Reconnect it from the project page in Lemmata.
 - Log: View -> Output -> "Lemmata". It never contains the token.
 
@@ -99,5 +123,5 @@ npm run compile
 npm test                    # unit tests (node's test runner)
 npm run test:integration    # real hub + fake GitHub, needs python3 and git
 npm run test:host           # optional: extension-host smoke test (downloads VS Code)
-npx @vscode/vsce package    # -> lemmata-0.7.0.vsix
+npx @vscode/vsce package    # -> lemmata-0.8.0.vsix
 ```

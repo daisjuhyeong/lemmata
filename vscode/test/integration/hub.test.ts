@@ -10,6 +10,7 @@ import { loadModel } from '../../src/core/load';
 import { matchProjects, parseGitConfigRemotes } from '../../src/core/remotes';
 import { toDiagnostics, Diag } from '../../src/core/model';
 import { formatWhy } from '../../src/core/why';
+import { asBench, newer, nowRows, LocalRun } from '../../src/core/bench';
 import { RunManifest, addArtifact, asManifest, isoLocal, parseMetrics, runId, sha256 } from '../../src/core/runs';
 
 const REPO = path.resolve(__dirname, '../../../..');
@@ -173,6 +174,64 @@ test('runs: a run made in the checkout reaches the hub with its commit, numbers 
   assert.equal((got.runs as any[]).find(r => r.run_id !== man.run_id).state, 'uncommitted');
   await assert.rejects(client.postRuns(fx.pid, [{ ...man, source: 'web' }]), (e: unknown) => e instanceof HubError && e.status === 400);
   await assert.rejects(new HubClient(fx.url, 'lmt_wrong').postRuns(fx.pid, [man]), (e: unknown) => e instanceof HubError && e.unauthorized);
+});
+
+test('S35 bench: the hub sends rows this extension can draw; a run is tied to an experiment by hand; a snooze sticks', async () => {
+  const b = asBench(await client.bench(fx.pid));
+  assert.ok(b, 'the bench document is read');
+  assert.equal(b!.version, 1);
+  const got = (await client.runs(fx.pid)).runs as any[];
+  const mine = got.find(r => r.exit_code === 0);
+  assert.ok(mine, 'the run of the test above is on the hub');
+  const paperKinds = ['differs', 'untraced', 'bold', 'finding', 'number', 'feedback', 'claim', 'changes'];
+  const kinds = (rows: any[]): string[] => rows.flatMap(r => [r.kind].concat(kinds(r.kids || []))).filter(Boolean);
+  for (const k of kinds(b!.to_run)) assert.ok(!paperKinds.includes(k), 'paper item on the bench: ' + k);
+  // the "Now" list on a machine that has this run locally: the hub's row for it is not shown twice
+  const local: LocalRun = { id: mine.run_id, command: mine.command, source: 'terminal', host: 'test', started: mine.started, ended: mine.ended, exit: 0, sha: mine.git_sha, dirty: false, patch: false,
+    metrics: mine.metrics, artifacts: mine.artifacts.map((a: any) => a.path), configs: [], sent: true, file: '/x.json', pid: fx.pid };
+  const groups = nowRows({ local: [local], note: id => b!.runs[id], elsewhere: b!.elsewhere, today: b!.today, nowMs: Date.now(), hubKnows: true });
+  const ids = groups.flatMap(g => g.kids!.map(k => k.run));
+  assert.equal(ids.filter(i => i === mine.run_id).length, 1);
+  if (b!.pick.length) {
+    const x = b!.pick[0].id;
+    const after = asBench(await client.attachRun(fx.pid, mine.run_id, x))!;
+    assert.deepEqual([after.runs[mine.run_id].x, after.runs[mine.run_id].how], [x, 'attached']);
+    const back = asBench(await client.attachRun(fx.pid, mine.run_id, null))!;
+    assert.notEqual((back.runs[mine.run_id] || { how: '' }).how, 'attached');
+  }
+  await assert.rejects(client.attachRun(fx.pid, mine.run_id, 'map:no-such-experiment'), (e: unknown) => e instanceof HubError && e.status === 404);
+  await assert.rejects(client.attachRun(fx.pid, 'no-such-run', ''), (e: unknown) => e instanceof HubError && e.status === 404);
+  await assert.rejects(new HubClient(fx.url, 'lmt_wrong').bench(fx.pid), (e: unknown) => e instanceof HubError && e.unauthorized);
+});
+
+test('S35: the hub names the extension it can hand out, and hands out that file', async () => {
+  const st = await client.status();
+  const own = JSON.parse(fs.readFileSync(path.join(REPO, 'vscode/package.json'), 'utf8')).version;
+  const packed = fs.existsSync(path.join(REPO, 'vscode/lemmata-' + own + '.vsix'));
+  if (!packed) { assert.equal(st.extension, undefined, 'no packaged file for this version: nothing is offered'); return; }
+  assert.deepEqual(st.extension, { version: own, path: '/api/hub/extension.vsix' });
+  assert.equal(newer(st.extension!.version, own), false, 'the same version is not offered as an update');
+  const r = await client.raw('GET', '/api/hub/extension.vsix', undefined, 40 * 1024 * 1024);
+  assert.deepEqual([r.status, r.data[0], r.data[1]], [200, 0x50, 0x4b]);     // a zip file
+  const anon = await fetch(fx.url + '/api/hub/extension.vsix');
+  assert.equal(anon.status, 401, 'the file is for signed-in devices only');
+  assert.equal(((await (await fetch(fx.url + '/api/hub/status')).json()) as any).extension, undefined);
+});
+
+test('S35: the packaged extension the hub hands out is built from the current source', () => {
+  const own = JSON.parse(fs.readFileSync(path.join(REPO, 'vscode/package.json'), 'utf8')).version;
+  const vsix = path.join(REPO, 'vscode/lemmata-' + own + '.vsix');
+  assert.ok(fs.existsSync(vsix), 'vscode/lemmata-' + own + '.vsix is missing: after a change in vscode/, bump the version and run npx @vscode/vsce package');
+  const py = 'import sys,zipfile,hashlib,json\nz=zipfile.ZipFile(sys.argv[1])\nprint(json.dumps({n[10:]:hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n.startswith("extension/") and not n.endswith(".map")}))';
+  const packed = JSON.parse(execFileSync('python3', ['-c', py, vsix], { encoding: 'utf8' })) as { [f: string]: string };
+  const stale: string[] = [];
+  for (const [f, h] of Object.entries(packed)) {
+    if (!/^(out\/src\/|media\/|package\.json$)/.test(f)) continue;
+    const file = path.join(REPO, 'vscode', f);
+    if (!fs.existsSync(file) || sha256(fs.readFileSync(file)) !== 'sha256:' + h) stale.push(f);
+  }
+  assert.deepEqual(stale, [], 'the packaged file is older than the source: run npx @vscode/vsce package and commit it');
+  assert.ok(packed['out/src/extension.js'] && packed['out/src/core/bench.js'] && packed['media/hooks/log_run.py'], 'the package holds the extension, the bench and the agent hook');
 });
 
 test('sync works and returns code/paper results; checkpoint resets the alarms', async () => {

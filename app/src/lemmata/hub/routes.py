@@ -26,6 +26,21 @@ from .projects import MAX_ZIP, HubContext, Manager, ProjectError, mask
 from .sync import SyncLoop
 
 HUB_WEB = WEB / "hub"
+EXT_DIR = Path(__file__).resolve().parents[4] / "vscode"      # present when the hub runs from a clone of the repository
+
+
+def extension_build(root=None):
+    """The VS Code extension this hub can hand out (S35): its version and packaged file, or None.
+    The hub's own update does not rebuild the extension, so the packaged file is committed next to its source."""
+    root = Path(root or EXT_DIR)
+    try:
+        v = json.loads((root / "package.json").read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        return None
+    if not isinstance(v, str) or not re.match(r"^\d+\.\d+\.\d+$", v):
+        return None
+    f = root / ("lemmata-%s.vsix" % v)
+    return {"version": v, "file": f} if f.is_file() else None
 CAL_RE = re.compile(r"^/cal/([A-Za-z0-9_-]{1,80})/([A-Za-z0-9_-]{20,80})\.ics$")
 PUBLIC_API = {("GET", "/api/hub/status"), ("POST", "/api/hub/pair"), ("POST", "/api/hub/login/start"), ("GET", "/api/hub/login/poll")}
 EVENTS = {"tutorial_shown", "tutorial_done", "tutorial_skipped", "view_open", "view_switch", "project_created", "project_opened", "claim_confirmed",
@@ -363,9 +378,19 @@ class HubHandler(Handler):
                 from . import update as _update
                 u = _update.state(hub.data)
                 st["build"] = {"branch": c.get("update_branch") or u.get("branch"), "commit": (u.get("running") or "")[:7] or None, "updated": u.get("time"), "result": u.get("result")}
+                ext = extension_build()
+                if ext:      # S35: the extension offers its own update from here
+                    st["extension"] = {"version": ext["version"], "path": "/api/hub/extension.vsix"}
             if hub.mgr.overleaf_on() and not pub:
                 st["overleaf_configured"] = hub.mgr.ol.configured()
             return self._json(st)
+        if (method, r) == ("GET", "/extension.vsix"):
+            if not dev:
+                raise ApiError(401, "unauthorized", "sign in first")
+            ext = extension_build()
+            if not ext:
+                raise ApiError(404, "not_found", "this hub has no packaged extension")
+            return self._send(200, ext["file"].read_bytes(), "application/octet-stream", {"Cache-Control": "no-store", "Content-Disposition": 'attachment; filename="lemmata-%s.vsix"' % ext["version"]})
         if (method, r) == ("POST", "/pair"):
             if pub:
                 raise ApiError(404, "not_found", "Pairing codes are for the private hub. Sign in with GitHub instead.")

@@ -82,16 +82,15 @@ before(async () => {
 });
 after(async () => { if (skip) return; try { await browser.close(); } catch { /* */ } try { proc.stdin!.end(); proc.kill(); } catch { /* */ } fs.rmSync(tmp, { recursive: true, force: true }); });
 
-test('the tab shows the hub\'s pages with real data, with no network access of its own', { skip }, async () => {
+test('the tab shows the hub\'s experiment pages with real data, with no network access of its own', { skip }, async () => {
   await tab.open(client, fx.url, fx.pid, 'Demo');
   await settle(3500);
   let t = await text();
-  assert.match(t, /Home/);
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'claims');
+  assert.match(t, /Setup/, 'the tab starts on Setup');
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments');
   await settle(2500);
   t = await text();
   assert.match(t, /Thesis/);
-  assert.match(t, /A Tiny Transformer for Sequence Labelling/, 'the claims tree of the sample project is drawn');
   assert.doesNotMatch(t, /Can't reach Lemmata/);
   assert.doesNotMatch(t, /← Projects/);
   assert.equal(await page.evaluate(() => document.documentElement.classList.contains('embed')), true);
@@ -100,62 +99,79 @@ test('the tab shows the hub\'s pages with real data, with no network access of i
   assert.deepEqual(errors, []);
 });
 
-test('Open Review / Experiments switch the page in the same tab', { skip }, async () => {
+test('S35: Setup and Thesis switch in the same tab; every other page opens on the website', { skip }, async () => {
   const before = navigations;
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'review');
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup', 'page');
   await settle(2500);
-  assert.match(await text(), /Hoped conclusion/);
+  assert.equal(await page.evaluate(() => (document.querySelector('.ptitle') as HTMLElement).innerText), 'Setup');
   await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments');
   await settle(2500);
   assert.equal(await page.evaluate(() => (document.querySelector('.tab.active, [role=tab][aria-selected=true]') as HTMLElement | null)?.innerText.includes('Thesis') ?? null), true);
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('.navtab')).map((e: any) => e.innerText.replace(/\s+\d+$/, '').trim())), ['Thesis', 'Setup'], 'two pages in the band');
+  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('#status .flinks .flink')).map((e: any) => e.innerText.trim())), ['Open on website'], 'the footer no longer lists every page');
+  assert.equal(await page.$('#side'), null, 'no sidebar inside VS Code');
+  // a page that is not about experiments: the browser opens it, the tab stays where it is
+  const site = fx.url.replace(/\/+$/, '') + '/p/' + encodeURIComponent(fx.pid) + '/';
+  seen.external.length = 0;
+  for (const v of ['review', 'digest', 'latex', 'baselines']) { await tab.open(client, fx.url, fx.pid, 'Demo', v as any); await settle(400); }
+  await page.evaluate(() => openTab('history'));
+  await settle(400);
+  assert.deepEqual(seen.external, ['review', 'digest', 'latex', 'baselines', 'history'].map(v => site + '#go=' + v));
+  assert.equal(await page.evaluate(() => (document.querySelector('.navtab.on .navl') as HTMLElement).innerText.trim()), 'Thesis', 'the tab did not move');
+  seen.external.length = 0;
   assert.equal(navigations, before, 'the page was not rebuilt');
   assert.deepEqual(errors, []);
 });
 
-test('S24-S25 pages in the tab: Home with its calendar, Setup with a traced number, the Trail', { skip }, async () => {
+test('S35: Setup with a traced number; the map keeps its lines in a narrow tab and opens alone', { skip }, async () => {
   const shots = process.env.LEMMATA_SHOTS || '';
   await page.setViewportSize({ width: 960, height: 900 });
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'digest');
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup', 'page');
   await settle(3000);
-  let t = await text();
-  assert.match(t, /Next to do/);
-  assert.ok(await page.$('.hm-cal .tm-c'), 'the month grid is on Home');
-  assert.equal(await page.$('#side'), null, 'no sidebar inside VS Code: the tabs stay in the band');
-  assert.deepEqual(await page.evaluate(() => Array.from(document.querySelectorAll('.navtab')).map((e: any) => e.innerText.replace(/\s+\d+$/, '').trim())), ['Home', 'Thesis', 'Setup', 'Review', 'Trail']);
-  const day = await page.$('.hm-cal .tm-c.has');
-  if (!day) { await page.click('.hm-cal .tm-h button[aria-label="Previous month"]'); await settle(500); }
-  const d2 = await page.$('.hm-cal .tm-c.has');
-  if (d2) { await d2.click(); await settle(600); assert.ok(await page.$('.tr-day'), 'a day opens its panel'); assert.ok(await page.$('.tr-day .ss .ss-r'), 'the day shows work sessions that answer what, why, who, where, how (S26)'); if (shots) await page.screenshot({ path: path.join(shots, 'vscode-day-sessions.png') }); }
-  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-home.png'), fullPage: true });
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup');
-  await settle(3000);
-  t = await text();
-  assert.match(t, /Setup/);
+  assert.match(await text(), /Setup/);
   const cell = await page.$('.su-g td:not(.miss) .su-cb');
   if (cell) { await cell.click(); await settle(1500); assert.ok(await page.$('.su-tr .su-st'), 'a number opens its trace'); }
   if (shots) await page.screenshot({ path: path.join(shots, 'vscode-setup.png'), fullPage: true });
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'history');
-  await settle(2500);
-  t = await text();
-  assert.match(t, /Trail/);
-  assert.match(t, /Ahead/);
-  assert.ok(await page.$('.tm'), 'the month view is at the bottom of the Trail');
-  assert.equal(await page.$('.tr-cal input'), null, 'the calendar link is made on the website, not in the tab');
-  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-trail.png'), fullPage: true });
+  const map = () => page.evaluate(() => { const sc = document.querySelector('.bd-sc') as HTMLElement | null, de = document.documentElement; if (!sc) return null;
+    const cols = Array.from(document.querySelectorAll('.bd-col')).map((c: any) => Math.round(c.getBoundingClientRect().left));
+    return { wires: document.querySelectorAll('.bd-w path').length, side: cols.length === 4 && cols[1] - cols[0] > 40, scrolls: sc.scrollWidth > sc.clientWidth + 1, page: de.scrollWidth > de.clientWidth + 1,
+      solo: !!document.querySelector('.bd-solo'), title: (document.querySelector('.ptitle') as HTMLElement).innerText }; });
+  const wide = await map();
+  assert.ok(wide, 'the sample project has a map');
+  assert.ok(wide.wires > 0 && wide.side && !wide.scrolls, 'at 960px the map fits and its lines are drawn: ' + JSON.stringify(wide));
+  await page.setViewportSize({ width: 420, height: 900 }); await settle(700);
+  const narrow = await map();
+  assert.ok(narrow.wires > 0, 'the lines are still drawn at 420px');
+  assert.equal(narrow.side, true, 'the four columns stay side by side');
+  assert.equal(narrow.scrolls, true, 'the map scrolls sideways inside its own frame');
+  assert.equal(narrow.page, false, 'the page itself does not scroll sideways');
+  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-map-narrow.png') });
   await page.setViewportSize({ width: 1400, height: 900 });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup', 'map');             // "Open the Map (large)"
+  await settle(1200);
+  const solo = await map();
+  assert.deepEqual([solo.solo, solo.title, solo.wires > 0], [true, 'Map', true]);
+  assert.equal(await page.$('.su-g'), null, 'the map alone: no result sheets under it');
+  if (shots) await page.screenshot({ path: path.join(shots, 'vscode-map-large.png'), fullPage: true });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup', 'page');            // "Open Setup" shows the whole page again
+  await settle(1200);
+  assert.equal((await map()).solo, false);
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 
-test('editing works: the hoped conclusion typed in the tab is saved on the hub', { skip }, async () => {
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'review');
+test('editing works: the kind of study chosen in the tab is saved on the hub', { skip }, async () => {
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'setup', 'page');
   await settle(1500);
   const n = host.changes;
-  await page.fill('textarea.rx-rv-hoped', 'A tiny model matches the baseline.');
-  await page.dispatchEvent('textarea.rx-rv-hoped', 'change');
-  await settle(1500);
-  const r = await client.raw('GET', '/p/' + encodeURIComponent(fx.pid) + '/api/review');
-  assert.equal(JSON.parse(r.data.toString('utf8')).hoped, 'A tiny model matches the baseline.');
-  assert.ok(host.changes > n, 'the extension is told so the panel can refresh');
+  const study = async () => JSON.parse((await client.raw('GET', '/p/' + encodeURIComponent(fx.pid) + '/api/study')).data.toString('utf8'));
+  const was = (await study()).kind, to = was === 'benchmark' ? 'method' : 'benchmark';
+  await page.selectOption('select.st-sel', to);
+  await settle(2500);
+  assert.equal((await study()).kind, to);
+  assert.ok(host.changes > n, 'the extension is told so the lists can refresh');
+  await page.selectOption('select.st-sel', 'auto');                          // back to Lemmata's own reading
+  await settle(2500);
+  assert.equal((await study()).kind, was);
   assert.deepEqual(errors, []);
 });
 
@@ -199,31 +215,27 @@ test('links: a file opens in the editor, claims.md opens as a document, web link
 });
 
 test('S18 width modes: narrow, medium and wide switch without a reload, and the page never scrolls sideways', { skip }, async () => {
-  await tab.open(client, fx.url, fx.pid, 'Demo', 'claims');
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments');
   await settle(2500);
   const before = navigations;
   const probe = () => page.evaluate(() => {
     const vis = (sel: string) => { const e = document.querySelector(sel); return !!e && getComputedStyle(e).display !== 'none'; };
     const de = document.documentElement;
     const bar = document.getElementById('topnav') as HTMLElement;
-    return { tag: vis('.rtag'), tabs: Array.from(document.querySelectorAll('.navtab .navl')).map((b: HTMLElement) => b.innerText.trim()), active: (document.querySelector('.navtab.on .navl') as HTMLElement).innerText.trim(),
-      tabsFit: bar.scrollWidth <= bar.clientWidth + 1, outline: vis('.rxt-caret'), pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft,
+    return { tabs: Array.from(document.querySelectorAll('.navtab .navl')).map((b: HTMLElement) => b.innerText.trim()), active: (document.querySelector('.navtab.on .navl') as HTMLElement).innerText.trim(),
+      tabsFit: bar.scrollWidth <= bar.clientWidth + 1, pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft,
       wide: (document.getElementById('page') as HTMLElement).getBoundingClientRect().width, sideways: de.scrollWidth > de.clientWidth + 1, band: getComputedStyle(document.querySelector('#band .bt') as HTMLElement).display, embed: de.classList.contains('embed') };
   });
   await page.setViewportSize({ width: 300, height: 800 }); await settle(500);
   const narrow = await probe();
   assert.equal(narrow.embed, true);
   assert.equal(narrow.sideways, false, 'no sideways scrolling at 300px');
-  assert.equal(narrow.pad, '12px'); assert.equal(narrow.tag, false, 'no bracket tag on screen when narrow');
+  assert.equal(narrow.pad, '12px');
   assert.equal(narrow.band, 'none', 'no header band in VS Code');
-  assert.equal(narrow.tabs.length, 5); assert.equal(narrow.tabsFit, true, 'the five tabs fit on one row'); assert.equal(narrow.active, 'Thesis', 'the active tab keeps its name');
-  assert.ok(narrow.tabs.every((t: string) => t.length === 1 || ['Home', 'Thesis', 'Setup', 'Review', 'Trail'].includes(t)), 'a tab is either its full name or its first letter');
-  assert.equal(narrow.outline, true, 'Claims is an outline with collapse arrows when narrow');
+  assert.deepEqual(narrow.tabs, ['Thesis', 'Setup'], 'two tabs fit with their names even at 300px'); assert.equal(narrow.tabsFit, true); assert.equal(narrow.active, 'Thesis');
   await page.setViewportSize({ width: 500, height: 800 }); await settle(500);
   const medium = await probe();
-  assert.equal(medium.pad, '16px'); assert.equal(medium.sideways, false); assert.equal(medium.tag, true, 'bracket tags are back from 360px');
-  assert.deepEqual(medium.tabs, ['Home', 'Thesis', 'Setup', 'Review', 'Trail'], 'all five names fit from 360px');
-  assert.equal(medium.outline, false, 'medium keeps the vertical graph: no collapse arrows');
+  assert.equal(medium.pad, '16px'); assert.equal(medium.sideways, false);
   await page.setViewportSize({ width: 1200, height: 800 }); await settle(500);
   const wide = await probe();
   assert.equal(wide.sideways, false); assert.ok(wide.wide <= 1100, 'content is capped in a wide tab');
@@ -231,33 +243,28 @@ test('S18 width modes: narrow, medium and wide switch without a reload, and the 
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });
 
-test('S18 width modes on Experiments, Digest and Review: usable at 300px, columns per mode, nothing cut off, no reload', { skip }, async () => {
+test('S18 width modes on Thesis: usable at 300px, columns per mode, nothing cut off, no reload', { skip }, async () => {
   const probe = () => page.evaluate(() => {
     const de = document.documentElement, W = de.clientWidth;
     const shown = (e: any) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
     const cut = Array.from(document.querySelectorAll('#page button, #page a, #page select, #page input, #page textarea, .navtab'))
-      .filter((e: any) => shown(e) && !e.closest('.rx-math, .katex-display, .code, .rx-ev-tablewrap') && e.getBoundingClientRect().right > W + 1).length;
-    const row = document.querySelector('.rx-x-sec:not(.loose) .rx-x-r:not(.head)') || document.querySelector('button.rx-rv-r');
-    return { sideways: de.scrollWidth > W + 1, cut, cols: row ? Array.from(row.children).filter(shown).length : -1, digest: document.querySelectorAll('.rx-dg-l button').length,
-      pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft };
+      .filter((e: any) => shown(e) && !e.closest('.rx-math, .katex-display, .code, .rx-ev-tablewrap, .bd-sc') && e.getBoundingClientRect().right > W + 1).length;
+    const row = document.querySelector('.rx-x-sec:not(.loose) .rx-x-r:not(.head)');
+    return { sideways: de.scrollWidth > W + 1, cut, cols: row ? Array.from(row.children).filter(shown).length : -1, pad: getComputedStyle(document.getElementById('page') as HTMLElement).paddingLeft };
   });
-  const want: { [v: string]: number[] } = { experiments: [2, 4, 6], review: [2, 3, 4], digest: [-1, -1, -1] };
-  for (const view of ['experiments', 'review', 'digest']) {
-    await page.setViewportSize({ width: 1200, height: 800 });
-    await tab.open(client, fx.url, fx.pid, 'Demo', view as any);
-    await settle(2500);
-    const before = navigations;
-    const got: any[] = [];
-    for (const w of [300, 500, 1200]) { await page.setViewportSize({ width: w, height: 800 }); await settle(500); got.push(await probe()); }
-    got.forEach((g, i) => {
-      assert.equal(g.sideways, false, view + ' scrolls sideways at ' + [300, 500, 1200][i]);
-      assert.equal(g.cut, 0, view + ': a control is cut off at ' + [300, 500, 1200][i]);
-      assert.equal(g.cols, want[view][i], view + ' columns at ' + [300, 500, 1200][i]);
-    });
-    assert.deepEqual(got.map(g => g.pad), ['12px', '16px', '16px'], view + ' padding per mode');
-    if (view === 'digest') assert.ok(got[0].digest >= 3, 'the digest is lines, each a link');
-    assert.equal(navigations, before, view + ': the mode changed without a reload');
-  }
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await tab.open(client, fx.url, fx.pid, 'Demo', 'experiments');
+  await settle(2500);
+  const before = navigations;
+  const got: any[] = [];
+  for (const w of [300, 500, 1200]) { await page.setViewportSize({ width: w, height: 800 }); await settle(500); got.push(await probe()); }
+  got.forEach((g, i) => {
+    assert.equal(g.sideways, false, 'Thesis scrolls sideways at ' + [300, 500, 1200][i]);
+    assert.equal(g.cut, 0, 'Thesis: a control is cut off at ' + [300, 500, 1200][i]);
+    assert.equal(g.cols, [2, 4, 6][i], 'Thesis columns at ' + [300, 500, 1200][i]);
+  });
+  assert.deepEqual(got.map(g => g.pad), ['12px', '16px', '16px'], 'padding per mode');
+  assert.equal(navigations, before, 'the mode changed without a reload');
   await page.setViewportSize({ width: 1400, height: 900 });
   assert.deepEqual(errors.filter(e => !/404/.test(e)), []);
 });

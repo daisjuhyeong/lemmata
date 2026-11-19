@@ -20,6 +20,7 @@ function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = n
 function rxGoto(view, sel) {
   if (view === 'experiments' && /^[qx]:/.test(sel || '')) { RX.exView = 'map'; RX.mapSel = sel; RX.exOpen = null; }
   if (view === 'setup' && /^[ixc]:/.test(sel || '')) { RX.suSel = sel.startsWith('i:') ? sel : null; RX.bdSel = sel; }
+  if (view === 'setup') RX.suMap = sel === 'map';      // S35: "Open the map large" in VS Code shows the board alone
   openTab(view);
 }
 /* Website only: a link that opens this page in VS Code's Lemmata tab (vscode/src/core/link.ts reads it). */
@@ -1648,7 +1649,8 @@ function bdBoard(B) {
       gaps.length ? h('span', { class: 'rx-warn bd-gap' }, '! ' + gaps.join(' · ')) : null, h('span', { class: 'grow' }),
       sel ? h('button', { class: 'linkbtn small', onclick: () => bdPick(B, sel) }, 'Clear') : null),
     B.waiting ? h('p', { class: 'muted small' }, 'The hypotheses are not drafted yet, so this board is made from the result files. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Open Thesis'), '.') : null,
-    h('div', { class: 'bd-b' }, sv('svg', { class: 'bd-w', 'aria-hidden': 'true' }), tcol, ccol, xcol, icol),
+    h('div', { class: 'bd-sc', tabindex: '0', role: 'group', 'aria-label': 'The map. In a narrow window it scrolls sideways.' }, h('div', { class: 'bd-b' }, sv('svg', { class: 'bd-w', 'aria-hidden': 'true' }), tcol, ccol, xcol, icol)),
+    h('p', { class: 'muted small bd-hint' }, 'Scroll sideways to see the whole map →'),
     h('p', { class: 'bd-tr' + (sel ? '' : ' muted') }, sel ? bdTrace(B, sel, L) : 'Click a card to light its path to the ' + (T.kind === 'problem' ? 'problem' : 'thesis') + '. A dashed card is not connected yet.'),
     sel && !(B.mode === 'paper' && sel[0] === 'i') ? bdDetail(B, sel) : null);
   const draw = () => bdWire(el, B, L);
@@ -1677,6 +1679,11 @@ function pageSetup() {
       c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null,
       h('button', { class: 'linkbtn', id: 'su-baselines', title: 'Each baseline\'s paper, PDF, code, idea and published numbers', onclick: () => openTab('baselines') }, 'Baselines →')));
   const B = D.board && (D.board.experiments.length || D.board.claims.length) ? D.board : null, hf = B && B.mode === 'hypothesis_first';
+  if (RX.suMap && B) {      // the map alone, for a wide editor tab or its own window
+    clear(root); root.classList.add('wide', 'bd-solo');
+    return root.append(h('div', { class: 'bd-solo-h' }, h('h1', { class: 'ptitle' }, 'Map'), h('span', { class: 'grow' }),
+      h('button', { class: 'linkbtn', id: 'bd-solo-all', onclick: () => { RX.suMap = false; renderPage(); } }, 'Show the whole Setup page')), bdBoard(B)), root;
+  }
   if (!D.mapped && !hf) root.append(h('div', { class: 'flag' }, 'No confirmed project map yet: each result file is read on its own, so this is rough. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Confirm the map on Thesis'), '.'));
   if (B) root.append(bdBoard(B));
   if (!D.experiments.some(x => x.protocol)) return root.append(B ? h('p', { class: 'muted' }, 'No result file could be read as a table of methods and numbers, so there are no sheets below.') : emptyState('○', 'Nothing to show yet', 'No result file could be read as a table of methods and numbers.', [])), root;

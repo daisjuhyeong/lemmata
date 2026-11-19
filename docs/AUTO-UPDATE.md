@@ -36,4 +36,4 @@ cd app && uv run lemmata hub autoupdate install --branch s07-public-site --notif
 ## Limits
 - Only code that reaches GitHub is deployed. Uncommitted work on the Mac mini is not.
 - Following a feature branch means every push to it goes live. Once S07 to S09 are approved and merged, follow `main`.
-- The desktop app and the VS Code extension are not rebuilt by this.
+- The desktop app and the VS Code extension are not rebuilt by this. For the extension, the packaged file is committed next to its source (`vscode/lemmata-<version>.vsix`); the hub hands it out and, from extension 0.8.0 on, the extension offers to install a newer one itself (S35). Whoever changes `vscode/` bumps the version and commits the new packaged file.

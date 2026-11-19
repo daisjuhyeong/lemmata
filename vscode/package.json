@@ -1,8 +1,8 @@
 {
   "name": "lemmata",
   "displayName": "Lemmata",
-  "description": "Lemmata in your editor: the Review, Claims tree and Experiments pages in a tab, alarms and findings on the lines they concern, and a log of the experiments you run.",
-  "version": "0.7.0",
+  "description": "Lemmata in your editor: the experiment bench. Your runs, each experiment with its setup, and what to run next, in VS Code's own lists. Everything else is on the Lemmata website.",
+  "version": "0.8.0",
   "publisher": "lemmata-local",
   "license": "UNLICENSED",
   "private": true,
@@ -43,7 +43,7 @@
           "scope": "application",
           "default": 30,
           "minimum": 10,
-          "description": "How often to fetch alarms and findings from the hub (also on window focus and file save)."
+          "description": "How often, in seconds, to read the experiments and what to run next from the hub while this window is in front (also when the window gets focus and when a run is sent)."
         },
         "lemmata.runs.capture": {
           "type": "boolean",
@@ -84,15 +84,10 @@
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.addProject",
-        "title": "Add This Repository to Lemmata",
+        "command": "lemmata.goto",
+        "title": "Go to…",
         "category": "Lemmata",
-        "icon": "$(add)"
-      },
-      {
-        "command": "lemmata.disconnect",
-        "title": "Disconnect (forget token)",
-        "category": "Lemmata"
+        "icon": "$(compass)"
       },
       {
         "command": "lemmata.refresh",
@@ -101,114 +96,86 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "lemmata.sync",
-        "title": "Sync now",
-        "category": "Lemmata",
-        "icon": "$(sync)"
-      },
-      {
-        "command": "lemmata.checkpoint",
-        "title": "Set checkpoint",
-        "category": "Lemmata",
-        "icon": "$(bookmark)"
-      },
-      {
-        "command": "lemmata.showPanel",
-        "title": "Show panel",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.openItem",
-        "title": "Open in editor",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.markReviewed",
-        "title": "Mark Reviewed",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.markNeedsFixing",
-        "title": "Needs fixing",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.markIgnored",
-        "title": "Ignore",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.why",
-        "title": "Why?",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.openInLemmata",
-        "title": "Open in the browser",
-        "category": "Lemmata"
-      },
-      {
         "command": "lemmata.runs.sync",
-        "title": "Send runs to the hub now",
+        "title": "Send Runs to the Hub Now",
         "category": "Lemmata",
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "lemmata.runs.refresh",
-        "title": "Refresh runs",
-        "category": "Lemmata",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "lemmata.runs.show",
-        "title": "Show runs",
-        "category": "Lemmata"
-      },
-      {
-        "command": "lemmata.runs.open",
-        "title": "Open the run record",
-        "category": "Lemmata"
-      },
-      {
         "command": "lemmata.setupAgent",
-        "title": "Set up coding agent (Claude Code)",
+        "title": "Set Up Coding Agent (Claude Code)",
         "category": "Lemmata",
         "icon": "$(hubot)"
       },
       {
-        "command": "lemmata.openTab",
-        "title": "Open Lemmata (in a tab)",
+        "command": "lemmata.addProject",
+        "title": "Add This Repository",
         "category": "Lemmata",
-        "icon": "$(open-preview)"
+        "icon": "$(add)"
       },
       {
-        "command": "lemmata.openTab.digest",
-        "title": "Open Home (thesis, calendar, next to do)",
+        "command": "lemmata.openMap",
+        "title": "Open the Map (large)",
+        "category": "Lemmata",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "lemmata.disconnect",
+        "title": "Disconnect (forget token)",
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.openTab.history",
-        "title": "Open Trail (deadlines and what was done)",
+        "command": "lemmata.showPanel",
+        "title": "Show the Lists",
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.openTab.review",
-        "title": "Open Review",
+        "command": "lemmata.openSetup",
+        "title": "Open Setup",
+        "category": "Lemmata",
+        "icon": "$(table)"
+      },
+      {
+        "command": "lemmata.openWebsite",
+        "title": "Open the Website",
+        "category": "Lemmata",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "lemmata.row.record",
+        "title": "Open the Run Record",
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.openTab.claims",
-        "title": "Open Claims tree",
+        "command": "lemmata.row.open",
+        "title": "Open the File",
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.openTab.experiments",
-        "title": "Open Thesis (claims and experiments, top down)",
+        "command": "lemmata.row.tab",
+        "title": "Open in Setup",
         "category": "Lemmata"
       },
       {
-        "command": "lemmata.openTab.setup",
-        "title": "Open Setup (protocol, coverage, traces)",
+        "command": "lemmata.row.site",
+        "title": "Open on the Website",
+        "category": "Lemmata",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "lemmata.row.copy",
+        "title": "Copy (prompt or command)",
+        "category": "Lemmata",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "lemmata.row.snooze",
+        "title": "Snooze…",
+        "category": "Lemmata"
+      },
+      {
+        "command": "lemmata.run.attach",
+        "title": "Attach to an Experiment…",
         "category": "Lemmata"
       }
     ],
@@ -224,119 +191,184 @@
     "views": {
       "lemmata": [
         {
-          "id": "lemmata.panel",
-          "name": "Alarms and findings"
+          "id": "lemmata.now",
+          "name": "Now",
+          "contextualTitle": "Lemmata"
         },
         {
-          "id": "lemmata.runs",
-          "name": "Runs"
+          "id": "lemmata.experiments",
+          "name": "Experiments",
+          "contextualTitle": "Lemmata"
+        },
+        {
+          "id": "lemmata.torun",
+          "name": "To run",
+          "contextualTitle": "Lemmata",
+          "visibility": "collapsed"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "lemmata.panel",
+        "view": "lemmata.now",
+        "contents": "Not connected to a Lemmata server yet.\n[Connect to Server](command:lemmata.connect)",
+        "when": "!lemmata.connected && !lemmata.hasRuns"
+      },
+      {
+        "view": "lemmata.now",
+        "contents": "No runs logged yet.\nRun an experiment in the integrated terminal (for example `python train.py`) and it appears here with its commit, its numbers and the experiment it belongs to. Jobs started elsewhere (tmux, sbatch) are picked up when they write a metrics file into a results folder.\n[Set up the coding agent](command:lemmata.setupAgent)",
+        "when": "lemmata.connected && !lemmata.hasRuns"
+      },
+      {
+        "view": "lemmata.experiments",
         "contents": "Not connected to a Lemmata server yet.\n[Connect to Server](command:lemmata.connect)",
         "when": "!lemmata.connected"
       },
       {
-        "view": "lemmata.runs",
-        "contents": "No runs logged yet.\nRun an experiment in the integrated terminal (for example `python train.py`) and it appears here with its commit and numbers. Jobs started elsewhere are picked up when they write a metrics file into a results folder.\n[Set up coding agent](command:lemmata.setupAgent)",
-        "when": "!lemmata.hasRuns"
+        "view": "lemmata.experiments",
+        "contents": "No Lemmata project matches this folder.\n[Add This Repository](command:lemmata.addProject)",
+        "when": "lemmata.connected && !lemmata.hasProject"
+      },
+      {
+        "view": "lemmata.experiments",
+        "contents": "No experiments yet. Lemmata lists them once the project map is confirmed on the website.\n[Open the website](command:lemmata.openWebsite)",
+        "when": "lemmata.connected && lemmata.hasProject && !lemmata.hasExperiments"
+      },
+      {
+        "view": "lemmata.torun",
+        "contents": "Nothing to run next.\nPlanned experiments, results that are older than their code and results with a single run appear here.",
+        "when": "lemmata.connected && lemmata.hasProject && !lemmata.hasToRun"
+      },
+      {
+        "view": "lemmata.torun",
+        "contents": "Connect and open a project to see what to run next.\n[Go to…](command:lemmata.goto)",
+        "when": "!lemmata.connected || !lemmata.hasProject"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "lemmata.openTab",
-          "when": "view == lemmata.panel",
-          "group": "navigation@0"
+          "command": "lemmata.runs.sync",
+          "when": "view == lemmata.now",
+          "group": "navigation@1"
         },
         {
           "command": "lemmata.refresh",
-          "when": "view == lemmata.panel",
-          "group": "navigation@1"
-        },
-        {
-          "command": "lemmata.sync",
-          "when": "view == lemmata.panel",
+          "when": "view == lemmata.now",
           "group": "navigation@2"
         },
         {
-          "command": "lemmata.checkpoint",
-          "when": "view == lemmata.panel",
+          "command": "lemmata.goto",
+          "when": "view == lemmata.now",
           "group": "navigation@3"
         },
         {
-          "command": "lemmata.runs.refresh",
-          "when": "view == lemmata.runs",
+          "command": "lemmata.openMap",
+          "when": "view == lemmata.experiments",
           "group": "navigation@1"
         },
         {
-          "command": "lemmata.runs.sync",
-          "when": "view == lemmata.runs",
+          "command": "lemmata.openSetup",
+          "when": "view == lemmata.experiments",
           "group": "navigation@2"
         },
         {
-          "command": "lemmata.setupAgent",
-          "when": "view == lemmata.runs",
+          "command": "lemmata.refresh",
+          "when": "view == lemmata.experiments",
           "group": "navigation@3"
+        },
+        {
+          "command": "lemmata.refresh",
+          "when": "view == lemmata.torun",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
         {
-          "command": "lemmata.markReviewed",
-          "when": "view == lemmata.panel && viewItem =~ /triageable/",
-          "group": "1_triage@1"
+          "command": "lemmata.row.copy",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-copy/",
+          "group": "inline@1"
         },
         {
-          "command": "lemmata.markNeedsFixing",
-          "when": "view == lemmata.panel && viewItem =~ /triageable/",
-          "group": "1_triage@2"
+          "command": "lemmata.row.site",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-site/",
+          "group": "inline@2"
         },
         {
-          "command": "lemmata.markIgnored",
-          "when": "view == lemmata.panel && viewItem =~ /triageable/",
-          "group": "1_triage@3"
+          "command": "lemmata.row.record",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-record/",
+          "group": "1_open@1"
         },
         {
-          "command": "lemmata.why",
-          "when": "view == lemmata.panel && viewItem =~ /why/",
-          "group": "2_inspect@1"
+          "command": "lemmata.row.open",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-open/",
+          "group": "1_open@2"
         },
         {
-          "command": "lemmata.openInLemmata",
-          "when": "view == lemmata.panel && viewItem =~ /triageable/",
-          "group": "2_inspect@2"
+          "command": "lemmata.row.tab",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-tab/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "lemmata.row.site",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-site/",
+          "group": "1_open@4"
+        },
+        {
+          "command": "lemmata.run.attach",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-attach/",
+          "group": "2_do@1"
+        },
+        {
+          "command": "lemmata.row.copy",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-copy/",
+          "group": "2_do@2"
+        },
+        {
+          "command": "lemmata.row.snooze",
+          "when": "view =~ /^lemmata\\./ && viewItem =~ /-snooze/",
+          "group": "2_do@3"
         }
       ],
       "commandPalette": [
         {
-          "command": "lemmata.openItem",
+          "command": "lemmata.showPanel",
           "when": "false"
         },
         {
-          "command": "lemmata.markReviewed",
+          "command": "lemmata.openSetup",
           "when": "false"
         },
         {
-          "command": "lemmata.markNeedsFixing",
+          "command": "lemmata.openWebsite",
           "when": "false"
         },
         {
-          "command": "lemmata.markIgnored",
+          "command": "lemmata.row.record",
           "when": "false"
         },
         {
-          "command": "lemmata.why",
+          "command": "lemmata.row.open",
           "when": "false"
         },
         {
-          "command": "lemmata.openInLemmata",
+          "command": "lemmata.row.tab",
           "when": "false"
         },
         {
-          "command": "lemmata.runs.open",
+          "command": "lemmata.row.site",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.row.copy",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.row.snooze",
+          "when": "false"
+        },
+        {
+          "command": "lemmata.run.attach",
           "when": "false"
         }
       ]
