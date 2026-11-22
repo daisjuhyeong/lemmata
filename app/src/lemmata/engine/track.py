@@ -10,7 +10,7 @@ from . import study as studymod
 from . import understand as und
 from .claims import _Ctx
 from .errors import NotFound
-from .experiments import DATA_COLS, LABEL_COLS, SEED_COLS, align, field_summary, history, lower_better, norm, num, paper_cells, pick_ours, records, summarise
+from .experiments import DATA_COLS, LABEL_COLS, SEED_COLS, align, untraced_cells, field_summary, history, lower_better, norm, num, paper_cells, pick_ours, records, summarise
 from .tree import GitTree
 
 SCHEMA = "lemmata.experiments/2"
@@ -262,6 +262,7 @@ def build(m, G, trees, infos, events, alarms, findings, ledger, store, github=No
             if x["summary"] and x["summary"].get("target") is not None:     # "best" in a column is the value nearest the target: skip the bold check
                 problems = [p for p in problems if p["kind"] != "bold"]
             x["tally"], x["problems"] = tally, problems
+            x["untraced_cells"] = untraced_cells(cells)
             if any(p["kind"] == "bold" for p in problems):
                 x["caveats"].append({"k": "bold", "t": "Bold is not best"})
             if full:

@@ -1,7 +1,7 @@
 ---
 type: screen-spec
 owner_agent: designer
-status: approved (founder, chat 2026-11-22 22:24 KST); phase 1 built 2026-11-22, phase 2 not started
+status: approved (founder, chat 2026-11-22 22:24 KST); phases 1 and 2 built 2026-11-22/23 (not seen in a browser)
 sources:
   - "founder message in chat, 2026-11-22 16:20 KST: 'Consider the youtube links to make the Claude design for my Lemmata webiste UI/UX https://www.youtube.com/watch?v=-JabKCzBf4s, https://www.youtube.com/watch?v=9RUcYdww138 Check and report what changes can be made to Lemmata'"
   - "founder message in chat, 2026-11-22 16:28 KST: 'Proceed and let me see the updated UI/UX page considering the purpose of Lemmata. Send this to CTO agent so that they have the context of the Lemmata.'"
@@ -175,6 +175,12 @@ Four sections in this order: **Mismatches**, **Stale**, **To confirm**, **Checke
 closed by default). A mismatch row states both sides in one sentence ("C3 says 'every dataset'; 2 of 6 have no run"). Open,
 it shows the numbers side by side (each compared method, then ours, then the difference), with "no run" in words where a
 cell is missing.
+
+### Where the phase 2 build differs from this section (2026-11-23, [S36-02 handoff](../../sprints/S36/S36-02-handoff.md))
+- In the VS Code tab the page head stays the one-word title, with no answer line, so the tab reads as in S35.
+- Home and Review each keep one extra closed block ("This week"; "Should you continue?") below the sections named here.
+- The Review example "C3 says 'every dataset'; 2 of 6 have no run" needs a rule that reads claim text; it is not built. Mismatch sentences come from the existing paper-vs-file rules.
+- A recheck node in the tree is `--warning`, not sand (rule 2).
 
 ## 8. Reference values
 The canvas was drawn with this stylesheet. Use it to read sizes, spacing and weights. Do not ship these class names.

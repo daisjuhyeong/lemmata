@@ -95,9 +95,10 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
     """-> the Trail document: entries newest first, days, months (for the month grid), deadlines ahead."""
     out = []
 
-    def add(t, kind, title, why=None, target=None, at=None, ref=None):
+    def add(t, kind, title, why=None, target=None, at=None, ref=None, by=None):
+        """by: who made it, only where the record says so: {"kind": you|agent|run|lemmata|person, "name": text or None}. Never guessed."""
         if isinstance(t, str) and len(t) >= 10:
-            out.append({"t": t, "day": t[:10], "kind": kind, "title": title, "why": why, "target": target, "at": at, "ref": ref})
+            out.append({"t": t, "day": t[:10], "kind": kind, "title": title, "why": why, "target": target, "at": at, "ref": ref, "by": by})
 
     res_paths = {p_ for x in exps or [] for p_ in x.get("_paths") or []}
     theme = {}
@@ -117,6 +118,10 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
             {"view": "commit", "url": (gh.group(1) + "/commit/" + ev["rev"]) if gh else None},
             ref=ev.get("short"))
         out[-1].update(repo=ev.get("repo"), author=ev.get("author"), coauthors=ev.get("coauthors") or [])
+        if ev.get("agent_coauthor"):      # a Co-Authored-By line with an Anthropic address says an agent helped
+            out[-1]["by"] = {"kind": "agent", "name": None}
+        elif ev.get("author"):
+            out[-1]["by"] = {"kind": "person", "name": ev["author"]}
         if st.get("decision"):
             out[-1]["decision"] = True
         # the detail shown when the day is opened: the files by kind, and what the commit did to each experiment's result
@@ -144,11 +149,12 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
         cid, prev = c["id"], None
         for r in c.get("stages") or ((stages or {}).get("log") or {}).get(cid) or []:
             add(r["t"], "claims", "%s: %s" % (names[cid], words.get(r["stage"], r["stage"])) if prev is None else "%s: %s → %s" % (names[cid], words.get(prev, prev), words.get(r["stage"], r["stage"])),
-                "Set by you." if r.get("by") == "you" else "From the stored results." if r.get("by") == "history" else "From the evidence.", {"view": "claims", "sel": cid}, at=r["t"])
+                "Set by you." if r.get("by") == "you" else "From the stored results." if r.get("by") == "history" else "From the evidence.", {"view": "claims", "sel": cid}, at=r["t"],
+                by={"kind": "you", "name": None} if r.get("by") == "you" else {"kind": "lemmata", "name": None})
             prev = r["stage"]
     for r in (runs or {}).get("runs") or []:
         t = r.get("ended") or r.get("started")
-        add(t, "runs", (r.get("command") or "run")[:120], "on %s%s" % (r.get("host") or "?", "" if r.get("exit_code") in (0, None) else ", exit %s" % r.get("exit_code")), {"view": "runs", "id": r.get("run_id")})
+        add(t, "runs", (r.get("command") or "run")[:120], "on %s%s" % (r.get("host") or "?", "" if r.get("exit_code") in (0, None) else ", exit %s" % r.get("exit_code")), {"view": "runs", "id": r.get("run_id")}, by={"kind": "run", "name": r.get("host")})
         if isinstance(t, str) and len(t) >= 10:
             out[-1]["_run"] = r
     for b in (tasks or {}).get("batches") or []:
@@ -158,11 +164,12 @@ def build(events, steps, stages, claims_doc, runs, tasks, mapdoc, checkpoints, p
         if t.get("done_at"):
             add(t["done_at"], "feedback", "Done: %s" % t["text"][:100], None, {"view": "tasks"})
     if mapdoc.get("proposed_at"):
-        add(mapdoc["proposed_at"], "decisions", "Project map proposed", "by %s" % (mapdoc.get("proposed_by") or "the agent"), {"view": "experiments"})
+        add(mapdoc["proposed_at"], "decisions", "Project map proposed", "by %s" % (mapdoc.get("proposed_by") or "the agent"), {"view": "experiments"}, by={"kind": "agent", "name": mapdoc.get("proposed_by")})
     if mapdoc.get("confirmed_at"):
-        add(mapdoc["confirmed_at"], "decisions", "Project map confirmed", "by you", {"view": "experiments"})
+        add(mapdoc["confirmed_at"], "decisions", "Project map confirmed", "by you" if mapdoc.get("confirmed_by") == "you" else None, {"view": "experiments"},
+            by={"kind": "you", "name": None} if mapdoc.get("confirmed_by") == "you" else None)
     for cp in (checkpoints or {}).get("checkpoints") or []:
-        add(cp.get("created_at"), "decisions", "Marked everything as looked at", cp.get("note") or None, {"view": "changes"})
+        add(cp.get("created_at"), "decisions", "Marked everything as looked at", cp.get("note") or None, {"view": "changes"}, by={"kind": "you", "name": None} if cp.get("by") == "you" else None)
     for p in (plans or {}).get("plans") or [] if isinstance(plans, dict) else []:
         add(p.get("at"), "decisions", "Planned: %s" % str(p.get("title") or "an experiment")[:100], None, {"view": "experiments"})
 

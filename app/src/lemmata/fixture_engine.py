@@ -216,7 +216,7 @@ class FixtureEngine:
     def checkpoints(self):
         return self._checkpoints
 
-    def create_checkpoint(self, note="", at=None, created_at=None, cp_id=None):
+    def create_checkpoint(self, note="", at=None, created_at=None, cp_id=None, actor=None):
         if at:
             for k in at:
                 if k not in {r["id"] for r in self._project["repos"]}:

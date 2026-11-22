@@ -40,7 +40,8 @@ def read_commits(path):
                 files.append({"path": fp, "status": f[4][0], "sha": f[3], "mode": f[1]})
         msg = msg.strip()
         co = sorted({m_.strip() for m_ in re.findall(r"(?im)^co-authored-by:\s*([^<\n]+)", msg)})
-        out.append({"rev": sha, "time": when, "message": msg, "subject": msg.split("\n", 1)[0], "files": files, "author": who.strip() or None, "coauthors": co})
+        agent_co = any(m_.strip().lower().endswith("@anthropic.com") for m_ in re.findall(r"(?im)^co-authored-by:[^<\n]*<([^>\n]+)>", msg))      # only this yes/no is kept, never an address
+        out.append({"rev": sha, "time": when, "message": msg, "subject": msg.split("\n", 1)[0], "files": files, "author": who.strip() or None, "coauthors": co, "agent_coauthor": agent_co})
     out.reverse()
     return out
 
@@ -144,7 +145,7 @@ def build_events(repos, infos, hist, cp, G, now_iso, cache):
         cevs = []
         for i, c in enumerate(commits):
             ev = {"id": "ev:commit:%s:%s" % (rid, c["rev"][:12]), "kind": "commit", "repo": rid, "rev": c["rev"], "short": _short(c["rev"]),
-                  "time": c["time"], "subject": c["subject"], "author": c.get("author"), "coauthors": c.get("coauthors") or [], "files": [{"path": f["path"], "status": f["status"]} for f in c["files"]],
+                  "time": c["time"], "subject": c["subject"], "author": c.get("author"), "coauthors": c.get("coauthors") or [], "agent_coauthor": bool(c.get("agent_coauthor")), "files": [{"path": f["path"], "status": f["status"]} for f in c["files"]],
                   "at_checkpoint": bool(mode == "post" and idx is not None and idx >= 0 and i == idx),
                   "after_checkpoint": bool(mode == "post" and idx is not None and i > idx),
                   "changed_nodes": None, "flags": []}

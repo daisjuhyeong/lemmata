@@ -215,6 +215,13 @@ def paper_cells(P, node_id):
     return out or None
 
 
+def untraced_cells(cells):
+    """The paper numbers no result file holds: [{row, col, paper}]. Kept apart from `problems`, which lists what the page draws as problems."""
+    head = cells[0] if cells else []
+    return [{"row": r[0]["text"], "col": head[j]["text"] if j < len(head) else "", "paper": c["text"]}
+            for i, r in enumerate(cells) if i > 0 for j, c in enumerate(r) if j > 0 and c.get("status") == "untraced"]
+
+
 def align(cells, table, lower=None):
     """Compare each number in the paper's table with the result file. -> (grid with status per cell, tally, problems)"""
     if not cells:
@@ -483,6 +490,7 @@ def build(G, trees, infos, events, alarms, findings, claims_doc, ledger, store, 
         if cells:
             grid, tally, problems = align(cells, tab)
             x["tally"], x["problems"] = tally, problems
+            x["untraced_cells"] = untraced_cells(cells)
             if any(p["kind"] == "bold" for p in problems):
                 x["caveats"].append({"k": "bold", "t": "Bold is not best"})
             if full:

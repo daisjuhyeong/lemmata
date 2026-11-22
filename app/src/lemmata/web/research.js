@@ -15,6 +15,30 @@ const RX_SCOPE = { new: ['New', 'A claim of this work'], original: ['Original', 
 function rxSt(stage) { return ' st-' + (RX_STAGE[stage] || RX_STAGE.hypothesis)[3]; }
 function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', s = RX_STAGE[k]; const ch = plainChip(s[0], s[1], s[2] + ' stg-' + k); ch.title = (c.stage_by === 'you' ? 'Set by you. ' : '') + (c.stage_why || '') + (c.stage_rule ? ' (rule ' + c.stage_rule + (c.stage_by === 'you' && c.stage_rule_auto ? '; the evidence alone gives rule ' + c.stage_rule_auto : '') + ')' : ''); return ch; }
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
+/* S36 (ADR-012): every page starts with the question it answers and one line that answers it from counts the hub already
+   returns. A zero is said in words. Standing explanations sit behind a "?" in their own section. */
+const RX_Q = { digest: 'What needs you today?', experiments: 'Is each claim backed?', setup: 'What was used?', review: 'What disagrees?', history: 'What did you do, and when?' };
+const rxB = n => h('b', null, String(n));
+const RX_SHORT = { digest: 'Home', experiments: 'Thesis', setup: 'Setup', review: 'Review', history: 'Trail' };
+// The VS Code tab keeps its one-word title and no answer line (vscode.css and the extension's tests know it); the website gets the question and the answer.
+function rxPageHead(question, ...answer) {
+  if (EMBED) return h('h1', { class: 'ptitle' }, RX_SHORT[Object.keys(RX_Q).find(k => RX_Q[k] === question)] || question);
+  return h('header', { class: 'pghead' }, h('h1', { class: 'ptitle pq' }, question), h('p', { class: 'pans' }, answer)); }
+function rxHelp(id, text) {
+  RX.helpOpen = RX.helpOpen || {};
+  const open = !!RX.helpOpen[id];
+  return [h('button', { class: 'helpq', 'aria-expanded': String(open), 'aria-label': 'What is this?', title: 'What is this?', onclick: () => { RX.helpOpen[id] = !open; renderPage(true); } }, '?'),
+    open ? h('span', { class: 'helptxt' }, text) : null];
+}
+function rxSection(title, count, help, ...kids) { return h('section', { class: 'dsec' }, h('h3', null, title, count != null ? h('span', { class: 'hm-n' }, String(count)) : null, help ? help[0] : null), help ? help[1] : null, kids); }      // help: what rxHelp() returns, its "?" beside the heading and its text under it
+// What only the researcher can settle: the to-do items the hub marks needs_you (todo.py), plus the links Lemmata suggests (in the graph the page already holds)
+// Where the paper and the files disagree today (Review's Mismatches, and the count on Thesis): one source for both
+const rxMismatches = () => RX.todo ? RX.todo.items.filter(i => i.group === 'paper' || i.kind === 'contradicts') : [];
+function rxNeedsList() {
+  const out = RX.todo ? RX.todo.items.filter(i => i.needs_you) : [];
+  const links = ((S.graph && S.graph.edges) || []).filter(e => e.kind === 'value_match' && e.status === 'proposed');
+  return out.concat(links.map(e => ({ key: 'link:' + e.id, kind: 'link', text: (() => { try { return edgeSentence(e); } catch (x) { return 'A suggested link waits for your yes or no.'; } })(), why: 'A suggested link waits for your yes or no.', target: { view: 'checks' }, needs_you: true, act: { do: 'confirm_link', id: e.id } })));
+}
 function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
 function rxGoto(view, sel) {
@@ -96,7 +120,7 @@ function rxStudyLine() {
   if (sel) sel.addEventListener('change', () => set(sel.value));
   return h('div', { class: 'st-line' + (D.by === 'rule' ? ' unsure' : ''), title: D.why },
     h('span', { class: 'tag' }, 'Study'), sel || h('b', null, D.word), h('span', { class: 'muted small' }, ST_BY[D.by] || D.by),
-    h('span', { class: 'st-w' }, bench ? 'No method of its own. Methods are compared; each claim is decided by its own test.' : 'Ours' + (D.ours ? ': ' + D.ours : '') + ', ranked against baselines.'),
+    (EMBED ? (t => h('span', { class: 'st-w' }, t)) : (t => rxHelp('study', t)))(bench ? 'No method of its own. Methods are compared; each claim is decided by its own test.' : 'Ours' + (D.ours ? ': ' + D.ours : '') + ', ranked against baselines.'),
     D.by === 'rule' && !READONLY ? h('button', { class: 'linkbtn small', title: 'Keep this reading', onclick: () => set(D.kind) }, 'Confirm') : null,
     D.note ? h('span', { class: 'muted small' }, D.note) : null);
 }
@@ -307,11 +331,14 @@ function rxTree(opts) {
   // two levels by default: the core message and its claims; a click opens what is under a node
   const isOpen = n => RX.treeOpen[n.id] != null ? RX.treeOpen[n.id] : (n.layer === 'core' || opts.scrub);
   const dotSize = n => n.layer === 'core' ? 22 : n.layer === 'claim' ? 10 + Math.min(8, (nRoots.get(n.id) || 0) + kidsCount(T, n.id)) : 8;
-  const att = n => !!n.recheck || n.state === 'proposed';
+  const att = n => n.state === 'proposed';      // sand: only what waits for the researcher; a recheck is "stale" (warning), not "your turn"
+  const untested = new Set(((RX.experiments && RX.experiments.thesis && RX.experiments.thesis.untested) || []).map(c => c.id));
+  const stateWord = n => n.layer === 'core' || n.layer === 'claim' ? (n.state === 'proposed' ? 'your turn' : n.recheck ? 'stale' : untested.has(n.id) ? 'no experiment' : (RX_STAGE[n.stage] || RX_STAGE.hypothesis)[1].toLowerCase())
+    : n.exp ? ((RX_XSTATE[n.state] || RX_XSTATE.none)[1]).toLowerCase() : n.kind === 'missing' ? '' : n.traced === false ? 'not traced' : (RX_KINDWORD[n.kind] || '').toLowerCase();
   const rxWords = (t, k) => { const w = String(t || '').trim().split(/\s+/); return w.length > k ? w.slice(0, k).join(' ') + '…' : w.join(' '); };
   function node(n, depth, path) {
     path = new Set(path || []); path.add(n.id);
-    const li = h('li', { class: 'rxt-li n-' + n.layer + (n.stage ? rxSt(n.stage) : '') + (n.exp ? ' x-' + n.state : '') + (att(n) ? ' att' : '') + (n.state === 'proposed' ? ' draft' : '') + (RX.sel === n.id ? ' sel' : ''), role: 'treeitem', 'aria-level': String(depth + 1) });
+    const li = h('li', { class: 'rxt-li n-' + n.layer + (n.stage ? rxSt(n.stage) : '') + (n.exp ? ' x-' + n.state : '') + (att(n) ? ' att' : '') + (n.recheck && !att(n) ? ' stale' : '') + ((n.layer === 'claim' || n.layer === 'core') && !att(n) && untested.has(n.id) ? ' noexp' : '') + (n.state === 'proposed' ? ' draft' : '') + (RX.sel === n.id ? ' sel' : ''), role: 'treeitem', 'aria-level': String(depth + 1) });
     const under = [...(kids.get(n.id) || []), ...(ev.get(n.id) || [])].filter(c => !path.has(c.id));
     const open = isOpen(n), nk = under.length;
     if (nk) li.setAttribute('aria-expanded', String(!!open));
@@ -321,8 +348,10 @@ function rxTree(opts) {
       : h('span', { class: 'rxt-lab' }, n.short);
     const caret = nk ? h('span', { class: 'rxt-caret', 'aria-hidden': 'true' }, open ? '▾' : '▸') : h('span', { class: 'rxt-caret ph', 'aria-hidden': 'true' });
     const tip = (n.short || n.title || '') + (stageName ? ' — ' + stageName : '') + (n.scope ? ', ' + RX_SCOPE[n.scope][0].toLowerCase() : '') + (n.recheck ? ', recheck' : '') + (n.state === 'proposed' ? ' (draft)' : '') + (n.layer === 'root' && n.traced === false && n.kind !== 'missing' ? ', not traced to a result file or script' : '');
-    const btn = h('button', { class: 'rxt-row', 'data-id': n.id, title: tip, 'aria-label': (n.short || n.title || 'Core message') + (stageName ? ', ' + stageName : '') + (att(n) ? ', needs your attention' : ''), 'aria-current': RX.sel === n.id ? 'true' : null },
+    const sw = stateWord(n);
+    const btn = h('button', { class: 'rxt-row', 'data-id': n.id, title: tip, 'aria-label': (n.short || n.title || 'Core message') + (sw ? ', ' + sw : '') + (att(n) ? ', needs your attention' : ''), 'aria-current': RX.sel === n.id ? 'true' : null },
       caret, h('span', { class: 'rxt-dot' + (n.traced === false && n.layer === 'root' ? ' untraced' : '') + (n.kind === 'missing' ? ' miss' : ''), style: 'width:' + d + 'px;height:' + d + 'px', 'aria-hidden': 'true' }), label,
+      sw ? h('span', { class: 'rxt-state' }, sw) : null,
       n.shared > 1 ? h('span', { class: 'rxt-n' }, '×' + n.shared) : null, n.caveat ? h('span', { class: 'rxt-n', title: 'Has a caveat' }, '!') : null, n.recheck ? h('span', { class: 'rxt-n', title: 'Recheck' }, '↻') : null,
       nk && !open ? h('span', { class: 'rxt-n', title: nk + ' under it' }, '+' + nk) : null);
     const pick = () => {
@@ -380,7 +409,7 @@ function rxTree(opts) {
   }
   if (opts.scrub && T.span && t1 > t0) wrap.append(rxScrubber(T, t0, t1, setTime));
   else setTime(1);
-  wrap.append(h('p', { class: 'rx-legend-note muted' }, 'Circle size is how much hangs on a claim. A darker fill means stronger evidence. A gold circle needs your attention. Click a circle to open what is under it.'));
+  if (!opts.noLegend) wrap.append(h('p', { class: 'rx-legend-note muted' }, 'A hollow ring: no experiment yet. Pale: weak. Lighter green: partly backed. Green: strongly backed. Sand: your turn. Click a circle to open what is under it.'));
   return wrap;
 }
 /* One figure, table or file: the picture, what it is for, whether it is connected to the repository, and your caveat. */
@@ -473,7 +502,7 @@ function pageTimeline() {
       h('div', { class: 'rx-step-dot', 'aria-hidden': 'true' }, s.decision ? '◆' : '·'),
       h('div', { class: 'rx-step-b' },
         h('button', { class: 'rx-step-h', 'aria-expanded': String(open), onclick: () => { RX.open['tl:' + s.id] = !open; renderPage(true); } },
-          h('b', null, s.title), s.decision ? plainChip('◆', 'Decision', 'proposed') : null, h('span', { class: 'muted' }, ' ' + (s.role === 'paper' ? 'paper' : 'code') + ' · ' + plural(s.commits.length, 'commit')),
+          h('b', null, s.title), s.decision ? plainChip('◆', 'Decision', 'ign') : null, h('span', { class: 'muted' }, ' ' + (s.role === 'paper' ? 'paper' : 'code') + ' · ' + plural(s.commits.length, 'commit')),
           s.after_checkpoint ? h('span', { class: 'tag' }, 'Since you last looked') : null),
         h('div', { class: 'rx-step-s' }, s.summary),
         s.affects.length ? h('div', { class: 'small' }, h('span', { class: 'muted' }, 'Touches what backs: '), s.affects.map((id, i) => [i ? ', ' : null, h('button', { class: 'linkbtn', onclick: () => { RX.open[id] = true; RX.filter = 'all'; openTab('claims'); } }, label(id))])) : null,
@@ -683,7 +712,7 @@ function rxExpDetail(id) {
     // paper check
     if (x.cells) out.push(blk('Paper check', rxPaperGrid(x),
       h('div', { class: 'rx-legend' }, Object.keys(RX_CELL).filter(k => x.tally && x.tally[k]).map(k => h('span', null, h('span', { class: 'cg c-' + k }, RX_CELL[k][0]), ' ' + RX_CELL[k][1])), h('span', { class: 'grow' }), rxWhere(x.loc)),
-      x.problems.map(p => h('div', { class: 'rx-warn' }, p.kind === 'differs' ? ['✕ ' + p.row + ' · ' + p.col + ': paper ', h('b', null, p.paper), ', file ', h('b', null, rxFmt(p.file))] : ['Bold ', h('b', null, p.paper), ' in “' + p.col + '” is not the best value (' + rxFmt(p.best) + ').'])),
+      x.problems.filter(p => p.kind !== 'untraced').map(p => h('div', { class: 'rx-warn' }, p.kind === 'differs' ? ['✕ ' + p.row + ' · ' + p.col + ': paper ', h('b', null, p.paper), ', file ', h('b', null, rxFmt(p.file))] : ['Bold ', h('b', null, p.paper), ' in “' + p.col + '” is not the best value (' + rxFmt(p.best) + ').'])),
       x.stale ? h('div', { class: 'rx-warn' }, '↻ ' + x.stale.newer.map(n => n.name).join(', ') + ' changed after ' + x.stale.file + ' was written.') : null));
     else if (x.kind === 'figure') out.push(blk('Paper check', h('div', { class: 'row' }, x.image && !READONLY ? h('img', { class: 'rx-x-fig', src: apiUrl('/api/thumb?node=' + encodeURIComponent(x.id)), alt: x.name, onerror: ev => ev.target.remove() }) : null,
       h('div', { class: 'muted small' }, x.connected ? 'Linked to the files above. Numbers inside a picture cannot be checked.' : 'No script or result file found behind this figure.'))));
@@ -807,7 +836,25 @@ function rxExpMap(E, renderSec) {
     h('div', { class: 'rx-legend' }, Object.keys(RX_XSTATE).map(k => h('span', null, h('span', { class: 'rx-m-g x-' + k }, RX_XSTATE[k][0]), ' ' + RX_XSTATE[k][1] + (k === 'ahead' || k === 'behind' ? ' ' + (k === 'ahead' ? 'of ' : '') + trunc(vs, 22) : ''))), h('span', null, '! to check'))];
   if (selQ) { const s = secs.find(q => q.id === selQ); if (s) out.push(renderSec(s)); }
   else if (selX && seen.has(selX)) { const x = seen.get(selX); out.push(h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-x-h' }, h('b', null, x.name), x.caption ? h('span', { class: 'muted' }, trunc(x.caption, 110)) : null), h('div', { class: 'rx-m-detail' }, rxExpDetail(x.id)))); }
-  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a claim to see the experiments run for it, or an experiment to see why it was run.'));
+  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a claim or an experiment. ', rxHelp('maphint', 'A claim shows the experiments run for it; an experiment shows why it was run.')));
+  return out;
+}
+function rxThesisAnswer(E) {      // "How many claims are backed, stale, in mismatch, waiting, without an experiment"; a zero is said in words
+  const cc = RX.claims.counts, st = cc.stages || {}, total = RX_STAGES.reduce((a, k) => a + (st[k] || 0), 0);
+  const noexp = E.thesis && E.thesis.buckets ? E.thesis.buckets.untested : 0;
+  if (!total) return 'No claim yet.';
+  const part = (n, word, zero) => n ? [rxB(n), ' ' + word] : zero;
+  const bits = [part(cc.recheck || 0, 'stale', 'none stale')];
+  if (RX.todo) bits.push(part(rxMismatches().length, 'in mismatch', 'none in mismatch'));      // the same list as Review's Mismatches
+  bits.push(part(cc.proposed || 0, 'waiting for you', 'none waiting for you'), part(noexp, 'without an experiment', 'every claim has an experiment'));
+  return [rxB(st.finding || 0), ' of ' + total + (total === 1 ? ' claim is' : ' claims are') + ' backed. ', bits.map((b, i) => [i ? (i === bits.length - 1 ? ' and ' : ', ') : '', b]), '.'];
+}
+function rxThesisTree() {      // the claims tree under the page head: straight lines, short name and state in words, its own scroll frame below 1100px
+  const frame = h('div', { class: 'rx-treeframe' }, rxTree({ scrub: false, noLegend: true }));
+  const c = RX.sel && RX.claims.claims.find(x => x.id === RX.sel);
+  const out = [rxSection('Claims', null, rxHelp('tree', 'The thesis is on top, its claims under it, and the evidence under each claim. A hollow ring has no experiment yet; a pale circle is weak; lighter green is partly backed; green is strongly backed; sand is your turn. Click a circle to open what is under it.'), frame)];
+  if (c) { RX.open[c.id] = true; out.push(rxClaimCard(c)); }
+  else if (RX.sel === 'core' && RX.claims.core) out.push(rxCoreCard(RX.claims.core));
   return out;
 }
 function pageExperiments() {
@@ -815,9 +862,10 @@ function pageExperiments() {
   S.outline = [];
   let E = RX.experiments;
   const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'View' }, [['table', 'Outline'], ['map', 'Map']].map(([k, l]) => h('button', { 'aria-pressed': String((RX.exView || 'table') === k), onclick: () => { RX.exView = k; renderPage(true); } }, l)), h('button', { 'aria-pressed': 'false', title: 'The claims as a tree', onclick: () => { RX.view = 'tree'; openTab('claims'); } }, 'Tree'));
-  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null));
+  const root = EMBED ? doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Thesis'), E ? seg : null)) : doc(rxPageHead(RX_Q.experiments, E && RX.claims ? rxThesisAnswer(E) : 'Not available.'));
   if (!E) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
-  root.append(rxStudyLine(), rxBehindNote());
+  root.append(EMBED ? null : h('div', { class: 'row' }, h('span', { class: 'grow' }), seg), rxStudyLine(), rxBehindNote());
+  if (!EMBED && RX.tree && RX.tree.nodes.length) root.append(rxThesisTree());      // the editor tab is the bench: it keeps its own outline
   const c = E.counts, mapped = !!E.unmapped;
   const HF = RX.hf && RX.hf.mode === 'hypothesis_first';
   if (HF) {
@@ -988,16 +1036,12 @@ function rxPlanBox(target, what, label) {
       h('button', { class: 'btn sm', title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, mine.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
       h('button', { class: 'linkbtn small', onclick: refresh }, 'Check for new plans')));
 }
-function pageReview() {
-  const nr = rxNotReady('Review'); if (nr) return nr;
-  S.outline = [];
+function rxReviewContinue() {      // the earlier Review page: three checks, hoped conclusion, baselines, questions. Now one closed section under the four of S36.
   const R = RX.review, days = RX.rvDays || 30, name = S.project ? S.project.name : 'this project';
   const setDays = async d => { RX.rvDays = d; try { RX.review = await apiGet('/api/review?days=' + d); } catch (e) { /* keep */ } renderPage(true); };
   const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Period' }, [[30, '30 days'], [7, '1 week'], [1, '1 day']].map(([d, l]) => h('button', { 'aria-pressed': String(days === d), disabled: READONLY && days !== d, onclick: () => setDays(d) }, l)));
-  const root = doc(h('div', { class: 'row' }, h('h1', { class: 'ptitle grow' }, 'Review'), R ? seg : null));
-  root.classList.add('wide');
+  const root = h('div', { class: 'rx-rv-old' }, h('div', { class: 'row' }, h('span', { class: 'grow' }), R ? seg : null));
   if (!R) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
-  root.append(rxBehindNote());
   const post = async body => { const r = await rxPost('/api/review', Object.assign({ days }, body)); if (r) { RX.review = r; renderPage(true); } };
   const F = RX.rvFilter, fc = F && R.checks.find(c => c.k === F);
   root.append(h('div', { class: 'rx-rv-checks' }, R.checks.map((c, i) => { const v = RX_VERDICT[c.verdict];
@@ -1053,6 +1097,89 @@ function pageReview() {
   }
   if (!rows.length) tbl.append(h('div', { class: 'rx-x-none' }, R.questions.length ? 'Nothing behind this check.' : R.study === 'benchmark' ? 'No claim yet. Confirm the hypotheses on Thesis.' : 'No questions yet. Confirm a project map on the Experiments page.'));
   root.append(tbl);
+  return root;
+}
+/* ---------- Review (S36): what disagrees. Mismatches, Stale, To confirm, then Checked and fine (closed) ---------- */
+// A number opens its file: straight to the file when the trace resolves to exactly one, otherwise to the trace (Setup) that lists them.
+async function rxOpenNumber(xid, method, col) {
+  const nm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let d = RX.suTrace[xid] && RX.suTrace[xid].d;
+  if (!d) { try { d = await apiGet('/api/experiment?id=' + encodeURIComponent(xid)); RX.suTrace[xid] = { d }; } catch (e) { d = null; } }
+  const des = d ? (d.design || {}) : {}, fs = (des.files || []).length ? des.files : (d && d.result ? [{ node_id: d.result.node_id, path: d.result.path }] : []);
+  const mine = fs.filter(f => f.fields && nm(f.fields.method) === nm(method) && nm(f.fields.dataset) === nm(col));
+  const one = mine.length === 1 ? mine[0] : !mine.length && fs.length === 1 ? fs[0] : null;
+  if (one) { if (EMBED && d.repo) EMBED.openFile(d.repo, one.path, 1); else openTab('node', one.node_id); return; }
+  RX.suCell = { x: xid, m: method, c: col }; suLoadTrace(xid); rxGoto('setup', 'x:' + xid);
+}
+function rxExpById(id) { const E = RX.experiments; let out = null; if (E) E.sections.forEach(sec => sec.experiments.forEach(x => { if (x.id === id) out = x; })); return out; }
+// each compared method, then the project's own, then the difference; a missing cell says "no run"
+function rxRvTable(x, mark) {
+  const G = x.grid; if (!G || !G.rows || !G.rows.length) return h('div', { class: 'muted small' }, 'No table of numbers for this experiment.');
+  const sm = x.summary || {}, oursL = sm.study === 'benchmark' ? null : sm.ours_label, lower = !!sm.lower;
+  const others = G.rows.filter(r => r.label !== oursL), ours = oursL ? G.rows.find(r => r.label === oursL) : null;
+  const num = (r, c) => { const v = r.values[c]; return v == null ? h('td', { class: 'num miss' }, 'no run') : h('td', { class: 'num' + (mark && mark.row === r.label && mark.col === c ? ' hit' : '') }, h('button', { class: 'linkbtn mono', title: 'Open the file this number came from', onclick: () => rxOpenNumber(x.id, r.label, c) }, rxFmt(v))); };
+  const best = c => { const vs = others.map(r => r.values[c]).filter(v => v != null); return vs.length ? (lower ? Math.min(...vs) : Math.max(...vs)) : null; };
+  const diff = c => { const o = ours && ours.values[c], b = best(c); if (o == null || b == null) return h('td', { class: 'num miss' }, 'no run'); const d = lower ? b - o : o - b; return h('td', { class: 'num mono' }, (d > 0 ? '+' : d < 0 ? '−' : '') + rxFmt(Math.abs(d)) + (d > 0 ? ' ahead' : d < 0 ? ' behind' : ' level')); };
+  return h('div', { class: 'rv-tw' }, h('table', { class: 'tbl rv-t' }, h('thead', null, h('tr', null, h('th', null, (sm.measure || sm.metric || '') + (lower ? ' ↓' : ' ↑')), G.cols.map(c => h('th', { class: 'num' }, c)))),
+    h('tbody', null, others.map(r => h('tr', null, h('th', null, r.label), G.cols.map(c => num(r, c)))),
+      ours ? [h('tr', { class: 'ours' }, h('th', null, ours.label), G.cols.map(c => num(ours, c))), h('tr', { class: 'diff' }, h('th', null, 'Difference from the best other'), G.cols.map(diff))] : null)));
+}
+function rxRvPair(pr) {
+  return h('div', { class: 'rv-tw' }, h('table', { class: 'tbl rv-t' }, h('tbody', null, [pr.left, pr.right].map(([k, v]) => h('tr', null, h('th', null, k), h('td', { class: 'mono' }, v)))),
+    ), pr.file ? h('div', { class: 'small' }, 'File: ', rxWhere({ path: pr.file, line: 1 }, 'code')) : null);
+}
+function rxRvDetail(it) {
+  const sel = (it.target || {}).sel || '', x = sel.startsWith('x:') ? rxExpById(sel.slice(2)) : null, kids = [];
+  if (x) {
+    kids.push(rxRvTable(x, (it.cells || [])[0] ? { row: it.cells[0].row, col: it.cells[0].col } : null));
+  } else if (it.pair) kids.push(rxRvPair(it.pair));
+  const f = it.kind === 'finding' && S.findings ? (S.findings.findings || []).find(g => 'finding:' + g.id === it.key) : null;
+  if (f) kids.push(h('div', { class: 'rv-ev' }, (f.evidence || []).slice(0, 4).map(ev => h('div', null, rxWhere(ev, ev.repo), h('span', { class: 'muted small' }, ' ' + trunc(ev.text, 100))))));
+  if (!kids.length) kids.push(h('p', { class: 'rv-why' }, 'There is nothing to compare side by side here: this check names one place, not two numbers.'));
+  kids.push(h('div', { class: 'btnrow' }, h('button', { class: 'btn sm', onclick: () => rxOpenTarget(it.target) }, 'Open it where it lives')));
+  return h('div', { class: 'rv-detail' }, kids);
+}
+// one sentence with both sides; the numbers in it open their file
+function rxRvSentence(it) {
+  const c = it.cells;
+  if (c && c.length === 2) {
+    const nb = cell => h('button', { class: 'linkbtn mono', title: 'Open the file this number came from', onclick: () => rxOpenNumber(cell.x, cell.row, cell.col) }, cell.side === 'file' ? rxFmt(cell.v) : String(cell.v));
+    return [c[0].row + ', ' + c[0].col + ': the paper says ', nb(c[0]), ', the file says ', nb(c[1]), '.'];
+  }
+  return it.sentence || (it.text + (it.why ? ': ' + it.why : ''));
+}
+function rxRvRow(cls, word, key, content, title, detail) {
+  const open = RX.rvRow === key, tog = () => { RX.rvRow = open ? null : key; renderPage(true); };
+  return [h('div', { class: 'hm-row rv' + (open ? ' on' : '') }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + cls, 'aria-hidden': 'true' }), word),
+    h('span', { class: 'hm-line', title }, content),
+    h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', 'aria-expanded': String(open), onclick: tog }, open ? 'Close' : 'Open'))),
+    open ? detail : null];
+}
+function pageReview() {
+  const nr = rxNotReady('Review'); if (nr) return nr;
+  S.outline = [];
+  const items = RX.todo ? RX.todo.items : [];
+  const mis = rxMismatches(), stale = items.filter(i => i.group === 'stale'), conf = rxNeedsList();
+  const checks = ((S.findings && S.findings.checks) || []).filter(c => c.status === 'ran' && !c.count), exps = [];
+  if (RX.experiments) RX.experiments.sections.forEach(sec => sec.experiments.forEach(x => { if (!exps.some(e => e.id === x.id)) exps.push(x); }));
+  const flagged = new Set(mis.concat(stale).map(i => (i.target || {}).sel));      // an experiment named by a mismatch or a stale item is not "fine"
+  const clean = exps.filter(x => x.connected && !x.attention && !flagged.has('x:' + x.id)), fine = clean.length + checks.length;
+  const w = (n, one, many) => n ? [rxB(n), ' ' + (n === 1 ? one : many)] : null;
+  const root = doc(rxPageHead(RX_Q.review, !RX.todo ? 'Not available on this hub yet.' : [
+    w(mis.length, 'mismatch', 'mismatches') || 'Nothing disagrees', ', ', w(stale.length, 'stale result', 'stale results') || 'nothing is stale', ' and ', w(conf.length, 'item to confirm', 'items to confirm') || 'nothing to confirm', '. ',
+    fine ? [rxB(fine), fine === 1 ? ' check found nothing.' : ' checks found nothing.'] : 'No check has run yet.']), rxBehindNote());
+  root.classList.add('wide');
+  const none = t => h('div', { class: 'muted hm-none' }, t);
+  root.append(rxSection('Mismatches', mis.length, rxHelp('mismatch', 'A mismatch is the paper and the files disagreeing today: a number that differs from its result file, a main text and appendix that give different values, or a claim whose experiment says otherwise. Open a row to see each compared method, then your own, then the difference.'),
+    mis.length ? mis.map(it => rxRvRow('err', 'mismatch', it.key, rxRvSentence(it), it.sentence || it.text, rxRvDetail(it))) : none('Nothing disagrees.')));
+  root.append(rxSection('Stale', stale.length, null, stale.length ? stale.map(it => rxRvRow('warn', 'stale', it.key, it.text + (it.why ? ': ' + it.why : ''), it.text, rxRvDetail(it))) : none('Nothing is out of date.')));
+  root.append(rxSection('To confirm', conf.length, null, conf.length ? conf.map(rxNeedsRow) : none('Nothing waits for you.')));
+  const open = !!RX.rvFine;
+  root.append(h('details', { class: 'details rv-fine', open: open ? '' : null, ontoggle: ev => { RX.rvFine = ev.target.open; } }, h('summary', null, 'Checked and fine', h('span', { class: 'hm-n' }, String(fine))),
+    clean.map(x => h('div', { class: 'hm-row rv' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ok', 'aria-hidden': 'true' }), 'fine'), h('span', { class: 'hm-line' }, x.name + ': its numbers match the files'), h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open')))),
+    checks.map(c => h('div', { class: 'hm-row rv' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ok', 'aria-hidden': 'true' }), 'fine'), h('span', { class: 'hm-line' }, c.title + ': none found'), h('span', { class: 'hm-act' }))),
+    fine ? null : none('No check has run yet.')));
+  root.append(h('details', { class: 'details rv-cont' }, h('summary', null, 'Should you continue? The three checks, your hoped conclusion and the baselines'), rxReviewContinue()));
   return root;
 }
 function pageTasks() {
@@ -1113,30 +1240,69 @@ function rxDigestBox() {
 }
 
 
-/* ---------- Digest (S18): this week in prose, open tasks, then the history by week ---------- */
-function pageDigest() {      // Home (S24 step 8): one research as a whole. The tab key stays 'digest' so old links keep working.
+/* ---------- Home (S36): the question, what needs you, what changed since you last looked, this month ---------- */
+const NY_MORE = 8;
+// the one click that settles an item from Home (todo.py gives each item that waits on the researcher an act, or null when it has to be opened first)
+async function rxSettle(it) {
+  const a = it.act; if (!a) return;
+  let r = null;
+  if (a.do === 'confirm_claim') { r = await rxPost('/api/claims', { id: a.id, state: 'confirmed' }, 'Confirmed.'); if (r) rxTrack('claim_confirmed'); }
+  else if (a.do === 'confirm_map') r = await rxPost('/api/map/confirm', {}, 'Confirmed.');
+  else if (a.do === 'confirm_hypothesis') r = await rxPost('/api/hypothesis', { action: 'confirm', target: a.target }, 'Confirmed.');
+  else if (a.do === 'confirm_baseline') r = await rxPost('/api/baselines', { action: 'confirm', name: a.name }, 'Confirmed.');
+  else if (a.do === 'confirm_link') { await decideLink(a.id, 'approved', 'Linked.'); renderPage(true); return; }      // app.js reloads the graph; the suggestion is then no longer proposed
+  if (r) await rxRefresh(); else renderPage(true);      // the row leaves the list because the rule that made it stopped firing
+}
+function rxNeedsRow(it) {
+  const can = !!it.act && !READONLY;
+  return h('div', { class: 'hm-row ny' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-dot', 'aria-hidden': 'true' }), 'your turn'),
+    h('span', { class: 'hm-line', title: it.text + (it.why ? ' (' + it.why + ')' : '') }, it.text),
+    h('span', { class: 'hm-act' }, can ? h('button', { class: 'btn sm primary', onclick: ev => { ev.currentTarget.disabled = true; rxSettle(it); } }, 'Confirm') : null,
+      h('button', { class: 'btn sm', onclick: () => rxOpenTarget(it.target) }, can ? 'Open' : 'Look')));
+}
+function rxSinceLoad() {      // opening Home records the visit; what the person had not seen comes back in the same answer
+  if (RX.since !== undefined || READONLY) return;
+  RX.since = null;
+  const done = () => { const t = S.tabs[S.active]; if (t && t.k === 'digest') renderPage(true); };
+  apiPost('/api/since', {}).then(r => { RX.since = r; done(); }).catch(e => { RX.since = { error: e.status === 501 || e.status === 404 ? 'This hub does not keep that record yet.' : e.message }; done(); });
+}
+function rxSinceRow(r) {
+  const open = r.target && (r.target.view !== 'commit' || r.target.url);
+  return h('div', { class: 'hm-row since' }, h('span', { class: 'hm-who' + (r.who.label ? '' : ' kind') }, r.who.label || r.kind_word),
+    h('span', { class: 'hm-line', title: r.text }, r.who.label ? r.kind_word + ': ' + r.text : r.text),
+    h('span', { class: 'hm-act' }, h('span', { class: 'hm-meta' }, absTime(r.t)), open ? h('button', { class: 'btn sm', onclick: () => rxOpenTarget(Object.assign({}, r.target, { at: r.at })) }, 'Open') : null));
+}
+function pageDigest() {      // Home (S24 step 8, S36): the tab key stays 'digest' so old links keep working.
   const nr = rxNotReady('Home'); if (nr) return nr;
   S.outline = [];
-  const root = doc(h('h1', { class: 'ptitle' }, S.project ? S.project.name : 'Home'));
-  const E = RX.experiments, T = RX.trail;
-  root.append(rxStudyLine(), rxBehindNote());
-  if (E && E.thesis) { const th = rxThesisHead(E); th.classList.add('home'); th.querySelector('.rx-th-k .linkbtn').replaceWith(h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the thesis')); root.append(th); }
-  if (T) { const ym = RX.trMonth || (RX.trDay || T.today).slice(0, 7); root.append(h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day to see its work sessions: what was done, why, by whom, where, how and with what result.'))); }
-  const cards = h('div', { class: 'hm-cards' });
-  const todoN = RX.todo ? RX.todo.counts.total : 0, lim = RX.hmAll ? 0 : 6;
-  cards.append(h('section', { class: 'hm-card hm-todo' }, h('div', { class: 'hm-h' }, h('h3', null, 'Next to do'), h('span', { class: 'hm-n' }, todoN), h('span', { class: 'grow' }),
-      RX.todo && todoN > 6 ? h('button', { class: 'linkbtn small', onclick: () => { RX.hmAll = !RX.hmAll; renderPage(true); } }, RX.hmAll ? 'Show fewer' : 'Show all') : null, h('button', { class: 'linkbtn small', onclick: () => openTab('tasks') }, 'Add feedback')),
-    rxTodoList(lim)));
-  const side = h('div', { class: 'hm-col' });
-  side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Deadlines'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Add')),
-    T && T.ahead.length ? T.ahead.slice(0, 5).map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(T.today)) / 864e5); return h('div', { class: 'hm-dl' }, h('span', { class: 'hm-dd' + (days <= 7 ? ' soon' : '') }, 'D-' + days), h('span', { class: 'grow' }, d.title), h('span', { class: 'muted small' }, dmon(d.date))); }) : h('div', { class: 'muted small' }, 'No deadlines yet.')));
-  if (T) { const since = new Date(Date.parse(T.today) - 7 * 864e5).toISOString().slice(0, 10), recent = T.sessions ? T.sessions.filter(x => x.day >= since).slice(0, 8).map(x => ({ day: x.day, kind: x.kinds.includes('runs') ? 'runs' : x.kinds[0], title: x.title, _s: x })) : T.entries.filter(e => e.day >= since).slice(0, 8);
-    side.append(h('section', { class: 'hm-card' }, h('div', { class: 'hm-h' }, h('h3', null, 'Last 7 days'), h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', onclick: () => openTab('history') }, 'Trail')),
-      recent.length ? recent.map(e => h('div', { class: 'tr-e k-' + e.kind }, h('span', { class: 'tr-c mono' }, dmon(e.day)), e._s ? null : h('span', { class: 'tag tr-k' }, TR_KIND[e.kind]),
-        e._s ? h('button', { class: 'ilink', title: 'Open this day', onclick: () => { RX.trDay = e.day; RX.trMonth = e.day.slice(0, 7); renderPage(true); } }, trunc(e.title, 64)) : h('span', null, trunc(e.title, 70)), e._s && e._s.why.claims.length ? h('span', { class: 'tag' }, e._s.why.claims.join(', ')) : null)) : h('div', { class: 'muted small' }, 'Nothing in the last 7 days.'))); }
-  cards.append(side);
-  root.append(cards);
-  if (!READONLY) root.append(sec('This week', 'digest', rxDigestBox()));
+  const root = doc();
+  const T = RX.trail, needs = rxNeedsList(), sn = RX.since;
+  rxSinceLoad();
+  const ans = [needs.length ? [rxB(needs.length), needs.length === 1 ? ' item waits for you. ' : ' items wait for you. '] : 'Nothing waits for you. '];
+  if (sn && !sn.error) ans.push(sn.total ? [rxB(sn.total), (sn.total === 1 ? ' thing' : ' things') + (sn.first_visit ? ' changed in the last 7 days. ' : ' changed since you last looked. ')] : (sn.first_visit ? 'Nothing changed in the last 7 days. ' : 'Nothing changed since you last looked. '));
+  const nd = T && T.ahead && T.ahead[0];
+  if (nd) { const days = Math.round((Date.parse(nd.date) - Date.parse(T.today)) / 864e5); ans.push('Next deadline: ' + nd.title + ', ' + (days === 0 ? 'today' : days === 1 ? 'tomorrow' : 'in ' + days + ' days') + '. '); }
+  else if (T) ans.push('No deadline is set. ');
+  if (RX.todo) ans.push(h('button', { class: 'linkbtn', id: 'hm-todo-link', 'aria-expanded': String(!!RX.hmTodo), onclick: () => { RX.hmTodo = !RX.hmTodo; renderPage(true); } }, 'All to-do (' + RX.todo.counts.total + ')'));
+  root.append(rxPageHead(RX_Q.digest, ans), rxBehindNote());
+  if (RX.hmTodo && RX.todo) root.append(rxSection('To do', RX.todo.counts.total, null, rxTodoList(0), h('div', { class: 'btnrow' }, h('button', { class: 'linkbtn small', onclick: () => openTab('tasks') }, 'Add feedback'))));
+  // Needs you: only what the researcher can settle
+  const shown = RX.hmAll ? needs : needs.slice(0, NY_MORE);
+  root.append(rxSection('Needs you', RX.todo || needs.length ? needs.length : null, rxHelp('needs', 'Only what you can settle: a drafted claim, problem, hypothesis, baseline card or map to confirm, and feedback Lemmata could not link to anything. Experiments to run and results to refresh are in the to-do list.'),
+    !RX.todo && !needs.length ? h('div', { class: 'muted' }, 'Not available on this hub yet.') : needs.length ? [shown.map(rxNeedsRow), needs.length > NY_MORE ? h('button', { class: 'linkbtn small', onclick: () => { RX.hmAll = !RX.hmAll; renderPage(true); } }, RX.hmAll ? 'Show fewer' : 'Show all ' + needs.length) : null] : h('div', { class: 'muted hm-none' }, 'Nothing waits for you.')));
+  // Since you last looked
+  const rows = !sn || sn.error ? [] : (RX.hmSinceAll ? sn.items : sn.items.slice(0, NY_MORE));
+  root.append(rxSection('Since you last looked', sn && !sn.error ? sn.total : null, null,
+    sn && sn.first_visit ? h('p', { class: 'hm-note' }, 'You have not opened Home before, so this covers the last 7 days.') : null,
+    READONLY ? h('div', { class: 'muted' }, 'A saved report does not record visits.') : !sn ? h('div', { class: 'muted' }, 'Reading what changed…') : sn.error ? h('div', { class: 'muted' }, sn.error) : sn.total ? [rows.map(rxSinceRow), sn.items.length > NY_MORE ? h('button', { class: 'linkbtn small', onclick: () => { RX.hmSinceAll = !RX.hmSinceAll; renderPage(true); } }, RX.hmSinceAll ? 'Show fewer' : 'Show all ' + sn.items.length) : null,
+      sn.total > sn.items.length ? h('div', { class: 'muted small' }, (sn.total - sn.items.length) + ' older changes are on the Trail.') : null] : h('div', { class: 'muted hm-none' }, sn.first_visit ? 'Nothing changed in the last 7 days.' : 'Nothing changed since you last looked.')));
+  // This month: the calendar, the deadlines, and the day you click
+  if (T) {
+    const ym = RX.trMonth || T.today.slice(0, 7);
+    root.append(rxSection('This month', null, null, h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day.')),
+      T.ahead.length ? h('div', { class: 'hm-dls' }, T.ahead.slice(0, 5).map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(T.today)) / 864e5); return h('div', { class: 'hm-dl' }, h('span', { class: 'hm-dd' + (days <= 7 ? ' soon' : '') }, 'D-' + days), h('span', { class: 'grow' }, d.title), h('span', { class: 'muted small' }, dmon(d.date))); })) : h('div', { class: 'muted small' }, 'No deadlines yet. Add one on the Trail.')));
+  }
+  if (!READONLY) root.append(h('details', { class: 'details hm-week' }, h('summary', null, 'This week, to copy into your notes'), rxDigestBox()));
   root.classList.add('wide');
   return root;
 }
@@ -1482,7 +1648,7 @@ function suSheet(x, claim, D, hl) {
               v == null ? '—' : h('span', { class: 'mono' }, rxFmt(v)), v != null && r.n[c] ? h('span', { class: 'su-cn' }, '×' + r.n[c]) : null)); })))))));
     if (G.rows.length > 14 && !hl && !sel) card.append(h('button', { class: 'linkbtn small su-more', onclick: () => { RX.suRows = Object.assign({}, RX.suRows, { [x.id]: !(RX.suRows || {})[x.id] }); renderPage(true); } }, (RX.suRows || {})[x.id] ? 'Show the first 12 rows' : 'Show all ' + G.rows.length + ' rows'));
     if (sel) card.append(suTracePanel(x, sel.m, sel.c));
-    else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it: what the paper says → where it comes from → how → who ran it → when. ×n is the number of runs; bold is the best in its column.'));
+    else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it. ', rxHelp('trace', 'The trace runs: what the paper says → where it comes from → how → who ran it → when. ×n is the number of runs; bold is the best in its column.')));
   }
   card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check. ' + c.why : c.why)); })));
   return card;
@@ -1669,15 +1835,19 @@ function pageSetup() {
   const D = RX.setup;
   const root = doc();
   if (!D) {
-    if (RX.setupErr) return root.append(h('h1', { class: 'ptitle' }, 'Setup'), emptyState('!', 'Not available', RX.setupErr, [h('button', { class: 'btn', onclick: () => { RX.setupErr = null; suLoad(); } }, 'Try again')])), root;
-    suLoad(); return root.append(h('h1', { class: 'ptitle' }, 'Setup'), h('p', { class: 'muted' }, 'Reading the experiments…')), root;
+    if (RX.setupErr) return root.append(rxPageHead(RX_Q.setup), emptyState('!', 'Not available', RX.setupErr, [h('button', { class: 'btn', onclick: () => { RX.setupErr = null; suLoad(); } }, 'Try again')])), root;
+    suLoad(); return root.append(rxPageHead(RX_Q.setup), h('p', { class: 'muted' }, 'Reading the experiments…')), root;
   }
   const c = D.counts, hfB = D.board && D.board.mode === 'hypothesis_first' && (D.board.experiments.length || D.board.claims.length);
   root.classList.add('wide');
-  root.append(h('h1', { class: 'ptitle' }, 'Setup'), rxStudyLine(), rxBehindNote(), hfB ? null :
+  const cnt = (n, one, many) => [rxB(n), ' ' + (n === 1 ? one : many)];
+  if (EMBED) root.append(h('h1', { class: 'ptitle' }, 'Setup'), rxStudyLine(), rxBehindNote(), hfB ? null :
     h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.experiments), ' experiments'), h('span', null, h('b', null, c.dataset), ' datasets'), h('span', null, h('b', null, c.method), D.study === 'benchmark' ? ' compared methods' : ' methods', c.baselines ? ' (' + c.baselines + ' baselines)' : ''), h('span', null, h('b', null, c.metric), ' metrics'),
       c.checks ? h('span', { class: 'warn' }, h('b', null, c.checks), ' to check') : null,
       h('button', { class: 'linkbtn', id: 'su-baselines', title: 'Each baseline\'s paper, PDF, code, idea and published numbers', onclick: () => openTab('baselines') }, 'Baselines →')));
+  else root.append(rxPageHead(RX_Q.setup, c.experiments || c.dataset || c.method ? [cnt(c.dataset, 'dataset', 'datasets'), ', ', cnt(c.method, D.study === 'benchmark' ? 'compared method' : 'method', D.study === 'benchmark' ? 'compared methods' : 'methods'), ' and ', cnt(c.metric, 'measure', 'measures'), ' in ', cnt(c.experiments, 'experiment', 'experiments'), '. ',
+      c.checks ? [rxB(c.checks), ' to check. '] : 'Nothing to check. '] : 'Nothing was found yet. ',
+    h('button', { class: 'linkbtn', id: 'su-baselines', title: 'Each baseline\'s paper, PDF, code, idea and published numbers', onclick: () => openTab('baselines') }, 'Baselines →')), rxStudyLine(), rxBehindNote());
   const B = D.board && (D.board.experiments.length || D.board.claims.length) ? D.board : null, hf = B && B.mode === 'hypothesis_first';
   if (RX.suMap && B) {      // the map alone, for a wide editor tab or its own window
     clear(root); root.classList.add('wide', 'bd-solo');
@@ -1806,7 +1976,7 @@ function trAhead(D) {
   } else {
     const di = h('input', { type: 'date', 'aria-label': 'Date' }), ti = h('input', { type: 'text', placeholder: 'What is due, e.g. Submit to TKDE, Draft to advisor', 'aria-label': 'Title', maxlength: '160' }), vi = h('input', { type: 'text', placeholder: 'Journal (optional)', 'aria-label': 'Journal', maxlength: '120' });
     form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!di.value || !ti.value.trim()) return; set(await rxPost('/api/deadlines', { date: di.value, title: ti.value.trim(), kind: vi.value.trim() ? 'journal' : 'milestone', venue: vi.value.trim() || undefined })); } }, di, ti, vi, h('button', { class: 'btn sm', type: 'submit' }, 'Add date'),
-      h('div', { class: 'muted small tr-fn' }, 'A journal has no shared deadline, so you set your own target dates.'));
+      h('div', { class: 'muted small tr-fn' }, 'Your own target dates. ', rxHelp('journal', 'A journal has no shared deadline, so you set your own target dates.')));
   }
   box.append(h('div', { class: 'tr-add' }, seg, form), trCalLink());
   return box;
@@ -1898,6 +2068,21 @@ function ssRow(s) {   // one line per session on the Trail list; click for the c
     h('span', { class: 'muted small' }, [s.commands_n ? plural(s.commands_n, 'command') : null, s.commits ? plural(s.commits, 'commit') : null].filter(Boolean).join(', ')));
   return open ? [line, ssCard(s)] : line;
 }
+/* S36: a day is a list of rows: who, what, where, when. A row opens the session card (why, how, result); the raw logged commands are one more click down, behind "Show the records". */
+const SS_WHO_SHORT = { you: 'You', agent: 'Your agent', watcher: 'File watcher' };
+const BY_WORD = { you: 'You', agent: 'Your agent', run: 'A run', lemmata: 'Lemmata' };
+function ssWhoShort(s) {
+  let w = s.who.map(x => SS_WHO_SHORT[x.who] || x.who).concat(s.authors.map(a => 'Commit by ' + a));
+  if (!w.length) w = [...new Set((s.entries || []).filter(e => e.by).map(e => e.by.kind === 'person' ? e.by.name : BY_WORD[e.by.kind]))].filter(Boolean);      // only what the records say
+  return w.length ? w.join(' · ') : 'Not recorded';
+}
+function ssWhereShort(s) { const W = s.where, p = W.hosts.concat(W.places.map(x => x.name)); return p.length ? p.slice(0, 2).join(', ') + (p.length > 2 ? ' +' + (p.length - 2) : '') : 'Not recorded'; }
+function ssDayRow(s) {
+  const open = RX.ssCard[s.id];
+  const line = h('button', { class: 'dy-row' + (open ? ' on' : ''), 'aria-expanded': String(!!open), onclick: () => { RX.ssCard[s.id] = !open; renderPage(true); } },
+    h('span', { class: 'dy-who' }, ssWhoShort(s)), h('span', { class: 'dy-what', title: s.title }, s.title), h('span', { class: 'dy-where', title: ssWhereShort(s) }, ssWhereShort(s)), h('span', { class: 'dy-when mono' }, ssTime(s)));
+  return open ? [line, ssCard(s)] : line;
+}
 function trDayPanel(D, day) {
   const dls = D.deadlines.filter(d => d.date === day), ss = (D.sessions || []).filter(s => s.day === day).slice().reverse();
   const box = h('section', { class: 'tr-day' }, h('div', { class: 'tr-day-h' }, h('b', null, dmon(day) + ' ' + day.slice(0, 4) + ' · ' + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(day + 'T00:00:00').getDay()]),
@@ -1907,8 +2092,9 @@ function trDayPanel(D, day) {
     box.append(trDeadlineRow(d, D), h('div', { class: 'tr-dd muted small' }, d.venue ? d.venue + ' · ' : '', open ? open + ' to-do items are still open (not counting gaps).' : 'No to-do items open.')); });
   if (!D.sessions) { D.entries.filter(e => e.day === day).forEach(e => box.append(trEntry(e))); return box; }   // a hub from before S26
   if (!ss.length && !dls.length) box.append(h('div', { class: 'muted small' }, 'Nothing recorded on this day.'));
-  ss.forEach(s => box.append(ssCard(s)));
-  if (ss.length) box.append(h('div', { class: 'muted small su-hint' }, 'A session is activity with no gap longer than ' + (D.gap_minutes || 60) + ' minutes. Everything except a confirmed summary is worked out by rules from the logged commands, commits and result files.'));
+  if (ss.length) box.append(h('div', { class: 'dy-row head', 'aria-hidden': 'true' }, h('span', null, 'Who'), h('span', null, 'What'), h('span', null, 'Where'), h('span', null, 'When')));
+  ss.forEach(s => box.append(ssDayRow(s)));
+  if (ss.length) box.append(h('div', { class: 'muted small su-hint' }, 'How sessions are made ', rxHelp('sessions', 'A session is activity with no gap longer than ' + (D.gap_minutes || 60) + ' minutes. Everything except a confirmed summary is worked out by rules from the logged commands, commits and result files.')));
   return box;
 }
 async function trLoad() {
@@ -1916,12 +2102,19 @@ async function trLoad() {
   try { RX.trail = await apiGet('/api/trail'); RX.trailErr = null; } catch (e) { RX.trailErr = e.status === 404 || e.status === 501 ? 'This hub has no Trail yet. It appears after the hub updates.' : e.message; }
   RX.trailBusy = false; const t = S.tabs[S.active]; if (t && (t.k === 'history' || t.k === 'trail')) renderPage(true);
 }
+function trLastDay(D) {      // the answer line: the last working day in one sentence
+  const ss = (D.sessions || []).filter(x => x.day === D.last), n = D.entries.filter(e => e.day === D.last).length;
+  if (!D.last) return 'Nothing is recorded yet.';
+  const when = D.last === D.today ? 'Today' : 'On ' + dmon(D.last);
+  if (ss.length) return [when + ', ', rxB(ss.length), ss.length === 1 ? ' work session' : ' work sessions', ' (' + (ssDur(ss.reduce((a, x) => a + x.minutes, 0)) || 'under a minute') + '): ' + trunc(ss[0].title, 90) + '.'];
+  return [when + ', ', rxB(n), n === 1 ? ' thing was recorded.' : ' things were recorded.'];
+}
 function pageTrail() {
   const nr = rxNotReady('Trail'); if (nr) return nr;
   S.outline = [];
-  const root = doc(h('h1', { class: 'ptitle' }, 'Trail'));
+  const root = doc(rxPageHead(RX_Q.history, RX.trail ? trLastDay(RX.trail) : RX.trailErr ? '' : 'Reading the history…'));
   const D = RX.trail;
-  if (!D) { if (RX.trailErr) return root.append(h('p', { class: 'muted' }, RX.trailErr)), root; trLoad(); return root.append(h('p', { class: 'muted' }, 'Reading the history…')), root; }
+  if (!D) { if (RX.trailErr) return root.append(h('p', { class: 'muted' }, RX.trailErr)), root; trLoad(); return root; }
   const F = RX.trFilter || 'all';
   root.append(trAhead(D));
   root.append(h('div', { class: 'fchips' }, [['all', 'All']].concat(D.kinds.map(k => [k, TR_KIND[k] + ' ' + D.counts[k]])).map(([k, l]) => h('button', { class: 'fchip', 'aria-pressed': String(F === k), onclick: () => { RX.trFilter = k; renderPage(true); } }, l))));

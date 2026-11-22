@@ -14,6 +14,7 @@ WEB = APP / "src" / "lemmata" / "web"
 HIGHLIGHT_ALLOWED = {
     ".btn.primary", ".btn.primary:hover", ".rdot.d-highlight", ".chip.proposed::before",
     ".rxt-li.att > .rxt-row .rxt-dot",
+    ".hm-dot", ".sd-dot",      # S36 phase 2: the your-turn dot of a Needs you row, and Home's dot in the sidebar
 }
 # Glyph-only text that carries no information (carets, +/- marks, one-character state glyphs) may stay below 13px.
 SIZE_EXCEPTIONS = {".rx-m-g", ".rxt-caret", ".rh .caret", ".rx-chk .cg"}
@@ -116,6 +117,93 @@ class DesignSystemTest(unittest.TestCase):
             hits = re.findall(r"#[0-9a-fA-F]{3,8}\b", (WEB / f).read_text(encoding="utf-8"))
             # '#' ids such as #status are not hex colours unless all characters are hex digits; none of ours are
             self.assertEqual(hits, [], f)
+
+
+class PageHeadsTest(unittest.TestCase):
+    """Phase 2 (acceptance lines 10, 11, 15, 16, 17): strings and structure that the browser cannot be asked about here."""
+    @classmethod
+    def setUpClass(cls):
+        cls.js = (WEB / "research.js").read_text(encoding="utf-8")
+        cls.app = (WEB / "app.js").read_text(encoding="utf-8")
+        cls.css = (WEB / "app.css").read_text(encoding="utf-8")
+
+    def test_each_page_starts_with_its_question(self):
+        qs = re.search(r"const RX_Q = \{([^}]*)\}", self.js).group(1)
+        for key, q in (("digest", "What needs you today?"), ("experiments", "Is each claim backed?"), ("setup", "What was used?"),
+                       ("review", "What disagrees?"), ("history", "What did you do, and when?")):
+            self.assertIn("%s: '%s'" % (key, q), qs)
+        for page, use in (("pageDigest", "RX_Q.digest"), ("pageExperiments", "RX_Q.experiments"), ("pageSetup", "RX_Q.setup"), ("pageReview", "RX_Q.review"), ("pageTrail", "RX_Q.history")):
+            body = self.js[self.js.index("function %s(" % page):]
+            body = body[:body.index("\n}\n")]
+            self.assertIn("rxPageHead(" + use, body, page)
+
+    def test_home_tiles_are_gone(self):
+        self.assertNotIn("hm-cards", self.js + self.css + self.app)
+        self.assertNotIn("hm-card", self.js + self.css)
+        body = self.js[self.js.index("function pageDigest("):]
+        body = body[:body.index("\n}\n")]
+        for section in ("'Needs you'", "'Since you last looked'", "'This month'"):
+            self.assertIn(section, body)
+        self.assertIn("rxTodoList(0)", body)      # the to-do list stays reachable from the answer line
+        self.assertIn("All to-do (", body)
+
+    def test_review_has_four_sections_in_order(self):
+        body = self.js[self.js.index("function pageReview("):]
+        body = body[:body.index("\n}\n")]
+        order = [body.index(x) for x in ("'Mismatches'", "'Stale'", "'To confirm'", "'Checked and fine'")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("'no run'", self.js)      # a missing cell is said in words
+        self.assertIn("open: open ? '' : null", body)      # closed by default
+
+    def test_sidebar_dot_is_only_on_home(self):
+        left = self.app[self.app.index("side.append(h('div', { class: 'sd-g sd-main' }"):]
+        left = left[:left.index("\n")]
+        self.assertIn("k === 'digest' && RX.todo ? h('i', { class: 'sd-dot'", left)
+        self.assertEqual(self.app.count("sd-dot"), 1)
+        self.assertRegex(self.css, r"\.sd-n \{[^}]*color:var\(--text-secondary\)")
+
+    def test_tree_frame_scrolls_on_its_own_below_1100px(self):
+        self.assertRegex(self.css, r"@media \(max-width:1100px\) \{ \.rx-treeframe \{ overflow-x:auto;")
+        self.assertIn("rx-treeframe", self.js)
+
+    def test_needs_you_rows_use_the_your_turn_dot_and_one_nowrap_line(self):
+        self.assertRegex(self.css, r"\.hm-line \{[^}]*white-space:nowrap")
+        self.assertRegex(self.css, r"\.hm-line \{[^}]*text-overflow:ellipsis")
+        self.assertIn("h('i', { class: 'hm-dot', 'aria-hidden': 'true' })", self.js)
+        self.assertIn("'your turn'", self.js)
+
+    def test_vscode_tab_keeps_its_one_word_titles(self):
+        head = self.js[self.js.index("function rxPageHead("):]
+        head = head[:head.index("\n}\n")]
+        self.assertIn("if (EMBED) return h('h1', { class: 'ptitle' }, RX_SHORT[", head)
+        self.assertIn("setup: 'Setup'", self.js)
+        self.assertNotIn("html.embed .pghead", self.css)      # vscode.css sets the tab's title size; nothing here may outrank it
+        self.assertNotIn("html.embed h1.ptitle.pq", self.css)
+
+    def test_thesis_draws_the_tree_without_a_paper(self):
+        body = self.js[self.js.index("function pageExperiments("):]
+        body = body[:body.index("\n}\n")]
+        line = next(l for l in body.split("\n") if "rxThesisTree()" in l)
+        self.assertNotIn("has_paper", line)
+
+    def test_thesis_and_review_count_mismatches_from_one_list(self):
+        self.assertIn("const rxMismatches = ", self.js)
+        self.assertGreaterEqual(self.js.count("rxMismatches()"), 2)
+        ans = self.js[self.js.index("function rxThesisAnswer("):]
+        self.assertIn("rxMismatches()", ans[:ans.index("\n}\n")])
+        self.assertNotIn("st.refuted", ans[:ans.index("\n}\n")])
+
+    def test_numbers_in_a_mismatch_open_their_file(self):
+        body = self.js[self.js.index("async function rxOpenNumber("):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("mine.length === 1", body)      # one file: straight to the file
+        self.assertIn("openTab('node', one.node_id)", body)
+        self.assertIn("rxGoto('setup'", body)      # several: the trace
+        sent = self.js[self.js.index("function rxRvSentence("):]
+        self.assertIn("rxOpenNumber(cell.x, cell.row, cell.col)", sent[:sent.index("\n}\n")])
+
+    def test_decision_commits_are_not_sand(self):
+        self.assertNotIn("plainChip('◆', 'Decision', 'proposed')", self.js)
 
 
 if __name__ == "__main__":

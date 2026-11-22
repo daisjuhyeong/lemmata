@@ -2105,7 +2105,7 @@ function renderLeft() {
   const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0, latex: RX.latex && RX.latex.counts ? RX.latex.counts.stale + RX.latex.counts.open : 0 };
   const go = k => k === 'search' ? quickSwitcher() : openTab(k);
   const top = NAV_OF[cur] || null;
-  side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' }, b) : null); })));
+  side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' + (k === 'digest' && RX.todo ? ' turn' : '') }, k === 'digest' && RX.todo ? h('i', { class: 'sd-dot', title: 'Waiting for you', 'aria-hidden': 'true' }) : null, b) : null); })));      // S36: only Home carries the your-turn dot, beside its count
   SIDE.forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
     items.map(([k, label]) => h('button', { class: 'sd-i' + (k === cur ? ' on' : ''), 'aria-current': k === cur ? 'page' : null, onclick: () => go(k) },
       h('span', null, label), n[k] ? h('span', { class: 'sd-n' }, n[k]) : null)))));
@@ -2113,7 +2113,7 @@ function renderLeft() {
 }
 
 /* ---------- tab bar, page ---------- */
-function navBadge(k) { return k === 'digest' ? (RX.todo ? RX.todo.counts.total : RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0) : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0)
+function navBadge(k) { return k === 'digest' ? (RX.todo ? rxNeedsList().length : RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0) : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0)
     : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : 0; }
 function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;

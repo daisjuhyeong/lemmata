@@ -28,6 +28,7 @@ from . import plans as plansmod
 from . import runs as runsmod
 from . import sessions as sessionsmod
 from . import setup as setupmod
+from . import since as sincemod
 from . import study as studymod
 from . import board as boardmod
 from . import todo as todomod
@@ -183,7 +184,7 @@ class Engine:
         return out
 
     # ------------------------------------------------------------------ mutations
-    def create_checkpoint(self, note="", at=None, created_at=None, cp_id=None):
+    def create_checkpoint(self, note="", at=None, created_at=None, cp_id=None, actor=None):
         if note is None:
             note = ""
         if not isinstance(note, str) or len(note) > 500:
@@ -198,6 +199,8 @@ class Engine:
         now = now_iso()
         cp = historymod.make_checkpoint(s["repos"], s["infos"], s["trees"], s["G"], s["cache"], self.hub, cp_id, note,
                                         created_at or now, at, existing)
+        if actor:      # who made it, only when the request knows (a browser session); otherwise nothing is recorded
+            cp["by"] = actor
         cps = {"schema": "lemmata.checkpoints/1", "active": cp["id"], "checkpoints": existing + [cp]}
         s["cps"] = cps
         self.hub.write_json("checkpoints.json", cps)
@@ -1210,7 +1213,7 @@ class Engine:
         self.hub.write_json("map.json", d)
         return self.project_map()
 
-    def confirm_map(self):
+    def confirm_map(self, actor=None):
         """The researcher accepts the proposal. Its questions become claims (reusing the ones the paper already states)
         and each question is linked to the tables and figures its experiments feed."""
         s = self._ensure()
@@ -1237,7 +1240,7 @@ class Engine:
                     for p in x["paper"]:
                         claimsmod.link(st, ids, s["G"].nodes, cid, p, True)
         self.hub.write_json("claims.json", st)
-        d.update(confirmed=m, proposed=None, report=report, confirmed_at=now_iso())
+        d.update(confirmed=m, proposed=None, report=report, confirmed_at=now_iso(), confirmed_by=actor or None)
         self.hub.write_json("map.json", d)
         return self.project_map()
 
@@ -1435,9 +1438,17 @@ class Engine:
         except Exception:      # the to-do list must never fail because of this
             nums = None
         E, S = _docs or (self.experiments(), self.setup())
+        try:      # drafts that wait for the researcher (S36); the to-do list must never fail because of them
+            hypo = self.hypothesis()
+        except Exception:
+            hypo = None
+        try:
+            bl = self.baselines()
+        except Exception:
+            bl = None
         return todomod.build(E, self.claims(), S, self.tasks(), s["findings"], s["alarms"], self.plans(),
                              {"proposed": d.get("proposed")}, trailmod.load_deadlines(self.hub)["deadlines"], todomod.load(self.hub), today,
-                             numbers=nums, sync=self.sync_state())
+                             numbers=nums, sync=self.sync_state(), hypo=hypo, baselines=bl)
 
     # ------------------------------------------------------------------ the bench (S35, ADR-011): what VS Code shows
     def bench(self, today=None):
@@ -1461,6 +1472,17 @@ class Engine:
                              {x["id"] for sec in E["sections"] for x in sec["experiments"]}, run_id, exp_id)
         self.hub.write_json(benchmod.STORE, st)
         return self.bench()
+
+    def since(self, viewer=None, mark=False):
+        """What changed after this person last opened Home, newest first (S36). Nothing is stored unless mark is true, which
+        records now as the last time they looked. viewer: the signed-in GitHub login on a hub, None for the local user."""
+        self._ensure()
+        store = sincemod.load(self.hub)
+        now = now_iso()
+        doc = sincemod.build(self.trail(), store["users"].get(sincemod.key_of(viewer)), now)
+        if mark:
+            self.hub.write_json("home_seen.json", sincemod.mark(store, viewer, now))
+        return doc
 
     def snooze_todo(self, key, until=None):
         self._ensure()

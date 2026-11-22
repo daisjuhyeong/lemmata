@@ -381,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                 with self.app.lock:
                     data = eng.events(after_checkpoint=q.get("after_checkpoint") in ("1", "true"))
                 return self._json(data)
+            if r == "/since":      # S36: what changed since this person last opened Home (reads only; POST records the visit)
+                with self.app.lock:
+                    return self._json(need("since")(getattr(self, "viewer", None), False))
             if r == "/trail":
                 with self.app.lock:
                     data = need("trail")(q.get("from") or None, q.get("to") or None)
@@ -460,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(405, "method_not_allowed", "use POST")
             raise ApiError(404, "not_found", "unknown route")
         # POST
-        RESEARCH = ("/todo", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change", "/study", "/numbers", "/baselines", "/latex", "/bench")
+        RESEARCH = ("/todo", "/since", "/session", "/deadlines", "/venue", "/calendar", "/claims", "/claims/link", "/claims/add", "/claims/remove", "/feedback", "/tasks", "/note", "/notation", "/experiment", "/map", "/map/draft", "/map/edit", "/map/confirm", "/map/discard", "/review", "/plans", "/hypothesis", "/hypothesis/submit", "/hypothesis/change", "/study", "/numbers", "/baselines", "/latex", "/bench")
         if r not in ("/scan", "/checkpoints", "/triage", "/links/decide", "/ask", "/runs") + RESEARCH:
             if r in gets or r in ("/events", "/analyze", "/export", "/file", "/raw"):
                 raise ApiError(405, "method_not_allowed", "use GET")
@@ -518,7 +521,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(need("propose_map")(body["map"], "you"), 201)
                 if r == "/map/edit":
                     return self._json(need("edit_map")(body.get("change")))
-                if r in ("/map/draft", "/map/confirm", "/map/discard"):
+                if r == "/map/confirm":
+                    return self._json(need("confirm_map")(getattr(self, "actor", "you")))      # S36: the actor is known only for a browser session
+                if r in ("/map/draft", "/map/discard"):
                     return self._json(need(r[5:] + "_map")())
                 if r == "/hypothesis":
                     ts, fs = body.get("targets"), body.get("fields")
@@ -546,6 +551,9 @@ class Handler(BaseHTTPRequestHandler):
                     if sp is not None and not isinstance(sp, dict):
                         raise ApiError(400, "bad_request", "spec must be an object")
                     return self._json(need("set_plan")(txt("id", True), txt("state"), sp, txt("title")))
+                if r == "/since":      # S36: record that this person has now looked at Home; the answer is what they had not seen
+                    # only a browser session records a visit; a bearer-token client (an agent, VS Code) gets the same answer as GET
+                    return self._json(need("since")(getattr(self, "viewer", None), getattr(self, "actor", "you") == "you"))
                 if r == "/todo":
                     return self._json(need("snooze_todo")(txt("key", True), txt("snooze_until")))
                 if r == "/bench":     # S35: the researcher attaches a run to an experiment by hand (an empty experiment undoes it)
@@ -598,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
                 at = body.get("at")
                 if not isinstance(note, str) or len(note) > 500 or not (at is None or isinstance(at, dict)):
                     raise ApiError(400, "bad_request", "note must be text up to 500 characters; at must be an object or null")
-                return self._json(eng.create_checkpoint(note=note, at=at), 201)
+                return self._json(eng.create_checkpoint(note=note, at=at, actor=getattr(self, "actor", "you")), 201)
             if r == "/triage":
                 note = body.get("note", "")
                 if not isinstance(note, str) or len(note) > 2000:

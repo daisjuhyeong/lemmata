@@ -239,6 +239,8 @@ class HubHandler(Handler):
     def _dispatch(self, method):
         self.app = None
         self.triage_by = None
+        self.viewer = None
+        self.actor = None
         try:
             if self.headers.get("Tailscale-Funnel-Request") is not None and not self.hub.public_mode():
                 # a request that came in through Tailscale Funnel while the hub is private (no public_url configured)
@@ -292,6 +294,8 @@ class HubHandler(Handler):
             if m:
                 self._own(m.group(1), dev)
                 self.triage_by = "ui:%s" % dev["device_id"]
+                self.actor = "you" if via == "cookie" else None      # a browser session is the researcher; a token is an agent or a tool
+                self.viewer = self._user(dev)      # who "Since you last looked" is for (S36)
                 return self._project(method, m.group(1), m.group(2), q)
             if path.startswith("/api/"):
                 raise ApiError(404, "not_found", "unknown route")
