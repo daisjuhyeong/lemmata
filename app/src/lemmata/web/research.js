@@ -117,7 +117,7 @@ async function rxShowLines(repo, loc) {
   let body;
   try { const r = await apiGet('/api/file?repo=' + encodeURIComponent(repo) + '&path=' + encodeURIComponent(loc.path) + '&start=' + a + '&end=' + Math.min(b, a + 60)); const hl = []; for (let i = loc.line || 1; i <= (loc.end_line || loc.line || 1); i++) hl.push(i); body = codeBlock(r.lines, r.start, hl); }
   catch (e) { body = h('p', { class: 'muted' }, 'Could not read those lines: ' + e.message); }
-  modal(loc.path + (loc.line ? ':' + loc.line : ''), body, [{ label: 'Close', primary: true }]);
+  modal(loc.path + (loc.line ? ':' + loc.line : ''), body, [{ label: 'Close' }]);
 }
 function rxNotReady(title) {
   if (!RX.loaded) return doc(h('h1', { class: 'ptitle' }, title), h('p', { class: 'muted' }, 'Reading your project…'));
@@ -183,7 +183,7 @@ function rxEditDialog(c) {
   const ta = h('textarea', { rows: '4', 'aria-label': 'Claim text', class: 'rx-ta' }); ta.value = c.text;
   const note = h('textarea', { rows: '2', 'aria-label': 'Note', class: 'rx-ta', placeholder: 'Note to yourself (optional): a caveat, a condition, what would falsify it' }); note.value = c.note || '';
   modal('Edit ' + c.label, h('div', null, h('p', { class: 'muted' }, 'Say the claim in your own words. The paper is not changed.'), ta, note), [{ label: 'Cancel' },
-    { label: 'Save', primary: true, fn: async () => { const r = await rxPost('/api/claims', { id: c.id, text: ta.value, note: note.value }); if (r) { RX.claims = r; renderPage(true); } } }]);
+    { label: 'Save', fn: async () => { const r = await rxPost('/api/claims', { id: c.id, text: ta.value, note: note.value }); if (r) { RX.claims = r; renderPage(true); } } }]);
 }
 function rxClaimCard(c) {
   const open = RX.open[c.id] != null ? RX.open[c.id] : (c.stage === 'testing' || c.stage === 'refuted' || !!c.recheck || c.state === 'proposed');
@@ -700,7 +700,7 @@ function rxMapCard() {
   if (M.state === 'none') return h('section', { class: 'rx-map none' },
     h('div', { class: 'rx-map-h' }, h('span', { class: 'sg look' }, '◌'), h('b', null, 'Not mapped yet'), h('span', { class: 'grow' }),
       READONLY ? null : h('button', { class: 'btn sm', title: 'A rough map from file names and columns, no AI', onclick: () => act('/api/map/draft', {}, 'Draft ready to review') }, 'Draft by rules')),
-    READONLY ? null : h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code to map this project: ' + RX_MAP_PROMPT(name), onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy prompt for Claude Code')));
+    READONLY ? null : h('div', { class: 'rx-map-ask' }, h('button', { class: 'btn sm', title: 'Paste it into your Claude Code to map this project: ' + RX_MAP_PROMPT(name), onclick: () => copyText(RX_MAP_PROMPT(name)) }, 'Copy prompt for Claude Code')));
   const m = M.proposed || M.confirmed, prop = M.state === 'proposed', cov = M.coverage || { n_files: 0, files: [], paper: [], total: 0 };
   const dropped = (M.report || []).filter(r => r.level === 'dropped'), warns = (M.report || []).filter(r => r.level !== 'dropped');
   const qOpts = m.questions.map(q => [q.id, q.label]);
@@ -972,7 +972,7 @@ function rxPlanCard(p0) {
     det('f', 'Edit the experiment', form),
     det('p', 'Prompt for Claude Code', pre),
     h('div', { class: 'row rx-rv-act' },
-      h('button', { class: 'btn sm' + (p.state === 'copied' ? '' : ' primary'), title: 'Copy the prompt, then paste it into a new Claude Code session in this project', onclick: () => { copyText(p.prompt); if (p.state !== 'copied') save({ state: 'copied' }); } }, 'Copy prompt for Claude Code'),
+      h('button', { class: 'btn sm', title: 'Copy the prompt, then paste it into a new Claude Code session in this project', onclick: () => { copyText(p.prompt); if (p.state !== 'copied') save({ state: 'copied' }); } }, 'Copy prompt for Claude Code'),
       p.deny && p.deny.length ? h('button', { class: 'btn sm', title: 'Claude Code permission rules that block its edit tools on the paths to leave unchanged. Add them to .claude/settings.local.json in the repository. They do not cover shell commands unless the sandbox is on.', onclick: () => copyText(rules()) }, 'Copy protection rules') : null,
       h('button', { class: 'linkbtn small', onclick: async () => { await save({ state: 'dropped' }); renderPage(true); } }, 'Drop')));
 }
@@ -985,7 +985,7 @@ function rxPlanBox(target, what, label) {
   return h('div', { class: 'rx-pl-box' }, label ? h('div', { class: 'rx-label' }, 'Next experiments') : null,
     mine.length ? mine.map(rxPlanCard) : h('div', { class: 'muted small' }, 'Claude Code reads this ' + what + ', its gaps and its scripts, and proposes up to three experiments. Each comes as a form you can change: goal, decision rule, files to read and to leave alone, steps, commands. Lemmata turns it into the prompt.'),
     h('div', { class: 'row rx-rv-act' },
-      h('button', { class: 'btn sm' + (mine.length ? '' : ' primary'), title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, mine.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
+      h('button', { class: 'btn sm', title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, mine.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
       h('button', { class: 'linkbtn small', onclick: refresh }, 'Check for new plans')));
 }
 function pageReview() {
@@ -1044,7 +1044,7 @@ function pageReview() {
           h('span', null, c.text), rxWhere(c.evidence, c.evidence.repo)))) : null,
         rxPlanBox('q:' + q.id, 'claim', true),
         h('div', { class: 'row rx-rv-act' },
-          READONLY ? null : h('button', { class: 'btn sm primary', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
+          READONLY ? null : h('button', { class: 'btn sm', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
           READONLY ? null : h('button', { class: 'btn sm', title: 'Mark confounds as checked by you, without an agent', onclick: () => post({ question: q.id, mine: !(rep && rep.by === 'you') }) }, rep && rep.by === 'you' ? 'Undo my check' : 'I checked it myself'),
           q.started ? h('button', { class: 'btn sm', onclick: () => { RX.exView = 'map'; RX.mapSel = 'q:' + q.id; openTab('experiments'); } }, 'Open experiments') : null,
           q.started ? rxVsLink('q:' + q.id) : null,
@@ -1064,7 +1064,7 @@ function pageTasks() {
   if (!READONLY) {
     const ta = h('textarea', { rows: '5', class: 'rx-ta', id: 'fb-text', 'aria-label': 'Feedback', placeholder: 'One point per line, for example:\n- Table 2 should include a second baseline\n- The proof of Theorem 1 does not use Assumption 2\n- Rerun evaluate.py with a longer window' });
     const src = h('input', { type: 'text', id: 'fb-source', 'aria-label': 'Where it came from', placeholder: 'Where it came from, e.g. Advisor meeting 10 Nov' });
-    root.append(h('div', { class: 'card' }, ta, h('div', { class: 'btnrow' }, src, h('button', { class: 'btn primary', id: 'fb-add', onclick: async () => {
+    root.append(h('div', { class: 'card' }, ta, h('div', { class: 'btnrow' }, src, h('button', { class: 'btn', id: 'fb-add', onclick: async () => {
       if (!ta.value.trim()) return;
       const r = await rxPost('/api/feedback', { text: ta.value, source: src.value.trim() || null });
       if (r) { RX.tasks = r; rxTrack('feedback_added'); renderPage(true); renderLeft(); }
@@ -1169,7 +1169,7 @@ function pageAsk() {
   input.addEventListener('keydown', ev => { if (ev.key === 'Enter') run(); });
   const root = doc(h('h1', { class: 'ptitle' }, 'Ask'),
 
-    h('div', { class: 'rx-askbar' }, input, h('button', { class: 'btn primary', id: 'ask-go', disabled: A.busy || READONLY, onclick: () => run() }, A.busy ? 'Looking…' : 'Ask')),
+    h('div', { class: 'rx-askbar' }, input, h('button', { class: 'btn', id: 'ask-go', disabled: A.busy || READONLY, onclick: () => run() }, A.busy ? 'Looking…' : 'Ask')),
     h('div', { class: 'rx-ex-q' }, RX_EXAMPLES.concat(['What depends on ' + (basename(((S.graph.nodes.find(n => n.kind === 'code') || {}).name) || 'train.py')) + '?']).map(q => h('button', { class: 'fchip', onclick: () => run(q) }, q))));
   if (A.res && A.res.error) root.append(h('div', { class: 'rx-warn' }, A.res.error));
   else if (A.res) {
@@ -1802,7 +1802,7 @@ function trAhead(D) {
       form.append(h('div', { class: 'tr-found' }, h('div', null, h('b', null, r.venue + ' ' + r.year), r.full_name ? h('span', { class: 'muted small' }, ' ' + r.full_name) : null, r.when ? h('span', { class: 'muted small' }, ' · ' + r.when + (r.place ? ', ' + r.place : '')) : null),
         r.deadlines.map(d => h('div', { class: 'tr-e' }, h('span', { class: 'tag tr-k' }, d.label), d.date ? h('span', { class: 'mono' }, d.date + ' ' + d.time) : h('span', { class: 'muted' }, 'not announced (' + d.raw + ')'), d.tz ? h('span', { class: 'muted small' }, d.tz) : null)),
         h('div', { class: 'muted small' }, 'From ', h('a', { href: r.source, target: '_blank', rel: 'noopener noreferrer' }, r.source_name), '. It can be wrong or late: check ', r.link ? h('a', { href: r.link, target: '_blank', rel: 'noopener noreferrer' }, 'the venue page') : 'the venue page', ' before you rely on it.'),
-        dated.length ? h('button', { class: 'btn sm primary', type: 'button', onclick: async () => set(await rxPost('/api/venue', { name: F.q, year: F.y, add: true })) }, 'Add these ' + dated.length + ' dates') : null)); }
+        dated.length ? h('button', { class: 'btn sm', type: 'button', onclick: async () => set(await rxPost('/api/venue', { name: F.q, year: F.y, add: true })) }, 'Add these ' + dated.length + ' dates') : null)); }
   } else {
     const di = h('input', { type: 'date', 'aria-label': 'Date' }), ti = h('input', { type: 'text', placeholder: 'What is due, e.g. Submit to TKDE, Draft to advisor', 'aria-label': 'Title', maxlength: '160' }), vi = h('input', { type: 'text', placeholder: 'Journal (optional)', 'aria-label': 'Journal', maxlength: '120' });
     form = h('form', { class: 'tr-f', onsubmit: async ev => { ev.preventDefault(); if (!di.value || !ti.value.trim()) return; set(await rxPost('/api/deadlines', { date: di.value, title: ti.value.trim(), kind: vi.value.trim() ? 'journal' : 'milestone', venue: vi.value.trim() || undefined })); } }, di, ti, vi, h('button', { class: 'btn sm', type: 'submit' }, 'Add date'),
@@ -2016,7 +2016,7 @@ async function hfPost(path, body, okMsg) {
 const hfAct = (action, extra) => hfPost('/api/hypothesis', Object.assign({ action }, extra || {}));
 function hfAsk(title, label, value, fn, opts) {
   const ta = h('textarea', { class: 'hf-ta', rows: (opts && opts.rows) || 4, 'aria-label': label, placeholder: (opts && opts.placeholder) || '' }); ta.value = value || '';
-  modal(title, h('div', null, h('p', { class: 'muted small' }, label), ta), [{ label: 'Cancel' }, { label: (opts && opts.ok) || 'Save', primary: true, fn: () => fn(ta.value) }], { width: 560 });
+  modal(title, h('div', null, h('p', { class: 'muted small' }, label), ta), [{ label: 'Cancel' }, { label: (opts && opts.ok) || 'Save', fn: () => fn(ta.value) }], { width: 560 });
 }
 function hfFix(hy) {
   const st = h('textarea', { class: 'hf-ta', rows: 3, 'aria-label': 'Statement' }); st.value = hy.statement;
@@ -2026,21 +2026,21 @@ function hfFix(hy) {
     h('label', { class: 'hf-l' }, 'Statement'), st, h('label', { class: 'hf-l' }, 'What it answers'), an, h('label', { class: 'hf-l' }, 'What is wrong (optional)'), why,
     hy.criterion && hy.criterion.frozen ? h('p', { class: 'muted small' }, 'Its test was frozen in ', mono(hy.criterion.frozen.file), '. Changing the hypothesis is recorded as a deviation; the frozen test stays as it is.') : null,
     h('p', { class: 'muted small' }, 'Your edit applies now. Your LLM is then asked what else must change; you review that before it applies.')),
-  [{ label: 'Cancel' }, { label: 'Save', primary: true, fn: () => hfAct('fix', { target: hy.id, text: st.value, note: why.value || null, fields: { answers: an.value } }) }], { width: 600 });
+  [{ label: 'Cancel' }, { label: 'Save', fn: () => hfAct('fix', { target: hy.id, text: st.value, note: why.value || null, fields: { answers: an.value } }) }], { width: 600 });
 }
 function hfFixProblem(p) {
   const tas = HF_PF.map(([k, l]) => { const t = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': l }); t.value = ((p || {})[k] || {}).text || ''; return [k, l, t]; });
   const why = h('textarea', { class: 'hf-ta', rows: 2, 'aria-label': 'What is wrong', placeholder: 'Or say in plain words what is wrong.' });
   modal('Fix the problem', h('div', null, tas.map(([k, l, t]) => [h('label', { class: 'hf-l' }, l), t]), h('label', { class: 'hf-l' }, 'What is wrong (optional)'), why,
     h('p', { class: 'muted small' }, 'Every hypothesis under it is marked stale, and your LLM proposes what else must change.')),
-  [{ label: 'Cancel' }, { label: 'Save', primary: true, fn: () => { const f = {}; tas.forEach(([k, l, t]) => { if (t.value !== (((p || {})[k] || {}).text || '')) f[k] = t.value; }); hfAct('fix', { target: 'problem', fields: f, note: why.value || null }); } }], { width: 620 });
+  [{ label: 'Cancel' }, { label: 'Save', fn: () => { const f = {}; tas.forEach(([k, l, t]) => { if (t.value !== (((p || {})[k] || {}).text || '')) f[k] = t.value; }); hfAct('fix', { target: 'problem', fields: f, note: why.value || null }); } }], { width: 620 });
 }
 async function hfJobText(id) { const j = await apiGet('/api/hypothesis/job?id=' + encodeURIComponent(id)); return j.markdown; }
 function hfPaste(j) {
   hfAsk('Paste your LLM’s answer', 'The JSON your LLM returned for ' + j.id + ' (' + (HF_JOB[j.type] || j.type) + '). Lemmata checks every quote and rule against the files and drops what fails.', '', async v => {
     let res; try { res = JSON.parse(v); } catch (e) { toast('That is not valid JSON.'); return; }
     const r = await hfPost('/api/hypothesis/submit', { job: j.id, result: res }, 'Checked and stored for your review.');
-    if (r && r.submit_report && r.submit_report.length) modal('What Lemmata dropped or flagged', h('ul', { class: 'hf-rep' }, r.submit_report.map(x => h('li', null, h('b', null, x.level), ' · ' + x.where + ': ' + x.why))), [{ label: 'Close', primary: true }]);
+    if (r && r.submit_report && r.submit_report.length) modal('What Lemmata dropped or flagged', h('ul', { class: 'hf-rep' }, r.submit_report.map(x => h('li', null, h('b', null, x.level), ' · ' + x.where + ': ' + x.why))), [{ label: 'Close' }]);
   }, { rows: 10, ok: 'Check and store' });
 }
 function hfJobs(D) {
@@ -2235,7 +2235,7 @@ function pageNumbers() {
   if (dropped.length || notes.length) root.append(h('details', { class: 'details', open: dropped.length && c.proposed ? '' : null }, h('summary', null, 'What the checker said (' + dropped.length + ' dropped, ' + notes.length + ' notes)'),
     dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why)), notes.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))));
   if (!c.total) root.append(emptyState('#', 'No key number yet', 'A hypothesis with a test lists the numbers of its test here by itself. For the others, your own agent reads the report and proposes the list; Lemmata checks every entry against the files and you confirm.',
-    READONLY ? [] : [h('button', { class: 'btn primary', title: NB_PROMPT(name), onclick: () => copyText(NB_PROMPT(name)) }, 'Copy prompt for Claude Code')]));
+    READONLY ? [] : [h('button', { class: 'btn', title: NB_PROMPT(name), onclick: () => copyText(NB_PROMPT(name)) }, 'Copy prompt for Claude Code')]));
   for (const g of N.groups) {
     const open = RX.nbOpen ? RX.nbOpen === (g.key || '-') : true;
     const sec = h('section', { class: 'rx-x-sec nb-g' + (g.stage ? rxSt(g.stage) : '') }, h('div', { class: 'rx-x-h' },
@@ -2311,7 +2311,7 @@ function blForm(r, B, act) {
     h('datalist', { id: 'bl-ds' }, B.datasets.map(d => h('option', { value: d }))), h('datalist', { id: 'bl-mt' }, B.metrics.map(d => h('option', { value: d }))),
     h('div', { class: 'su-tw' }, h('table', { class: 'nb-t bl-pub' }, h('thead', null, h('tr', null, ['Dataset', 'Measure', 'Number', 'Printed in', 'Link', 'Note', ''].map(t => h('th', null, t)))), body)),
     h('div', { class: 'bl-acts' }, h('button', { class: 'linkbtn small', onclick: () => pubRow({}) }, '+ Add a number'), h('span', { class: 'grow' }),
-      h('button', { class: 'btn sm', onclick: () => { RX.blEdit = null; renderPage(true); } }, 'Cancel'), h('button', { class: 'btn sm primary', onclick: save }, 'Save')));
+      h('button', { class: 'btn sm', onclick: () => { RX.blEdit = null; renderPage(true); } }, 'Cancel'), h('button', { class: 'btn sm', onclick: save }, 'Save')));
 }
 function blDetail(r, B, act, name) {
   const e = r.entry, p = e.paper || {}, bench = B.study === 'benchmark';
@@ -2335,7 +2335,7 @@ function blDetail(r, B, act, name) {
       : r.named ? 'named on ' + plural(r.named, 'line') + ', not cited there' : r.in_results ? none('not named') : none('not in your result files yet'))));
   kids.push(h('div', { class: 'bl-ph' }, 'Published and measured'), blNumbers(r, B));
   kids.push(h('div', { class: 'bl-acts' },
-    READONLY ? null : h('button', { class: 'btn sm primary', onclick: () => { RX.blEdit = r.key; renderPage(true); } }, r.has_entry ? 'Edit' : 'Fill in'),
+    READONLY ? null : h('button', { class: 'btn sm', onclick: () => { RX.blEdit = r.key; renderPage(true); } }, r.has_entry ? 'Edit' : 'Fill in'),
     READONLY ? null : h('button', { class: 'btn sm', title: BL_PROMPT(name, r.name), onclick: () => copyText(BL_PROMPT(name, r.name)) }, 'Copy prompt for Claude Code'),
     r.item ? h('button', { class: 'linkbtn small', title: 'Where the paper and the code name it', onclick: () => { RX.suSel = 'i:' + r.item; RX.bdSel = 'i:' + r.item; openTab('setup'); } }, 'Open in Setup') : null,
     r.experiments.map(x => h('button', { class: 'linkbtn small', onclick: () => rxOpenExp(x.id) }, x.name)), h('span', { class: 'grow' }),
@@ -2472,11 +2472,11 @@ function pageLatex() {
     const go = async () => { const t = L.targets[Number(tgt.value)] || L.targets[0]; RX.lxKind = kind.value; RX.lxTarget = t.id || '';
       const d = await act({ action: 'request', kind: kind.value, target: t.type === 'project' ? null : { type: t.type, id: t.id }, ask: ask.value }, 'Asked. It waits for your agent.'); if (d) { RX.lxAsk = ''; renderPage(true); } };
     root.append(h('h2', { class: 'st-h' }, 'Ask your agent'), h('div', { class: 'lx-ask' }, h('div', { class: 'lx-pick' }, kind, h('span', { class: 'muted' }, 'about'), tgt), ask,
-      h('div', { class: 'bl-acts' }, h('button', { class: 'btn sm primary', id: 'lx-go', onclick: go }, 'Ask'), h('span', { class: 'muted small' }, 'Lemmata writes nothing itself. Your agent gets the full brief and hands the LaTeX back here.'))));
+      h('div', { class: 'bl-acts' }, h('button', { class: 'btn sm', id: 'lx-go', onclick: go }, 'Ask'), h('span', { class: 'muted small' }, 'Lemmata writes nothing itself. Your agent gets the full brief and hands the LaTeX back here.'))));
   }
   const open = L.requests.filter(r => r.status === 'open');
   if (open.length) root.append(h('div', { class: 'flag nb-prop' }, h('b', null, plural(open.length, 'request') + ' waiting for your agent. '),
-    READONLY ? null : [h('button', { class: 'btn sm primary', title: LX_PROMPT(name), onclick: () => copyText(LX_PROMPT(name)) }, 'Copy prompt for Claude Code'), h('span', { class: 'muted small' }, ' or type /lemmata-latex there')]),
+    READONLY ? null : [h('button', { class: 'btn sm', title: LX_PROMPT(name), onclick: () => copyText(LX_PROMPT(name)) }, 'Copy prompt for Claude Code'), h('span', { class: 'muted small' }, ' or type /lemmata-latex there')]),
     open.map(r => h('div', { class: 'hf-row lx-req', id: 'lx-' + r.id }, h('span', { class: 'hf-tag' }, '[' + (L.kinds[r.kind] || r.kind).toLowerCase() + ']'), h('span', { class: 'grow' }, h('b', null, r.target.name), r.ask ? ['. ', r.ask] : null, h('span', { class: 'muted small' }, ' · asked ' + dmon(r.created))),
       READONLY ? null : h('button', { class: 'linkbtn small', onclick: () => act({ action: 'remove_request', id: r.id }, 'Removed.') }, 'Remove'))));
   // written

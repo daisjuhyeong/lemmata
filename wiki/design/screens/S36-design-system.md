@@ -1,7 +1,7 @@
 ---
 type: screen-spec
 owner_agent: designer
-status: approved (founder, chat 2026-11-22 22:24 KST); build not started
+status: approved (founder, chat 2026-11-22 22:24 KST); phase 1 built 2026-11-22, phase 2 not started
 sources:
   - "founder message in chat, 2026-11-22 16:20 KST: 'Consider the youtube links to make the Claude design for my Lemmata webiste UI/UX https://www.youtube.com/watch?v=-JabKCzBf4s, https://www.youtube.com/watch?v=9RUcYdww138 Check and report what changes can be made to Lemmata'"
   - "founder message in chat, 2026-11-22 16:28 KST: 'Proceed and let me see the updated UI/UX page considering the purpose of Lemmata. Send this to CTO agent so that they have the context of the Lemmata.'"
@@ -108,6 +108,12 @@ Do not add a second set of classes. Change the ones in `app.css`. Section 8 give
 | 8 | `--fs-11` and `--fs-12` are both 12px (:2) and are used 114 times; 19 rules set a literal size below 13px | Both become 13px; the literal sizes use `var(--fs-tag)`. Check the pages at 1360, 760 and 420px afterwards: rows that fitted on one line may wrap |
 | 9 | Control edges use `--border-strong` (`.btn` :23, `.chip-btn` :292), which is 1.73:1 on `--bg` | Edges of buttons, inputs and chips that can be pressed: `--muted`. Hairlines between rows and under headings keep `--border` and `--border-strong` |
 | 9 | Buttons at :412 have no edge and a `--surface-hover` fill | Plain button: no fill, 1px `--muted` edge, fill `--surface-hover` on hover |
+
+### Where the phase 1 build differs from this section (2026-11-22, [S36-01 handoff](../../sprints/S36/S36-01-handoff.md))
+- The `.btn` rules that take effect are the third layer (app.css:610 at bc26f66), which drew `.btn.primary` and the pressed toggle as an `--accent-dark` outline, not a fill in `--text`. Sand went into that layer; the pressed toggle keeps its outline.
+- There were 37 primary sites, not 13 (10 are dialog buttons with `primary: true`); 10 kept, 27 plain.
+- `.hf-branch.warn::before` means "the branch has newer commits", so it takes `--warning`, not sand.
+- The VS Code tab keeps its S35 look through four `html.embed` rules in `app.css`, so `vscode/` and the extension version are unchanged.
 
 ## 6. The shell
 ```

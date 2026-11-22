@@ -296,7 +296,7 @@ function connectPaperRepo() {
   const err = h('div', { class: 'warn-note hidden', role: 'alert' });
   modal('Connect paper repo', h('div', null,
     h('p', null, 'Lemmata reads your LaTeX paper from GitHub, the same way it reads your code. The paper can be its own repo, or a folder inside your code repo.'), repo, h('div', { style: { height: '8px' } }), sub, err),
-    [{ label: 'Cancel' }, { label: 'Connect', primary: true, keep: true, fn: async close => {
+    [{ label: 'Cancel' }, { label: 'Connect', keep: true, fn: async close => {
       let r = repo.value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
       if (!/^[\w.-]+\/[\w.-]+$/.test(r)) { err.textContent = 'Type the repository as owner/name.'; err.classList.remove('hidden'); return; }
       const body = { kind: 'github', repo: r }; if (sub.value.trim()) body.subdir = sub.value.trim().replace(/^\/+|\/+$/g, '');
@@ -368,7 +368,7 @@ async function syncNow() {
   if (hc.sync) return hc.sync();
   setBusy('Reading your files…');
   try { await apiPost('/api/scan', {}); await loadAll(); toast('Read your files again.'); }
-  catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close', primary: true }]) }); }
+  catch (e) { toast(e.status === 409 ? 'Lemmata is already checking your files. Try again in a moment.' : 'Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close' }]) }); }
   setBusy(null);
 }
 let BUSY = null;
@@ -791,7 +791,7 @@ async function setTriageMany(targets, state, note, quiet) {
     }
     computeStatuses(); renderAll();
     if (!quiet) toast('Saved.');
-  } catch (e) { toast('Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close', primary: true }]) }); await refreshTriage(); }
+  } catch (e) { toast('Something broke on our side. Your files and marks are unchanged.', { label: 'Details', fn: () => modal('Details', h('p', { class: 'mono' }, e.message), [{ label: 'Close' }]) }); await refreshTriage(); }
 }
 async function refreshTriage() { try { S.triage = await apiGet('/api/triage'); computeStatuses(); renderAll(); } catch (e) { /* ignore */ } }
 function noteOf(targets) {
@@ -812,7 +812,7 @@ function markAllDialog() {
   if (READONLY) return;
   const note = h('input', { type: 'text', maxlength: '500', placeholder: 'Add a note to this mark (optional)', 'aria-label': 'Add a note to this mark (optional)' });
   modal('Mark everything as looked at?', h('div', null, h('p', null, 'Lemmata will start counting changes from now. Your notes and Looks fine / Needs fixing marks are kept. Earlier marks stay in History.'), note),
-    [{ label: 'Cancel' }, { label: 'Mark everything as looked at', primary: true, fn: () => createCheckpoint(note.value) }], { width: 440 });
+    [{ label: 'Cancel' }, { label: 'Mark everything as looked at', fn: () => createCheckpoint(note.value) }], { width: 440 });
 }
 async function decideLink(edgeId, decision, doneMsg) {
   if (READONLY) return;
@@ -1266,7 +1266,7 @@ function triageButtons(targets, cur, key, opts) {
     h('div', { class: 'tri' }, b('reviewed', 'Looks fine'), b('needs_fixing', 'Needs fixing'), b('ignored', 'Ignore')),
     noteOpen ? h('div', { class: 'noterow' },
       h('input', { type: 'text', id: 'note-' + key, maxlength: '2000', placeholder: 'Add a note (optional)', 'aria-label': 'Add a note (optional)', value: noteOf(targets), onkeydown: ev => { if (ev.key === 'Enter') ev.target.nextSibling.click(); } }),
-      h('button', { class: 'btn primary', onclick: ev => { const v = ev.target.previousSibling.value; S.noteOpen[key] = false; setTriageMany(targets, 'needs_fixing', v); } }, 'Save'),
+      h('button', { class: 'btn', onclick: ev => { const v = ev.target.previousSibling.value; S.noteOpen[key] = false; setTriageMany(targets, 'needs_fixing', v); } }, 'Save'),
       h('button', { class: 'btn', onclick: () => { S.noteOpen[key] = false; renderPage(true); } }, 'Cancel')) : null);
 }
 
@@ -1278,7 +1278,7 @@ function pageChanges() {
   if (S.loading) { root.append(h('div', { class: 'muted' }, 'Reading your paper and code…'), [1, 2, 3].map(() => h('div', { class: 'skelcard' }))); return root; }
   if (!cp) {
     root.append(emptyState('○', 'You haven\'t set a starting point yet.', 'Lemmata needs to know when you last felt sure about your paper. It will then list everything that changes after that.',
-      [h('button', { class: 'btn primary', disabled: READONLY, onclick: () => createCheckpoint('') }, 'Start tracking from now')]));
+      [h('button', { class: 'btn', disabled: READONLY, onclick: () => createCheckpoint('') }, 'Start tracking from now')]));
     return root;
   }
   const full = (S.checkpoints && S.checkpoints.checkpoints || []).find(c => c.id === cp.id) || cp;
@@ -2134,7 +2134,7 @@ function renderPage(keepScroll) {
   clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
   S.outline = [];
   let el;
-  if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn primary', onclick: () => loadAll() }, 'Try again')]));
+  if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn', onclick: () => loadAll() }, 'Try again')]));
   else if (t.k === 'changes') el = pageChanges();
   else if (t.k === 'graph') el = pageGraph();
   else if (t.k === 'item') { const it = M.byId.get(t.id); el = it ? pageItem(it) : doc(h('div', { class: 'muted' }, 'This item is not in the project any more.')); }
@@ -2293,7 +2293,7 @@ function intro(force) {
     clear(dots).append(step + 1 + ' of 3');
     clear(acts).append(h('button', { class: 'linkbtn', onclick: () => done(false) }, 'Skip'), h('span', { class: 'grow' }),
       step ? h('button', { class: 'btn', onclick: () => { step--; draw(); } }, 'Back') : null,
-      step < 2 ? h('button', { class: 'btn primary', onclick: () => { step++; draw(); } }, 'Next') : h('button', { class: 'btn primary', onclick: () => done(true) }, 'Show me what changed'));
+      step < 2 ? h('button', { class: 'btn', onclick: () => { step++; draw(); } }, 'Next') : h('button', { class: 'btn', onclick: () => done(true) }, 'Show me what changed'));
   };
   const onKey = ev => { if (ev.key === 'Escape') done(false); };
   document.addEventListener('keydown', onKey, true);

@@ -8,8 +8,8 @@
   --surface-hover: #EDF3EF; /* row hover */
   --text: #1A1A1A;
   --text-secondary: #464f4a;
-  --muted: #707B74;
-  --muted-light: #959f99;   /* tags, footer */
+  --muted: #646F68;
+  --muted-light: #959f99;   /* placeholder and disabled text only */
   --border: #CCD6D0;        /* all hairlines */
   --border-strong: #B8C5BE;
   --accent: #819A91;        /* header band */
@@ -17,9 +17,11 @@
   --accent-vivid: #5e917e;  /* graph nodes: strong */
   --accent-light: #A7C1A8;
   --accent-pale: #D4DDD6;   /* graph nodes: weak; text on band */
-  --highlight: #dac88e;     /* the one item needing attention */
+  --highlight: #dac88e;     /* your turn: the primary action's fill, and the dot of items waiting for the researcher; nothing else */
+  --highlight-edge: #8A7431; /* 1px edge of the your-turn button and dot */
+  --on-highlight: #1A1A1A;  /* text on --highlight */
   --success: #6F9A76;
-  --warning: #C9A66B;
+  --warning: #B5823A;
   --error: #B87474;
   --on-accent: #fafcfb;       /* text on the header band */
   --on-accent-muted: #D4DDD6; /* quieter text and lines on the band */
@@ -28,7 +30,7 @@
   --font-sans: "Source Sans 3", "Helvetica Neue", Helvetica, Arial, "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "D2Coding", monospace;
 
-  --fs-tag: 12.8px;
+  --fs-tag: 13px;
   --fs-body: 15px;
   --fs-sub: 14.4px;
   --fs-h2: 20px;
@@ -60,8 +62,10 @@
   --accent-light: #5f8273;
   --accent-pale: #34443d;
   --highlight: #c9b06a;
+  --highlight-edge: #c9b06a;
+  --on-highlight: #1A1A1A;
   --success: #7fb089;
-  --warning: #d3b074;
+  --warning: #B5823A;
   --error: #cf8a8a;
   --on-accent: #f3f7f5;
   --on-accent-muted: #c5d3cc;
