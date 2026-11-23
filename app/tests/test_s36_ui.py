@@ -167,8 +167,9 @@ class PageHeadsTest(unittest.TestCase):
         self.assertIn("rx-treeframe", self.js)
 
     def test_needs_you_rows_use_the_your_turn_dot_and_one_nowrap_line(self):
-        self.assertRegex(self.css, r"\.hm-line \{[^}]*white-space:nowrap")
-        self.assertRegex(self.css, r"\.hm-line \{[^}]*text-overflow:ellipsis")
+        rule = re.search(r"\.hm-line \{[^}]*\}", self.css).group(0)
+        self.assertNotIn("ellipsis", rule)      # information is never hidden behind "…"; a long sentence wraps instead
+        self.assertNotIn("overflow:hidden", rule)
         self.assertIn("h('i', { class: 'hm-dot', 'aria-hidden': 'true' })", self.js)
         self.assertIn("'your turn'", self.js)
 
@@ -245,6 +246,47 @@ class PageHeadsTest(unittest.TestCase):
         medias = re.findall(r"@media[^{]*", self.css)
         self.assertTrue(all("prefers-reduced-motion" in m for m in medias), medias)
         self.assertNotRegex(self.css, r"@media[^{]*(?:max|min)-width")
+
+    def test_the_title_goes_to_the_projects_on_a_hub_and_keeps_its_other_two_ways(self):
+        fn = self.app[self.app.index("const titleGoesToProjects"):]
+        fn = fn[:fn.index("\n}\n")]
+        self.assertIn("HUB_ON && !window.LEMMATA_EMBED", fn)      # hub, outside the VS Code tab
+        self.assertIn("location.href = '/'", fn)      # the list of projects, with a project open or not
+        self.assertLess(fn.index("titleGoesToProjects()) location.href"), fn.index("openTab(window.LEMMATA_EMBED ? 'setup' : 'digest')"))
+        self.assertIn("window.LEMMATA_EMBED ? 'setup' : 'digest'", fn)      # no hub: Home; the VS Code tab: Setup
+        bar = self.app[self.app.index("function renderTabbar("):]
+        bar = bar[:bar.index("\n  const t = S.tabs")]
+        self.assertIn("'Your projects' : 'Home'", bar)
+        self.assertIn("': your projects' : ': go to Home'", bar)
+        self.assertIn("title: 'Home', 'aria-label': PRODUCT + ': go to Home'", self.app)      # the tab's markup is unchanged
+
+    def test_settings_says_what_is_kept(self):
+        self.assertIn("hashed GitHub login", self.js)
+        self.assertIn("the time you last opened Home", self.js)
+
+    def test_review_trail_and_home_share_one_column(self):
+        cls = self.app[self.app.index("pg.className"):][:460]
+        for k in ("review", "history", "trail", "digest", "experiments", "setup"):
+            self.assertIn("t.k === '%s'" % k, cls)
+
+    def test_thesis_core_message_is_listed_where_it_is_sand(self):
+        self.assertIn('core.get("state") == "proposed"', (WEB.parent / "engine" / "todo.py").read_text(encoding="utf-8"))
+        self.assertIn("RX.claims.core.state === 'proposed'", self.js)      # counted in the Thesis answer line
+
+    def test_footer_checkpoint_is_not_confused_with_since_you_last_looked(self):
+        self.assertIn("'Checkpoint: ' + (cp ? lastChecked(cp.created_at) : 'none yet')", self.app)
+        self.assertNotIn("Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')", self.app)
+        self.assertIn("with no value", self.app)      # a missing value is said in words, not "?"
+        self.assertNotIn('press "Mark everything as looked at"', self.app)
+
+    def test_setup_and_tree_explanations_sit_behind_a_question_mark(self):
+        self.assertIn("rxHelp('board'", self.js)
+        self.assertIn("rxHelp('suck:'", self.js)
+        self.assertNotIn("'You check. ' + c.why", self.js)
+        self.assertIn("frame.scrollWidth > frame.clientWidth", self.js)      # the tree's hint shows only when the frame overflows
+        self.assertIn("ResizeObserver", self.js)
+        self.assertNotRegex(self.css, r"\.rx-tree-hint \{[^}]*display")
+        self.assertIn("SU_GENERAL.test(c.why) ? '' : ' ' + c.why", self.js)      # an experiment's own reason stays on the row
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ whose meaning sits in the cell's title and the legend. It is listed as an open q
   on `.rx-pl-f` inputs, which are now fixed, and raised the VS Code tab changes, now held as in departure 5.
 
 ## Not checked
-- **Line 8 and every screenshot.** This Mac has no browser that can be driven from a script. Installing Playwright and
+- **Line 8 and every screenshot** (later done in [S36-03](S36-03-handoff.md): line 8 passed on `test_map`). This Mac has no browser that can be driven from a script. Installing Playwright and
   Chromium into a temporary folder was refused by the permission check, and the founder then chose to skip browser checks. So there are **no before and after
   screenshots** in `screenshots/`, and nothing was seen at 1360, 760 or 420px in light or dark. The main risk: with 12px text now
   13px, rows that fitted on one line may wrap, mostly in the Setup board, the tree labels and the calendar's `.tm-due`.

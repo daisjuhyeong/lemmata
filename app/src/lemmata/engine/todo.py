@@ -48,6 +48,12 @@ def coverage_phrase(text):
     return None
 
 
+def _cut(t, n):
+    """A claim or task text as a short preview for a one-line row; the full text stays in the item's `why`."""
+    t = " ".join(str(t or "").split())
+    return t if len(t) <= n else t[:n - 1].rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
+
+
 def _norm(t):
     return re.sub(r"[^a-z0-9]", "", str(t).lower())
 
@@ -140,7 +146,7 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
         # feedback waits on the researcher (S36): when it points at no target (they must say what it is about) or at a claim (they must
         # settle it). A task that points only at a file or experiment is work to do, and stays in the to-do list.
         mine = bool(cl) or not tg.get("node_id")
-        add("person", "feedback", t["id"], ("%s: %s" % (cl_name, t["text"][:200])) if cl else t["text"][:200], "Feedback from %s." % (t.get("source") or "someone"), dict(target, task=t["id"]), "feedback is open",
+        add("person", "feedback", t["id"], ("%s: %s" % (cl_name, _cut(t["text"], 70))) if cl else _cut(t["text"], 80), "Feedback from %s: %s" % (t.get("source") or "someone", t["text"][:600]), dict(target, task=t["id"]), "feedback is open",
             needs=mine, act={"do": "task_done", "id": t["id"]} if mine else None)
     # 1b. Lemmata's copy is behind GitHub: everything below may be out of date
     if sync and sync.get("failing"):
@@ -150,15 +156,18 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
         add("confirm", "numbers", "proposed", "Confirm the %d proposed key numbers" % numbers["counts"]["proposed"], "A list of key numbers was proposed and is not confirmed yet.", {"view": "numbers"}, "key numbers proposed")
     if mapdoc.get("proposed"):
         add("confirm", "map", "proposed", "Confirm the proposed project map", "A map was proposed and is not confirmed yet.", {"view": "experiments"}, "map proposed", act={"do": "confirm_map"})
+    core = C.get("core")
+    if core and core.get("state") == "proposed":      # the thesis node is sand on Thesis, so it must be listed here (S36-03 D1); /api/claims accepts id "core"
+        add("confirm", "claim", "core", "Confirm the core message: %s" % _cut(core.get("text"), 52), str(core.get("text") or "")[:600], {"view": "claims", "sel": "core"}, "core message is a draft", act={"do": "confirm_claim", "id": "core"})
     for c in C.get("claims", []):
         if c.get("state") == "proposed":
-            add("confirm", "claim", c["id"], "Confirm or reject %s: %s" % (short[c["id"]], c["text"][:120]), "Lemmata drafted this claim.", {"view": "claims", "sel": c["id"]}, "claim is a draft", act={"do": "confirm_claim", "id": c["id"]})
+            add("confirm", "claim", c["id"], "Confirm %s: %s" % (short[c["id"]], _cut(c["text"], 56)), "Lemmata drafted this claim: %s" % c["text"][:600], {"view": "claims", "sel": c["id"]}, "claim is a draft", act={"do": "confirm_claim", "id": c["id"]})
     pr = ((hypo or {}).get("problem") or {})
     if pr.get("proposed") and not pr.get("confirmed") and pr.get("validity") == "unreviewed":
-        add("confirm", "problem", "problem", "Confirm the problem your LLM stated", "The problem statement is a draft.", {"view": "experiments"}, "problem is a draft", act={"do": "confirm_hypothesis", "target": "problem"})
+        add("confirm", "problem", "problem", "Confirm the stated problem", "The problem statement is a draft.", {"view": "experiments"}, "problem is a draft", act={"do": "confirm_hypothesis", "target": "problem"})
     for hy in (hypo or {}).get("hypotheses") or []:
         if not hy.get("archived") and hy.get("validity") == "unreviewed":
-            add("confirm", "hypothesis", hy["id"], "Confirm %s: %s" % (hy["id"], str(hy.get("statement") or "")[:120]), "The hypothesis is a draft.", {"view": "experiments"}, "hypothesis is a draft",
+            add("confirm", "hypothesis", hy["id"], "Confirm %s: %s" % (hy["id"], _cut(hy.get("statement"), 56)), "The hypothesis is a draft: %s" % str(hy.get("statement") or "")[:600], {"view": "experiments"}, "hypothesis is a draft",
                 act={"do": "confirm_hypothesis", "target": hy["id"]})
     for r in (baselines or {}).get("rows") or []:
         if r.get("proposal"):
@@ -166,7 +175,7 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
                 act={"do": "confirm_baseline", "name": r["name"]})
     for p in plans.get("plans", []) if isinstance(plans, dict) else []:
         if p.get("state") == "draft":
-            add("confirm", "plan", str(p.get("id")), "Review the planned experiment: %s" % str(p.get("title") or "")[:120], "A plan was drafted.", {"view": "experiments"}, "plan is a draft")
+            add("confirm", "plan", str(p.get("id")), "Review the planned experiment: %s" % _cut(p.get("title"), 56), "A plan was drafted.", {"view": "experiments"}, "plan is a draft")
     # 3-5. per experiment (once each, whichever claims it tests)
     seen = set()
     for sec in E.get("sections", []):

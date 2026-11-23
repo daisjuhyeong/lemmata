@@ -87,7 +87,7 @@ Decision commits on the Claims timeline no longer borrow the sand `.chip.propose
 ## Founder's answers (chat, 2026-11-23) and what was done
 | # | Question | Answer | Done |
 |---|---|---|---|
-| 1 | Browser check and screenshots before main | "Skip the browser check." | Waived. No screenshots or browser check for S36; the extension suites also stay unrun (no node on this Mac) |
+| 1 | Browser check and screenshots before main | "Skip the browser check." | **Superseded the same day:** two chats had recorded different answers, and the founder then chose the Playwright check ([S36-03](S36-03-handoff.md), with before and after screenshots). The extension suites stay unrun (no node on this Mac) |
 | 2 | `home_seen.json` (hashed GitHub login and last-opened time, per project) | "Confirm" | Kept as built |
 | 3 | Feedback tasks that point at a claim in Needs you | "Yes" | An open feedback task needs you when it points at a claim or at nothing; one that points only at a file or experiment stays in the to-do list. Row: "C2: <task text>", with Done (the existing `/api/tasks` call) and Open (the claim). No Snooze: feedback has none today. Also fixed: the claim a task pointed at was passed on as an object, not its id |
 | 4 | The claim-text rule | "Now" | Built (below) |

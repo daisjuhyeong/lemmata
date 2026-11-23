@@ -1100,7 +1100,7 @@ table.tbl tbody tr:hover { background:var(--surface-hover); }
 .hm-row { display:grid; grid-template-columns:116px minmax(0, 1fr) auto; column-gap:16px; align-items:baseline; padding:8px; border-bottom:1px solid var(--border); font-size:15px; line-height:24px; }
 .hm-row:hover { background:var(--surface-hover); }
 .hm-row.on { background:var(--surface); border-bottom-color:transparent; }
-.hm-line { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+.hm-line { min-width:0; overflow-wrap:anywhere; text-align:left; }      /* never cut with an ellipsis: the sentences are written short, and a long one wraps */
 button.hm-line { background:none; border:0; padding:0; font:inherit; color:inherit; cursor:pointer; }
 .hm-turn { display:inline-flex; align-items:center; gap:8px; font-size:var(--fs-tag); line-height:18px; font-weight:600; color:var(--text-secondary); white-space:nowrap; }
 .hm-who { font-size:var(--fs-tag); line-height:18px; font-weight:600; color:var(--text-secondary); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1138,3 +1138,4 @@ button.hm-line { background:none; border:0; padding:0; font:inherit; color:inher
 }
 .rx-digest-s input { height:32px; flex:1; min-width:220px; padding:0 10px; border:1px solid var(--muted); border-radius:var(--radius); background:transparent; color:var(--text); font:inherit; }
 .rx-digest-s .btnrow { margin:var(--s-2) 0; }
+.rx-tree-hint { margin:var(--s-1) 0 0; }      /* shown by research.js only when the frame overflows (the hidden attribute) */

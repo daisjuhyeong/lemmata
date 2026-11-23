@@ -37,7 +37,7 @@ const rxMismatches = () => RX.todo ? RX.todo.items.filter(i => i.group === 'pape
 function rxNeedsList() {
   const out = RX.todo ? RX.todo.items.filter(i => i.needs_you) : [];
   const links = ((S.graph && S.graph.edges) || []).filter(e => e.kind === 'value_match' && e.status === 'proposed');
-  return out.concat(links.map(e => ({ key: 'link:' + e.id, kind: 'link', text: (() => { try { return edgeSentence(e); } catch (x) { return 'A suggested link waits for your yes or no.'; } })(), why: 'A suggested link waits for your yes or no.', target: { view: 'checks' }, needs_you: true, act: { do: 'confirm_link', id: e.id } })));
+  return out.concat(links.map(e => ({ key: 'link:' + e.id, kind: 'link', text: (() => { try { return edgeShort(e); } catch (x) { return 'A suggested link: same setting?'; } })(), why: (() => { try { return edgeSentence(e); } catch (x) { return 'A suggested link waits for your yes or no.'; } })(), target: { view: 'checks' }, needs_you: true, act: { do: 'confirm_link', id: e.id } })));
 }
 function rxOpenExp(id) { RX.exView = 'map'; RX.mapSel = 'x:' + id; RX.exOpen = null; openTab('experiments'); }
 /* The VS Code tab calls this to open a page with something selected (from an "Open in VS Code" link on the website). */
@@ -585,15 +585,15 @@ function rxCriterion(x, sec, link) {
     link.criterion_by === 'you' ? h('button', { class: 'linkbtn small', onclick: () => save(null) }, 'Reset') : null));
   return box;
 }
-function rxThesisHead(E) {
+function rxThesisHead(E, treeShown) {      // treeShown: the tree above already shows the thesis and links to itself, so this block keeps only its counts
   const T = E.thesis; if (!T) return null;
   const stages = RX_STAGES.filter(k => T.stages[k]).map(k => h('span', { class: 'rx-th-c' }, h('b', null, T.stages[k]), ' ' + RX_STAGE[k][1].toLowerCase()));
   const links = RX_LINKS.filter(k => T.links[k]).map(k => h('span', { class: 'rx-th-c lk-' + k }, h('b', null, T.links[k]), ' ' + RX_LINK[k][0]));
   const B = T.buckets, open = RX.exBucket;
   const bucket = (k, n, label, title) => h('button', { class: 'rx-th-b' + (n ? ' has' : '') + (open === k ? ' on' : ''), 'aria-expanded': String(open === k), title, disabled: n ? null : '', onclick: () => { RX.exBucket = open === k ? null : k; renderPage(true); } }, h('b', null, n), ' ' + label);
   const head = h('section', { class: 'rx-th' },
-    h('div', { class: 'rx-th-k' }, h('span', { class: 'tag' }, 'Thesis'), T.loc ? rxWhere(T.loc) : null, h('span', { class: 'grow' }), h('button', { class: 'linkbtn small', title: 'Open the claims tree', onclick: () => { RX.sel = 'core'; RX.view = 'tree'; openTab('claims'); } }, 'Tree')),
-    h('p', { class: 'rx-th-t serif' }, T.text ? rxMath(T.text) : h('span', { class: 'muted' }, 'No core message yet. It is drafted from the abstract on Claims.')),
+    h('div', { class: 'rx-th-k' }, h('span', { class: 'tag' }, 'Thesis'), T.loc ? rxWhere(T.loc) : null, h('span', { class: 'grow' }), treeShown ? null : h('button', { class: 'linkbtn small', title: 'Open the claims tree', onclick: () => { RX.sel = 'core'; RX.view = 'tree'; openTab('claims'); } }, 'Tree')),
+    treeShown ? null : h('p', { class: 'rx-th-t serif' }, T.text ? rxMath(T.text) : h('span', { class: 'muted' }, 'No core message yet. It is drafted from the abstract on Claims.')),
     h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, plural(T.claims, 'claim')), stages.length ? stages : h('span', { class: 'muted' }, 'none yet')),
     E.study === 'benchmark' ? null : h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, plural(T.links_n, 'experiment link')), T.links_n ? [rxLinkBar(T.links, true), links] : h('span', { class: 'muted' }, 'none yet')),
     h('div', { class: 'rx-th-row' }, h('span', { class: 'rx-th-l' }, 'Gaps'), bucket('untested', B.untested, B.untested === 1 ? 'claim with no experiment' : 'claims with no experiment', 'Claims nothing tests yet'),
@@ -843,15 +843,19 @@ function rxThesisAnswer(E) {      // "How many claims are backed, stale, in mism
   const noexp = E.thesis && E.thesis.buckets ? E.thesis.buckets.untested : 0;
   if (!total) return 'No claim yet.';
   const part = (n, word, zero) => n ? [rxB(n), ' ' + word] : zero;
-  const bits = [part(cc.recheck || 0, 'stale', 'none stale')];
+  const bits = [part(cc.recheck || 0, 'stale', 'None stale')];
   if (RX.todo) bits.push(part(rxMismatches().length, 'in mismatch', 'none in mismatch'));      // the same list as Review's Mismatches
-  bits.push(part(cc.proposed || 0, 'waiting for you', 'none waiting for you'), part(noexp, 'without an experiment', 'every claim has an experiment'));
+  bits.push(part((cc.proposed || 0) + (RX.claims.core && RX.claims.core.state === 'proposed' ? 1 : 0), 'waiting for you', 'none waiting for you'), part(noexp, 'without an experiment', 'every claim has an experiment'));
   return [rxB(st.finding || 0), ' of ' + total + (total === 1 ? ' claim is' : ' claims are') + ' backed. ', bits.map((b, i) => [i ? (i === bits.length - 1 ? ' and ' : ', ') : '', b]), '.'];
 }
 function rxThesisTree() {      // the claims tree under the page head: straight lines, short name and state in words, its own scroll frame below 1100px
   const frame = h('div', { class: 'rx-treeframe' }, rxTree({ scrub: false, noLegend: true }));
+  const hint = h('p', { class: 'muted small rx-tree-hint', hidden: '' }, 'Scroll sideways to see the whole tree →');
+  const sync = () => { hint.hidden = !(frame.scrollWidth > frame.clientWidth + 1); };      // only when the frame really overflows
+  setTimeout(sync, 0);
+  if (typeof ResizeObserver !== 'undefined') { const ro = new ResizeObserver(() => { if (!frame.isConnected) ro.disconnect(); else sync(); }); setTimeout(() => { if (frame.isConnected) ro.observe(frame); }, 0); }
   const c = RX.sel && RX.claims.claims.find(x => x.id === RX.sel);
-  const out = [rxSection('Claims', null, rxHelp('tree', 'The thesis is on top, its claims under it, and the evidence under each claim. A hollow ring has no experiment yet; a pale circle is weak; lighter green is partly backed; green is strongly backed; sand is your turn. Click a circle to open what is under it.'), frame)];
+  const out = [rxSection('Claims', null, rxHelp('tree', 'The thesis is on top, its claims under it, and the evidence under each claim. A hollow ring has no experiment yet; a pale circle is weak; lighter green is partly backed; green is strongly backed; sand is your turn. Click a circle to open what is under it.'), frame, hint)];
   if (c) { RX.open[c.id] = true; out.push(rxClaimCard(c)); }
   else if (RX.sel === 'core' && RX.claims.core) out.push(rxCoreCard(RX.claims.core));
   return out;
@@ -875,7 +879,7 @@ function pageExperiments() {
     if (!E.sections.length && !(E.unassigned || []).length && !mapped) return root;
     root.append(h('h2', { class: 'hf-h2' }, 'Result files no hypothesis covers yet'));
   }
-  if (!HF) root.append(rxThesisHead(E));
+  if (!HF) root.append(rxThesisHead(E, !EMBED && !!(RX.tree && RX.tree.nodes.length)));
   const X = E.extends;
   if (X) root.append(h('div', { class: 'rx-ext' }, h('span', { class: 'rx-ext-b' }, h('b', null, (E.map.method || {}).name || 'Ours'), ' extends ', h('b', null, X.base.name)),
     X.goal ? h('span', { class: 'rx-ext-g serif' }, '→ ' + X.goal) : h('span', { class: 'muted small' }, 'No goal')));
@@ -1083,7 +1087,7 @@ function pageReview() {
   const w = (n, one, many) => n ? [rxB(n), ' ' + (n === 1 ? one : many)] : null;
   const root = doc(rxPageHead(RX_Q.review, !RX.todo ? 'Not available on this hub yet.' : [
     w(mis.length, 'mismatch', 'mismatches') || 'Nothing disagrees', ', ', w(stale.length, 'stale result', 'stale results') || 'nothing is stale', ' and ', w(conf.length, 'item to confirm', 'items to confirm') || 'nothing to confirm', '. ',
-    fine ? [rxB(fine), fine === 1 ? ' check found nothing.' : ' checks found nothing.'] : 'No check has run yet.']), rxBehindNote());
+    fine ? [rxB(fine), fine === 1 ? ' thing was checked and is fine.' : ' things were checked and are fine.'] : 'Nothing has been checked yet.']), rxBehindNote());
   root.classList.add('wide');
   const none = t => h('div', { class: 'muted hm-none' }, t);
   root.append(rxSection('Mismatches', mis.length, rxHelp('mismatch', 'A mismatch is the paper and the files disagreeing today: a number that differs from its result file, a main text and appendix that give different values, or a claim whose experiment says otherwise. Open a row to see each compared method, then your own, then the difference.'),
@@ -1498,6 +1502,7 @@ function suContext(x, claim) {   // S26: why, what, where, how, when, who on one
       T.stale ? h('div', { class: 'rx-warn' }, '! Code or settings changed after the last result.') : null] : h('span', null, 'No dated result yet.'), !T.last),
     cell('Who', O.runs ? who.join(', ') + ' (' + plural(O.runs, 'logged run') + ')' : [h('span', null, 'No logged run.'), O.commit ? h('span', { class: 'muted small' }, ' Results came in with commit ' + O.commit + '.') : null], !O.runs));
 }
+const SU_GENERAL = /^Lemmata cannot read this from the files/;      // the checklist's general explanation, the same on every experiment
 function suSheet(x, claim, D, hl) {
   const P = x.protocol, link = claim && claim.links[x.id];
   const card = h('section', { class: 'su-sh' + (x.attention ? ' att' : '') });
@@ -1529,7 +1534,8 @@ function suSheet(x, claim, D, hl) {
     if (sel) card.append(suTracePanel(x, sel.m, sel.c));
     else card.append(h('div', { class: 'muted small su-hint' }, 'Click a number to trace it. ', rxHelp('trace', 'The trace runs: what the paper says → where it comes from → how → who ran it → when. ×n is the number of runs; bold is the best in its column.')));
   }
-  card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check. ' + c.why : c.why)); })));
+  card.append(h('div', { class: 'su-ck' }, (x.checklist || []).map(c => { const a = SU_ANS[c.a]; return h('div', { class: 'su-ck-r', title: c.why }, h('span', { class: 'sg ' + a[1] }, a[0]), h('span', { class: 'su-ck-q' }, c.q), h('span', { class: 'muted small' }, c.a === 'you' ? 'You check.' + (SU_GENERAL.test(c.why) ? '' : ' ' + c.why) : c.why)); }),      // a reason that belongs to this experiment stays on the row; only the general one goes behind the ?
+    (x.checklist || []).some(c => c.a === 'you' && SU_GENERAL.test(c.why)) ? h('div', { class: 'muted small' }, rxHelp('suck:' + x.id, [...new Set(x.checklist.filter(c => c.a === 'you' && SU_GENERAL.test(c.why)).map(c => c.why))].join(' '))) : null));
   return card;
 }
 /* ---------- Setup board (S28): thesis <- claims <- experiments <- what was used ----------
@@ -1696,7 +1702,7 @@ function bdBoard(B) {
     B.waiting ? h('p', { class: 'muted small' }, 'The hypotheses are not drafted yet, so this board is made from the result files. ', h('button', { class: 'linkbtn', onclick: () => openTab('experiments') }, 'Open Thesis'), '.') : null,
     h('div', { class: 'bd-sc', tabindex: '0', role: 'group', 'aria-label': 'The map. In a narrow window it scrolls sideways.' }, h('div', { class: 'bd-b' }, sv('svg', { class: 'bd-w', 'aria-hidden': 'true' }), tcol, ccol, xcol, icol)),
     h('p', { class: 'muted small bd-hint' }, 'Scroll sideways to see the whole map →'),
-    h('p', { class: 'bd-tr' + (sel ? '' : ' muted') }, sel ? bdTrace(B, sel, L) : 'Click a card to light its path to the ' + (T.kind === 'problem' ? 'problem' : 'thesis') + '. A dashed card is not connected yet.'),
+    h('p', { class: 'bd-tr' + (sel ? '' : ' muted') }, sel ? bdTrace(B, sel, L) : ['Click a card. ', rxHelp('board', 'Click a card to light its path to the ' + (T.kind === 'problem' ? 'problem' : 'thesis') + '. A dashed card is not connected yet.')]),
     sel && !(B.mode === 'paper' && sel[0] === 'i') ? bdDetail(B, sel) : null);
   const draw = () => bdWire(el, B, L);
   requestAnimationFrame(() => { draw(); if (!el.isConnected || typeof ResizeObserver === 'undefined') return;
@@ -2506,6 +2512,7 @@ function pageSettings() {
     row('Write LaTeX', 'Ask for a table, a paragraph or a caption; your agent writes it from everything Lemmata holds.', h('button', { class: 'btn sm', onclick: () => openTab('latex') }, 'Open LaTeX'))));
   // how Lemmata works
   root.append(sec('how', [T.intro.map(([head, text], i) => h('div', { class: 'hf-row st-how' }, h('span', { class: 'hf-tag' }, '[' + (i + 1) + ']'), h('span', { class: 'grow' }, h('b', null, head), ' ', text))),
+    h('p', { class: 'muted small st-kept' }, 'What Lemmata keeps about you: for each project, a hashed GitHub login (on a hub; on this computer alone, a single local entry) and the time you last opened Home, only to show what changed since you last looked.'),
     h('div', { class: 'st-acts' }, h('button', { class: 'btn sm', onclick: () => intro(true) }, 'Show the walkthrough'))]));
   // FAQ
   const fq = h('div', { class: 'st-faq' }, h('p', { class: 'muted small' }, 'Where to look for what. Each answer has a button to the page it is about.'));

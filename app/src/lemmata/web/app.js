@@ -128,7 +128,7 @@ const T = {
   intro: [
     ['Lemmata keeps track of what your paper claims and what backs it.', 'It reads your paper and the code and results behind it. Claims shows the core message, each claim under it, and the proof, table, result file and script behind each one.'],
     ['When something changes, it tells you what it affects.', 'Change a setting or a script and Lemmata lists the tables, figures and sections that may no longer match. You don\'t have to watch it. Open it when you need it.'],
-    ['You decide what is fine.', 'For each change, choose Looks fine, Needs fixing or Ignore. When you are happy, press "Mark everything as looked at" and Lemmata counts from there.'],
+    ['You decide what is fine.', 'Each flagged item on Checks can be marked Looks fine, Needs fixing or Ignore. Home lists what waits for you, and Review lists where the paper and the files disagree. The Checkpoint at the foot of the page starts counting changes from now.'],
   ],
 };
 
@@ -1598,6 +1598,14 @@ function findingCard(f) {
     e && e.note ? h('div', { class: 'muted' }, 'Your note: “' + e.note + '”') : null,
     triageButtons([{ type: 'finding', id: f.id }], cur, 'f:' + f.id));
 }
+/* The same question in one short line for a Needs you row (the full sentence is in the detail on Checks). */
+function edgeShort(e) {
+  const from = M.byId.get(M.paperId.get(e.from)), file = String(nameOf(e.to)).split('/').pop(), re = /([\w.\-]+):\s*paper\s+([^,;]+),\s*config\s+([^;]+)/, m = re.exec(e.reason || '');
+  const who = from ? lead(from) : 'Your paper';
+  if (!m) return who + ' and ' + file + ': same setting?';
+  const k = humanKey(m[1]), p = m[2].trim(), c = m[3].trim();
+  return who + (p === '?' ? '’s ' + k + ' has no value' : ' says ' + k + ' ' + p) + '; ' + file + ' sets ' + c + '. Same setting?';
+}
 function edgeSentence(e) {
   const from = M.byId.get(M.paperId.get(e.from)), path = nameOf(e.to);
   const pairs = [], re = /([\w.\-]+):\s*paper\s+([^,;]+),\s*config\s+([^;]+)/g; let m;
@@ -1605,7 +1613,7 @@ function edgeSentence(e) {
   const who = from ? lead(from) : 'Your paper';
   if (!pairs.length) return who + ' and ' + path + ' seem to describe the same settings. Should Lemmata treat them as the same?';
   const p0 = pairs[0];
-  return who + ' mentions ' + p0.k + ' ' + p0.p + ', and ' + path + ' sets ' + p0.k + ' to ' + p0.c + '.' + (pairs.length > 1 ? ' It also lines up ' + pairs.slice(1).map(p => p.k + ' (' + p.p + ')').join(', ') + '.' : '') + ' Should Lemmata treat them as the same setting?';
+  return who + ' mentions ' + p0.k + (p0.p === '?' ? ' with no value' : ' ' + p0.p) + ', and ' + path + ' sets ' + p0.k + ' to ' + p0.c + '.' + (pairs.length > 1 ? ' It also lines up ' + pairs.slice(1).map(p => p.k + ' (' + p.p + ')').join(', ') + '.' : '') + ' Should Lemmata treat them as the same setting?';
 }
 function pageChecks() {
   S.outline = [];
@@ -2075,10 +2083,12 @@ function projectMenu(anchor) {
   menuPop(anchor, es, { up: true });
 }
 
-/* S31: the title goes back to the first page. In a project that is Home; on a hub with no project open, the list of projects. */
+/* S31, changed by S36-03 (founder, 2026-11-23): the title goes to the list of projects (/) on a hub, whether or not a project is open;
+   Home is reached from the sidebar. Without a hub there is no list, so the title keeps going to Home. In the VS Code tab it goes to Setup. */
+const titleGoesToProjects = () => HUB_ON && !window.LEMMATA_EMBED;
 function goHome() {
-  if (S.project) { openTab(window.LEMMATA_EMBED ? 'setup' : 'digest'); window.scrollTo(0, 0); }
-  else if (HUB_ON && !window.LEMMATA_EMBED) location.href = '/';
+  if (titleGoesToProjects()) location.href = '/';
+  else if (S.project) { openTab(window.LEMMATA_EMBED ? 'setup' : 'digest'); window.scrollTo(0, 0); }
 }
 /* ---------- left sidebar ---------- */
 const sgl = st => h('span', { class: 'sg ' + st, 'aria-hidden': 'true' }, ST[st].glyph);
@@ -2117,6 +2127,7 @@ function navBadge(k) { return k === 'digest' ? (RX.todo ? rxNeedsList().length :
     : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : 0; }
 function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;
+  const bt = $('#bt-home'); if (bt) { const pl = titleGoesToProjects(); bt.title = pl ? 'Your projects' : 'Home'; bt.setAttribute('aria-label', PRODUCT + (pl ? ': your projects' : ': go to Home')); }
   const t = S.tabs[S.active], cur = t ? NAV_OF[t.k] : null;
   const badge = k => navBadge(k);
   (window.LEMMATA_EMBED ? NAV.filter(([k]) => BENCH_PAGES.includes(k)) : NAV).forEach(([k, label]) => {
@@ -2131,7 +2142,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'numbers' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'review' || t.k === 'history' || t.k === 'trail' || t.k === 'numbers' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn', onclick: () => loadAll() }, 'Try again')]));
@@ -2214,7 +2225,7 @@ function renderStatus() {
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('LaTeX', () => openTab('latex')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher()), link('Settings', () => openTab('settings'))];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, embed ? null : more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },
-      h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at' }, 'Last looked at: ' + (cp ? lastChecked(cp.created_at) : 'not yet')),
+      h('button', { class: 'linkbtn flink', onclick: () => (READONLY ? openTab('changes') : markAllDialog()), title: 'Mark everything as looked at: start a new checkpoint' }, 'Checkpoint: ' + (cp ? lastChecked(cp.created_at) : 'none yet')),
       ' · ', plural(M.todo || 0, 'thing') + ' to look at',
       S.project && S.project.sync && S.project.sync.failing ? h('span', { class: 'fwarn', title: S.project.sync.message || '' }, ' · Sync is failing') : null,
       BUSY ? h('span', { role: 'status' }, ' · ' + BUSY) : !hc.status && S.project ? ' · Files read ' + agoText(S.project.scanned_at) : hc.status ? ' · ' + hc.status : null,

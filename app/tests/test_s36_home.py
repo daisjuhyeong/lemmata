@@ -106,6 +106,30 @@ class TodoNeedsYou(unittest.TestCase):
         self.assertFalse(work["needs_you"])
         self.assertIsNone(work["act"])
 
+    def test_a_drafted_core_message_is_a_needs_you_item(self):
+        E = {"sections": [], "thesis": {}, "study": None}
+        C = {"core": {"id": "core", "state": "proposed", "text": "Drift-aware detection with Monte Carlo Dropout is cheaper and earlier than the baselines on three streams."}, "claims": []}
+        its = todomod.build(E, C, {"items": []}, {"tasks": []}, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-23")["items"]
+        (it,) = [i for i in its if i["key"] == "claim:core"]
+        self.assertTrue(it["needs_you"])
+        self.assertEqual(it["act"], {"do": "confirm_claim", "id": "core"})
+        self.assertLessEqual(len(it["text"]), 80)      # one line
+        C["core"]["state"] = "confirmed"
+        self.assertEqual([i for i in todomod.build(E, C, {"items": []}, {"tasks": []}, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-23")["items"] if i["key"] == "claim:core"], [])
+
+    def test_needs_you_sentences_are_short_and_keep_the_full_text_in_why(self):
+        long = "Monte Carlo Dropout detects drift earlier and with fewer false positives than every baseline we compared against in this study"
+        E = {"sections": [], "thesis": {}, "study": None}
+        C = {"claims": [{"id": "c1", "label": "C1", "short": "C1", "text": long, "state": "proposed"}]}
+        its = todomod.build(E, C, {"items": []}, {"tasks": [{"id": "t1", "state": "open", "text": long * 2, "claims": [], "targets": [], "source": "advisor"}]}, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-23")["items"]
+        it = next(i for i in its if i["kind"] == "claim")
+        fb = next(i for i in its if i["kind"] == "feedback")
+        self.assertLessEqual(len(fb["text"]), 80)
+        self.assertIn(long * 2, fb["why"])
+        self.assertLessEqual(len(it["text"]), 75)
+        self.assertTrue(it["text"].startswith("Confirm C1: "))
+        self.assertIn(long, it["why"])
+
 
 class TodoSentences(unittest.TestCase):
     def test_every_mismatch_gives_both_sides_in_one_sentence(self):

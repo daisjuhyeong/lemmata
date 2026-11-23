@@ -581,7 +581,7 @@ class MapTest(unittest.TestCase):
         self.assertNotIn(("confirm", "map"), kinds())                                   # the rule stopped firing: the item is gone
         self.e.add_feedback("Check Table 1 against the new results.", "Advisor meeting")
         T = self.e.todo("2026-11-16")
-        self.assertEqual([(i["group"], i["kind"]) for i in T["items"]], [("person", "feedback"), ("paper", "differs"), ("gap", "seeds")])   # in the order of who is waiting
+        self.assertEqual([(i["group"], i["kind"]) for i in T["items"]], [("person", "feedback"), ("confirm", "claim"), ("paper", "differs"), ("gap", "seeds")])   # in the order of who is waiting; the paper's drafted core message waits for you (S36-03)
         for i in T["items"]:
             self.assertTrue(i["target"].get("view") and i["why"] and i["rule"])
         d = next(i for i in T["items"] if i["kind"] == "differs")

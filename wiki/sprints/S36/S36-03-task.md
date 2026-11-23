@@ -1,7 +1,7 @@
 ---
 type: task
 owner_agent: lead
-status: ready (founder's answers of 2026-11-23 12:58 KST); not started
+status: built 2026-11-23, see S36-03-handoff.md (line 2 was already built in a349a64 as 'a claim or nothing', confirmed by the founder; line 6's decisions are in the handoff)
 sources:
   - "founder message in chat, 2026-11-23 12:58 KST, answering the five open questions of S36-02-handoff.md as the chat had numbered them (the home_seen question first, then the handoff's questions 1 to 4): '1. Yes. this is important. 2. instal Playwright in a temporary folder on the Mac mini 3. Yes 4. and 5. let CTO agent decide.'"
   - "same message: 'Also, for the Lemmata homepage, if i am clicking the Lemmata button on the top left, then I will go back to the project selection slide, not the home button.'"
