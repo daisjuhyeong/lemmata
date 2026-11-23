@@ -2379,7 +2379,7 @@ function fitTabs() {
   if (bar.scrollWidth > bar.clientWidth + 1) inactive.forEach(s => { s.textContent = navShort(s.dataset.full); });
 }
 /* In VS Code, arrow keys move between rows and Enter opens one, as in the file explorer (the Claims tree has its own keys). */
-const ROW_KEYS = '.row-line button, .rx-x-main, button.rx-rv-r, button.rx-rv-b, button.rx-rv-check, .rrow';
+const ROW_KEYS = '.row-line button, .rx-x-main, .rrow';
 function rowKeys() {
   if (!window.LEMMATA_EMBED) return;
   document.addEventListener('keydown', ev => {

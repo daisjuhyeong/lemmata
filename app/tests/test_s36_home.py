@@ -82,8 +82,9 @@ class TodoNeedsYou(unittest.TestCase):
         E = {"sections": [], "thesis": {}, "study": None}
         C = {"claims": [{"id": "c1", "label": "C1", "short": "C1", "text": "It is better.", "state": "proposed"},
                         {"id": "c2", "label": "C2", "short": "C2", "text": "Done.", "state": "confirmed"}]}
-        tasks = {"tasks": [{"id": "t1", "state": "open", "text": "Fix Table 2", "claims": ["c2"], "targets": [], "source": "advisor"},
-                           {"id": "t2", "state": "open", "text": "Something vague", "claims": [], "targets": [], "source": "advisor"}]}
+        tasks = {"tasks": [{"id": "t1", "state": "open", "text": "Fix Table 2", "claims": [{"id": "c2", "label": "C2"}], "targets": [], "source": "advisor"},
+                           {"id": "t2", "state": "open", "text": "Something vague", "claims": [], "targets": [], "source": "advisor"},
+                           {"id": "t3", "state": "open", "text": "Rerun the loader", "claims": [], "targets": [{"node_id": "file:code/load.py", "name": "load.py"}], "source": "advisor"}]}
         return todomod.build(E, C, {"items": []}, tasks, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-22", **kw)
 
     def test_every_item_says_whether_it_waits_on_you(self):
@@ -92,14 +93,18 @@ class TodoNeedsYou(unittest.TestCase):
             baselines={"rows": [{"name": "ADWIN", "proposal": {"by": "claude"}}, {"name": "DDM", "proposal": None}]})["items"]
         self.assertTrue(all(isinstance(i["needs_you"], bool) and "act" in i for i in items))
         mine = {(i["kind"], i["key"].split(":", 1)[1]): i for i in items if i["needs_you"]}
-        self.assertEqual(sorted(mine), [("baseline", "ADWIN"), ("claim", "c1"), ("feedback", "t2"), ("hypothesis", "H1"), ("problem", "problem")])
+        self.assertEqual(sorted(mine), [("baseline", "ADWIN"), ("claim", "c1"), ("feedback", "t1"), ("feedback", "t2"), ("hypothesis", "H1"), ("problem", "problem")])
         self.assertEqual(mine[("claim", "c1")]["act"], {"do": "confirm_claim", "id": "c1"})
         self.assertEqual(mine[("hypothesis", "H1")]["act"], {"do": "confirm_hypothesis", "target": "H1"})
         self.assertEqual(mine[("problem", "problem")]["act"], {"do": "confirm_hypothesis", "target": "problem"})
         self.assertEqual(mine[("baseline", "ADWIN")]["act"], {"do": "confirm_baseline", "name": "ADWIN"})
-        self.assertIsNone(mine[("feedback", "t2")]["act"])
-        other = next(i for i in items if i["kind"] == "feedback" and i["key"].endswith("t1"))
-        self.assertFalse(other["needs_you"])      # feedback that already points at a claim is work, not a decision
+        # feedback: with no target or at a claim it waits on the researcher (done is the one existing task action); at a file only, it is work to do
+        self.assertEqual(mine[("feedback", "t1")]["act"], {"do": "task_done", "id": "t1"})
+        self.assertEqual((mine[("feedback", "t1")]["text"], mine[("feedback", "t1")]["target"]["sel"]), ("C2: Fix Table 2", "c2"))
+        self.assertEqual(mine[("feedback", "t2")]["act"], {"do": "task_done", "id": "t2"})
+        work = next(i for i in items if i["kind"] == "feedback" and i["key"].endswith("t3"))
+        self.assertFalse(work["needs_you"])
+        self.assertIsNone(work["act"])
 
 
 class TodoSentences(unittest.TestCase):
@@ -130,6 +135,79 @@ class TodoSentences(unittest.TestCase):
         it = todomod.build(E, {"claims": []}, {"items": []}, {"tasks": []}, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-22", numbers=nums)["items"][0]
         self.assertEqual(it["pair"], {"left": ["The report says", "0.91"], "right": ["The file holds", "0.88"], "file": "results/a.csv"})
         self.assertIn("0.91", it["sentence"])
+
+
+class Coverage(unittest.TestCase):
+    CLAIM = "MCD wins on every dataset."
+
+    def exp(self, xid, ours, datasets, others=None, **kw):
+        rows = [{"label": "ADWIN", "values": {d: 40.0 for d in datasets}}, {"label": "MCD", "values": dict(ours)}]
+        return dict({"id": xid, "name": xid, "tally": {}, "problems": [], "grid": {"datasets": list(datasets), "rows": rows, "cols": list(datasets), "tuning": False},
+                     "summary": {"ours_label": "MCD", "study": "method"}}, **kw)
+
+    def run_rule(self, text, xs, study=None, state="confirmed"):
+        E = {"sections": [{"id": "s1", "claim_id": "c3", "label": "C3", "kind": "claim", "text": text, "experiments": xs, "links": {}}] if xs is not None else [], "thesis": {}, "study": study}
+        C = {"claims": [{"id": "c3", "label": "C3", "short": "C3", "text": text, "state": state}]}
+        return [i for i in todomod.build(E, C, {"items": []}, {"tasks": []}, {"findings": []}, {"summary": {}}, {"plans": []}, {"proposed": None}, [], {"snoozed": {}}, "2026-11-22")["items"] if i["kind"] == "coverage"]
+
+    def test_phrases_that_count(self):
+        for text, phrase in (("Wins on every dataset.", "every dataset"), ("It wins on all 6 datasets we tried", "all 6 datasets"), ("on all six datasets", "all six datasets"),
+                             ("on all of the 6 datasets", "all of the 6 datasets"), ("Consistently across the benchmarks.", "Consistently across the benchmarks"),
+                             ("Consistently across the evaluated benchmarks.", "Consistently across the evaluated benchmarks"), ("Better than all evaluated benchmarks", "all evaluated benchmarks"),
+                             ("on EACH benchmark", "EACH benchmark"), ("across all the datasets", "all the datasets"), ("across all data sets", "all data sets"), ("each task", "each task"),
+                             ("on each of the datasets", "each of the datasets"), ("on every one of the datasets", "every one of the datasets"),
+                             ("consistently outperforms baselines across datasets", "consistently outperforms baselines across datasets"),
+                             ("모든 데이터셋에서 우수하다", "모든 데이터셋"), ("모든 데이터 세트에서", "모든 데이터 세트"), ("각 데이터셋에서", "각 데이터셋"), ("모든 dataset에서", "모든 dataset")):
+            self.assertEqual(todomod.coverage_phrase(text), phrase, text)
+
+    def test_phrases_that_do_not(self):
+        for text in ("Wins on most datasets.", "Better on all metrics.", "Wins on some datasets", "Improves every metric", "all of the baselines", "every seed", "all baselines", "across datasets", "", None, "datasets differ",
+                     "on all but one dataset",
+                     # a negation just before: not a universal claim
+                     "Ours does not win on every dataset", "Ours is not better on every dataset", "Ours isn't best on all datasets", "not best on all datasets", "never wins on every dataset",
+                     # an exception just after: the exception is the dataset a rule would report
+                     "Best on all datasets except Weather", "On all datasets but Weather, ours leads", "on all datasets other than Weather", "all datasets, apart from Weather", "every dataset excluding Weather",
+                     "on all datasets save for Weather", "모든 데이터셋에서 우월하지 않다", "모든 데이터셋 제외", "Weather를 제외한 모든 데이터셋에서 우수하다", "Weather 빼고 모든 데이터셋에서 우수하다", "Weather 말고 각 데이터셋에서", "전체 데이터셋", "생각 데이터셋", "생각각 데이터셋",
+                     # a qualifier names a subset that cannot be resolved here
+                     "on all synthetic datasets", "all the UCI datasets", "all three image datasets", "all real-world datasets", "every public benchmark",
+                     # a possessive is not a universal over tasks as datasets
+                     "Each task's model is tuned", "each task’s budget"):
+            self.assertIsNone(todomod.coverage_phrase(text), text)
+
+    def test_fires_with_both_sides_and_counts_only(self):
+        ds = ["A", "B", "C", "D", "E", "F"]
+        x = self.exp("x1", {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": None, "F": None}, ds)
+        (it,) = self.run_rule(self.CLAIM, [x])
+        self.assertEqual((it["group"], it["needs_you"]), ("paper", False))
+        self.assertEqual(it["sentence"], "C3 says “every dataset”; 2 of 6 have no run.")
+        self.assertEqual(it["why"], "No run of the project's own method on: E, F.")
+        self.assertEqual([c["col"] for c in it["cells"]], ["E", "F"])
+        self.assertEqual(it["pair"]["right"], ["Datasets with a run", "4 of 6"])
+        self.assertEqual(it["xs"], ["x1"])
+        for w in ("wrong", "fail", "bad", "error"):
+            self.assertNotIn(w, it["sentence"].lower())
+
+    def test_count_runs_across_two_experiments_by_dataset_name(self):
+        x1 = self.exp("x1", {"A": 1.0, "B": None, "C": None}, ["A", "B", "C"])
+        x2 = self.exp("x2", {"b": 2.0, "D": None}, ["b", "D"])      # "b" is the same dataset as "B"
+        (it,) = self.run_rule(self.CLAIM, [x1, x2])
+        self.assertEqual(it["sentence"], "C3 says “every dataset”; 2 of 4 have no run.")
+        self.assertEqual(it["why"], "No run of the project's own method on: C, D.")
+        self.assertEqual(it["xs"], ["x1", "x2"])
+
+    def test_silent_cases(self):
+        full = self.exp("x1", {"A": 1.0, "B": 2.0}, ["A", "B"])
+        gap = self.exp("x1", {"A": 1.0, "B": None}, ["A", "B"])
+        self.assertEqual(self.run_rule(self.CLAIM, [full]), [])      # full coverage
+        self.assertEqual(self.run_rule(self.CLAIM, []), [])      # no linked experiment
+        self.assertEqual(self.run_rule(self.CLAIM, None), [])
+        self.assertEqual(self.run_rule("It wins on most datasets.", [gap]), [])
+        self.assertEqual(self.run_rule("It is better on all metrics.", [gap]), [])
+        self.assertEqual(self.run_rule(self.CLAIM, [gap], state="rejected"), [])
+        self.assertEqual(self.run_rule(self.CLAIM, [gap], study="benchmark"), [])      # a benchmark study has no "ours"
+        tuned = self.exp("x1", {"A": 1.0, "B": None}, ["A", "B"])
+        tuned["grid"]["tuning"] = True
+        self.assertEqual(self.run_rule(self.CLAIM, [tuned]), [])      # a search over settings has no datasets to cover
 
 
 class TrailByField(unittest.TestCase):

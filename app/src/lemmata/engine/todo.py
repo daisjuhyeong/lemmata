@@ -3,9 +3,91 @@ plus the open feedback tasks. Every item names what it is about (target) so the 
 is waiting. Nothing here is stored except snoozes (todo.json); a rule item disappears when its rule stops firing."""
 from .errors import BadRequest
 
+import re
+
 SCHEMA = "lemmata.todo/1"
 GROUPS = (("person", "Someone is waiting"), ("confirm", "Needs your confirmation"), ("paper", "The paper is wrong today"),
           ("stale", "Out of date"), ("gap", "Gaps"))
+
+# Claim-text coverage (S36, founder's answer 2026-11-23): a claim that says "every dataset" is checked against the datasets of the
+# experiments linked to it. A fixed, tested list of patterns; no model. When unsure, the rule stays silent.
+#  - The datasets must be named ("all metrics" does not match). A possessive ("each task's model") is not a universal over datasets.
+#  - Only neutral words may sit between the quantifier and the noun. A qualifier ("all synthetic datasets", "all the UCI datasets",
+#    "all three image datasets") names a subset that cannot be resolved here (families are out of S36), so such a claim does not match.
+#  - A negation just before the phrase ("does not win on every dataset") or an exception just after it ("on all datasets except
+#    Weather") makes the claim something other than a universal, so the rule stays silent.
+#  - Korean: 모든/각 + 데이터셋 / 데이터 세트 (or dataset); 전체 is not used. The exception may come before the phrase (제외한, 제외하고, 빼고, 외의, 말고).
+_NOUN = r"(?:dataset|data\s?set|benchmark|task|stream)"
+_PLURAL = r"(?:datasets|data\s?sets|benchmarks|tasks|streams)"
+_NEUTRAL = r"(?:(?:evaluated|tested|considered|single|benchmark)\s+)"
+_DET = r"(?:(?:the|our|these|those)\s+)"
+_NUM = r"(?:(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+)"
+_POSS = r"(?![’']s)"
+COVERAGE_PATTERNS = [re.compile(x, re.I) for x in (
+    r"\b(?:every|each)\s+(?:(?:one\s+)?of\s+" + _DET + r"?" + _PLURAL + r"|" + _NEUTRAL + r"{0,2}" + _NOUN + r")\b" + _POSS,
+    r"\ball\s+(?:of\s+)?" + _DET + r"?" + _NUM + r"?" + _NEUTRAL + r"{0,2}" + _PLURAL + r"\b" + _POSS,
+    r"\bconsistently\b(?:\W+\w+){0,4}?\W+(?:across|on|over)\s+(?:all\s+|every\s+|each\s+)?" + _DET + r"?" + _NEUTRAL + r"{0,2}(?:" + _PLURAL + r"|" + _NOUN + r")\b" + _POSS,
+    r"(?<![가-힣])(?:모든|각)\s*(?:데이터\s?셋|데이터\s?세트|dataset)",      # no Hangul directly before: "생각 데이터셋" is not 각; 전체 is left out (it usually means one whole dataset)
+)]
+_NEGATION = re.compile(r"\b(?:not|never|no|neither|nor|cannot)\b|n['’]t\b", re.I)
+_EXCEPTION = re.compile(r"^\W*(?:\w+\W+){0,3}?(?:except|but|other than|apart from|excluding|save for|barring|without)\b|^[^.]{0,12}(?:제외|빼고)|^[^.]{0,14}(?:않|못|아니)", re.I)
+
+
+_KO_BEFORE = re.compile(r"(?:제외한|제외하고|빼고|외의|말고)")
+
+
+def coverage_phrase(text):
+    """The universal phrase over datasets in a claim's text, or None (also None when a negation or an exception makes it doubtful)."""
+    text = text or ""
+    for rx in COVERAGE_PATTERNS:
+        for m in rx.finditer(text):
+            before = " ".join(re.findall(r"[\w’']+", text[:m.start()])[-4:])
+            if _NEGATION.search(before) or _KO_BEFORE.search(" ".join(re.findall(r"[\w’']+", text[:m.start()])[-4:])) or _EXCEPTION.search(text[m.end():m.end() + 60]):
+                continue
+            return m.group(0)
+    return None
+
+
+def _norm(t):
+    return re.sub(r"[^a-z0-9]", "", str(t).lower())
+
+
+def coverage_items(E, C):
+    """[(claim, phrase, datasets, missing, exp_ids)] for each live claim whose text says "every dataset" and whose experiments leave the
+    project's own method without a result on some of them. A benchmark study has no "ours": the rule is skipped there."""
+    if E.get("study") == "benchmark":
+        return []
+    live = {c["id"]: c for c in C.get("claims", []) if c.get("state") != "rejected"}
+    by_claim = {}
+    for sec in E.get("sections", []):
+        cid = sec.get("claim_id") or sec["id"]
+        if cid in live and sec.get("kind") != "other":
+            by_claim.setdefault(cid, []).extend(sec.get("experiments") or [])
+    out = []
+    for cid, xs in by_claim.items():
+        phrase = coverage_phrase(live[cid].get("text"))
+        if not phrase:
+            continue
+        names, ran, used = {}, set(), []
+        for x in xs:
+            g, sm = x.get("grid") or {}, x.get("summary") or {}
+            if not g or g.get("tuning") or sm.get("study") == "benchmark" or not sm.get("ours_label"):
+                continue
+            ours = next((r for r in g.get("rows") or [] if r.get("label") == sm["ours_label"]), None)
+            if ours is None:
+                continue
+            if x["id"] not in used:
+                used.append(x["id"])
+            for col in g.get("datasets") or []:
+                names.setdefault(_norm(col), col)
+                if ours["values"].get(col) is not None:
+                    ran.add(_norm(col))
+        missing = [n for k, n in names.items() if k not in ran]
+        if missing:
+            out.append((live[cid], phrase, list(names.values()), missing, used))
+    return out
+
+
 PAPER_CHECKS = ("main_appendix_mismatch", "undefined_ref", "undefined_cite", "reference_unmatched")
 
 
@@ -39,11 +121,11 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
     items = []
     bench = E.get("study") == "benchmark"
 
-    def add(group, kind, key, text, why, target, rule, act=None, needs=None, sentence=None, cells=None, pair=None):
+    def add(group, kind, key, text, why, target, rule, act=None, needs=None, sentence=None, cells=None, pair=None, xs=None):
         """sentence: one sentence with both sides of a disagreement; cells: the numbers in it, each {x, row, col, v, side};
         pair: two sides to show next to each other when there is no table, {"left": [label, value], "right": [label, value], "file": path or null}. All three are null for items that are not a disagreement."""
         items.append({"key": kind + ":" + key, "kind": kind, "group": group, "text": text, "why": why, "target": target, "rule": rule,
-                      "needs_you": kind in NEEDS_YOU if needs is None else needs, "act": act, "sentence": sentence, "cells": cells, "pair": pair})
+                      "needs_you": kind in NEEDS_YOU if needs is None else needs, "act": act, "sentence": sentence, "cells": cells, "pair": pair, "xs": xs})
 
     short = {c["id"]: c.get("short") or c["label"] for c in C.get("claims", [])}
     # 1. a person is waiting: feedback
@@ -51,11 +133,15 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
         if t.get("state") != "open":
             continue
         tg = (t.get("targets") or [{}])[0]
-        cl = (t.get("claims") or [None])[0]
+        cl0 = (t.get("claims") or [None])[0]      # the task view gives {id, label, ...}; older stores may hold a bare id
+        cl = cl0.get("id") if isinstance(cl0, dict) else cl0
+        cl_name = (cl0.get("label") if isinstance(cl0, dict) else None) or short.get(cl, cl)
         target = {"view": "claims", "sel": cl} if cl else ({"view": "node", "id": tg["node_id"]} if tg.get("node_id") else {"view": "tasks"})
-        # feedback waits on the researcher to say what it is about only when Lemmata could not tell
-        add("person", "feedback", t["id"], t["text"][:200], "Feedback from %s." % (t.get("source") or "someone"), dict(target, task=t["id"]), "feedback is open",
-            needs=not cl and not tg.get("node_id"))
+        # feedback waits on the researcher (S36): when it points at no target (they must say what it is about) or at a claim (they must
+        # settle it). A task that points only at a file or experiment is work to do, and stays in the to-do list.
+        mine = bool(cl) or not tg.get("node_id")
+        add("person", "feedback", t["id"], ("%s: %s" % (cl_name, t["text"][:200])) if cl else t["text"][:200], "Feedback from %s." % (t.get("source") or "someone"), dict(target, task=t["id"]), "feedback is open",
+            needs=mine, act={"do": "task_done", "id": t["id"]} if mine else None)
     # 1b. Lemmata's copy is behind GitHub: everything below may be out of date
     if sync and sync.get("failing"):
         add("stale", "sync", "failing", "Sync with GitHub is failing", (sync.get("message") or "The last sync failed.")[:300], {"view": "digest"}, "sync failing since %s" % (sync.get("since") or "?")[:10])
@@ -118,6 +204,13 @@ def build(E, C, S, tasks, findings, alarms, plans, mapdoc, deadlines, store, tod
                 add("stale", "stale", x["id"], "Rerun %s" % x["name"], "The code or settings changed after this result was written.", tg, "result older than its code")
             if any(cv.get("k") == "seeds" for cv in x.get("caveats") or []):
                 add("gap", "seeds", x["id"], "%s has one run only" % x["name"], "One run per cell: no spread.", tg, "one run")
+    for c, phrase, names, missing, xids in coverage_items(E, C):
+        nm = c.get("short") or c["label"]
+        add("paper", "coverage", c["id"], "%s says “%s” and %d of %d datasets have no run" % (nm, phrase, len(missing), len(names)),
+            "No run of the project's own method on: %s." % ", ".join(missing), {"view": "experiments", "sel": "x:" + xids[0]}, "claim text names every dataset",
+            sentence="%s says “%s”; %d of %d have no run." % (nm, phrase, len(missing), len(names)),
+            cells=[{"x": xids[0], "row": None, "col": m, "v": None, "side": "missing"} for m in missing],
+            pair={"left": ["The claim says", phrase], "right": ["Datasets with a run", "%d of %d" % (len(names) - len(missing), len(names))], "file": None}, xs=xids)
     for f in (findings or {}).get("findings", []):
         if f.get("check") in PAPER_CHECKS:
             loc = f.get("loc") or {}

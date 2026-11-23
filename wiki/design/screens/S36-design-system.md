@@ -180,8 +180,8 @@ cell is missing.
 
 ### Where the phase 2 build differs from this section (2026-11-23, [S36-02 handoff](../../sprints/S36/S36-02-handoff.md))
 - In the VS Code tab the page head stays the one-word title, with no answer line, so the tab reads as in S35.
-- Home and Review each keep one extra closed block ("This week"; "Should you continue?") below the sections named here.
-- The Review example "C3 says 'every dataset'; 2 of 6 have no run" needs a rule that reads claim text; it is not built. Mismatch sentences come from the existing paper-vs-file rules.
+- The weekly Slack digest controls, which sat in Home's old "This week" block, live in Settings (hub only). The founder dropped that block and Review's "Should you continue?" on 2026-11-23.
+- The Review example "C3 says 'every dataset'; 2 of 6 have no run" is the `coverage` rule (todo.py), built on 2026-11-23 at the founder's request. It stays silent when unsure (negation, exceptions, named subsets).
 - A recheck node in the tree is `--warning`, not sand (rule 2).
 
 ## 8. Reference values

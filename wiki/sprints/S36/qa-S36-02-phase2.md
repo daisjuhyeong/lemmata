@@ -1,7 +1,7 @@
 ---
 type: qa-report
 owner_agent: qa
-status: re-check 2026-11-22 after fixes. Python 267 OK, 2 skipped; JS parses. Lines 10-17 PASS on the code (16 with one accepted gap); 18 not walked; 19 PASS for Python, and the extension suites should hold on reading but were not run. One new medium issue (co-author emails in the saved report). Merge waits on that fix, the handoff and Juhyeong.
+status: follow-ups 2026-11-23: A PASS, B PASS on firing and dedup but PARTIAL on the phrase list (negation and except fire), C PARTIAL (the extension unit test s18.test.ts:91 breaks; FAQ text). Suite 276 OK. Earlier: re-check 2026-11-22 after fixes. Python 267 OK, 2 skipped; JS parses. Lines 10-17 PASS on the code (16 with one accepted gap); 18 not walked; 19 PASS for Python, and the extension suites should hold on reading but were not run. One new medium issue (co-author emails in the saved report). Merge waits on that fix, the handoff and Juhyeong.
 sources:
   - "S36-01-task.md (acceptance lines 10-19)"
   - "../../design/screens/S36-design-system.md §3, §6, §7"
@@ -145,3 +145,107 @@ This re-check follows the "Fixes after QA" section of the builder's report and t
 1. N1: remove the co-author addresses from events and from the saved report, or get Juhyeong's explicit approval to keep them.
 2. `S36-02-handoff.md`. It should cover the accepted gaps (defects 4 and 6, N3) and a written waiver from the founder for the screenshots and the extension suites.
 3. Juhyeong's approval of the merge.
+
+## Follow-ups after the founder's answers (2026-11-23)
+This checks the uncommitted diff on top of 3294e34: todo.py, app.css, app.js, research.js and the two S36 tests. It was done by reading the code, plus Python probes of the rule function. The browser checks and the extension suites remain **not checked (founder skipped)**.
+
+### Test runs
+- **Python** (outside the sandbox, with the stub): **Ran 276, OK, 2 skipped**. This matches the builder's count.
+- **JS:** jsc `checkSyntax` passes on `app.js` and `research.js`. The broken control file is still rejected.
+
+### Per item
+| Item | Verdict | Evidence |
+|---|---|---|
+| A. Feedback in Needs you | **PASS** | An item is `needs_you` when it points at a claim or at no target. A task that points only at a node stays in the to-do list with `act` null (todo.py:118-126). The claim-id fix: `cl0.get("id")` when the task view gives a dict (todo.py:118-119). **Done** posts the existing `/api/tasks {id, state:'done'}` (research.js:1131), the same call as the task card (:939), which reaches `server.py:595 set_task`. Done is a plain `.btn sm`, not sand (:1140) |
+| B. Coverage rule: firing, dedup, counts only, silent cases | **PASS** | `coverage_items` (todo.py:38-70) handles each case. **Dedup:** dataset names are normalized across all linked experiments, and an experiment listed twice is counted once (probe: `A`/`B`/`b`/`C` across `a`, `b` and `a` again → 3 datasets, 1 missing, experiment ids `[a, b]`). **No linked experiment:** nothing fires (probe: empty section, no section). **Skipped:** benchmark studies, search grids, experiments with no "ours", rejected claims. **Wording:** the sentence is «C1 says “every dataset”; 1 of 3 have no run.», which is counts only. Group `paper`, so it reaches `rxMismatches()` → Review and the Thesis count. Snooze key `coverage:<claim>`. `bench.py` `TO_RUN` does not include `coverage`, so the VS Code To-run list is unchanged |
+| B. Coverage rule: phrase list | **PARTIAL** | See defects F2 and F3. The probe results are below |
+| C. The two closed blocks removed | **PARTIAL** | No dead calls are left: `rxDigestBox`, `rxDigestProse`, `rxReviewContinue`, `RX_VERDICT`, `RX_CONF_PROMPT`, `rxBaselineTable`, `nbSummary`, `/api/review`, `RX.review` and `rvDays` have no remaining uses in research.js or app.js. `ROW_KEYS` was trimmed. **But:** see F1 (the extension's unit test) and F4 (FAQ text) |
+| C. Slack digest in Settings | **PASS** | `rxDigestSettings` (research.js:2462ff) is shown only when `HUB_ON && RX.hub && !READONLY` (:2501). `RX.hub` comes from `rxStartView`, which runs on the hub only (:2620). Every control is a plain `.btn`. It uses the same hub API: `POST /api/hub/projects/<id>/digest` with `webhook`, `enabled` and `weekday`; `set_digest` accepts exactly those, with weekday 0 = Monday, matching `RX_WEEKDAYS` (hub/projects.py:961-983). "Stop and forget" posts `{webhook:'', enabled:false}`, which removes the webhook and does not trip the "add a webhook first" guard. `/digest/send` is unchanged. Only F5 remains |
+| VS Code tab | **PARTIAL** | The EMBED pages are untouched: no hunk touches `pageSetup` or `pageExperiments`, and Settings, Review and Home open on the website (`BENCH_PAGES`). `embed.test.ts:9` (`POST /api/review` allowed) is a pure function of `embed.ts` and still passes. **But** F1 breaks the extension's unit suite |
+
+### Probe of `coverage_phrase` (QA's phrasings, not the builder's)
+- **Match, correctly:** "every dataset"; "all 6 datasets" and "all six datasets"; "across all data sets"; "every benchmark"; "consistently across the evaluated benchmarks".
+- **No match, correctly:** "all metrics"; "every seed"; "all baselines"; "on all but one dataset"; "on most datasets"; "across datasets"; "on all three image datasets" (a named subset).
+- **False positives:**
+  - "Ours is **not** better on every dataset" and "not best on all datasets": negation.
+  - "Best on all datasets **except** Weather" and "On all datasets **but** Weather, ours leads": the exception is exactly the missing dataset.
+  - "on all **synthetic** datasets": the claim names a subset, but the rule counts every dataset of the linked experiments.
+  - "**Each task**'s model is tuned": `task` is in the noun list, and the word boundary before the `'s` lets the possessive match.
+- **False negatives:**
+  - Korean ("모든 데이터셋에서", "모든 dataset에서");
+  - "on each of the datasets" and "on every one of the datasets";
+  - "consistently outperforms baselines across datasets";
+  - "all the UCI datasets" and "all real-world datasets" (a word that is not in the adjective list blocks the match).
+
+### Defects, by severity
+1. **F1 HIGH: the extension's unit suite breaks.** `vscode/test/unit/s18.test.ts:91` asserts that app.css's `@container app (max-width: 359px)` block contains `.rx-rv-r { grid-template-columns:32px minmax(0,1fr); }`. This change removed that rule (it was at app.css:805 in 3294e34). Line 19 fails again. **Fix:** delete that one assertion, because Review is no longer drawn in the tab and the `.rx-rv-r` rows are gone. It is a test-only change in `vscode/`, so the CTO decides on the version. Also, `vscode/media/vscode.css:79` (`.rx-rv-two`, `.rx-rv-checks`) and `:84` (`.hm-card`) now style nothing. That does no harm; tidy it whenever vscode.css next changes.
+2. **F2 MEDIUM: negation and exceptions raise false mismatches.** "not … every dataset", "all datasets except X" and "all datasets but X" fire. The except/but case fires exactly when X is the missing dataset, so a correct claim shows as a mismatch on Review and in the Thesis count. **Fix:** do not fire when `not`, `n't` or `never` appears within the 4 words before the phrase, or when `except`, `but`, `other than` or `apart from` follows it within 3 words. Add these four phrasings to `test_phrases_that_do_not`.
+3. **F3 LOW/MEDIUM: named subsets and the noun list.**
+   - "all synthetic datasets" counts the real datasets too. **Fix:** when the phrase carries a qualifier (synthetic, real, public), either skip the claim or count only the datasets the map gives that family. Families are out of S36 scope, so skipping is the safe choice.
+   - `task` and `tasks` with a possessive ("Each task's") match. **Fix:** require the noun not to be followed by `'s`, or drop `task`/`tasks` from the noun list.
+   - The false negatives are acceptable for a fixed list; record them in the handoff. Korean is not covered: say so, since some of the authors write in Korean.
+4. **F4 LOW: the FAQ still names a Home section that no longer exists.** Four FAQ entries still say “Next to do” on Home (research.js:2026, 2027, 2028, 2049; the last was edited in this change). Since phase 2, Home has "Needs you" and "All to-do (N)". **Fix:** replace it with "the to-do list (All to-do on Home)" or "Needs you", whichever is meant.
+5. **F5 LOW: a dead button on the Settings page.** The section list always holds "Weekly Slack digest" (research.js:2486), so the jump button shows on a local server and in a saved report, where the section is absent. It then does nothing (`el` is null). **Fix:** build `SECS` with the digest entry only under the same `HUB_ON && RX.hub && !READONLY` condition.
+
+### What still blocks the merge
+1. F1: the extension unit test (`s18.test.ts:91`). Then run the extension suites.
+2. F2: the negation and exception false positives in a rule that reports mismatches.
+3. ~~N1~~ **resolved:** commit 3294e34 stores the boolean `agent_coauthor` in commits and events, not the addresses (history.py:44, :148).
+4. `S36-02-handoff.md`, and Juhyeong's approval.
+
+## Final re-check (2026-11-23)
+This checks the uncommitted working tree on top of 3294e34, by reading the code, with probes and an extension-test stand-in. The Python suite was run by the lead, not re-run by QA. JS: jsc `checkSyntax` passes on `app.js` and `research.js`. The browser checks and the extension suites were **not run (founder skipped)**.
+
+### Per item
+| Item | Verdict | Evidence |
+|---|---|---|
+| F1 `.rx-rv-r` assertion | **FIXED** | `vscode/test/unit/s18.test.ts:91` was replaced by a comment. `vscode/.vscodeignore` ships only `out/src/**`, `media/**`, `package.json` and `README.md`, so tests are not in the .vsix and 0.8.0 stands |
+| 1100px `@media`, which QA missed | **FIXED** | The rule is now `@container app (max-width: 1100px)` (app.css:1133). The guard in test_s36_ui.py:245-247 checks that app.css has no window-width `@media`. **QA's miss:** at the phase 2 check, QA read e2e `tab.test.ts` but not the extension's *unit* tests that regex-match app.css. `s18.test.ts` "three width modes" would have failed on 3294e34 |
+| F2 negation and exceptions | **FIXED for English** | See the probe below |
+| F3 qualifiers and possessive | **FIXED** | "all synthetic datasets", "all the UCI datasets", "all real-world datasets" and "all three image datasets" are silent; "Each task's model" is silent |
+| F4 FAQ | **FIXED** | "Next to do", "This week" and "Should you continue" no longer appear. The entries now name "Needs you" and "All to-do" on Home (research.js:2026-2028) |
+| F5 Settings jump entry | **FIXED** | The digest entry is spliced into `SECS` under the same `HUB_ON && RX.hub && !READONLY` condition as the section (research.js:2486-2487, :2502) |
+
+### The extension's web-file assertions: QA's own stand-in
+I did not rely on the lead's checker (27 lines). I translated, one for one, every assertion in `vscode/test/unit/s18.test.ts` and `link.test.ts` that reads `app.css`, `vscode.css` or `research.js` (31 checks; scratchpad `vsx_check.py`):
+- vscode.css: no colours, the theme variables mapped, every selector scoped to `html.embed`, the dark-link rule;
+- the three width modes: the container on `#app`, 700px and 359px in both stylesheets, no window-width `@media` in either;
+- the narrow and medium grid rules;
+- the claims tree rules per width;
+- research.js's `vscode://lemmata-local.lemmata/open?pid=` link prefix, and `onUri` in package.json.
+
+Results:
+- **31 of 31 pass** on the working tree.
+- **Negative control:** the same checker on 3294e34's app.css fails exactly one check, `@media (max-width:1100px)`, so the stand-in does catch this class of break.
+
+The tests in other files that read files (bench, runs, capture) read only `vscode/src` and package.json, or their own temp folders.
+
+**Integration and e2e tests against hub output changed this round:**
+- No test reads the text of Home, Review or Settings. Those pages open on the website from the tab: e2e `tab.test.ts:116-119` asserts only the external URLs.
+- `views.test.ts:255-257` reads `/api/todo` `items[].key` and `counts.snoozed`, which are unchanged; the new `coverage` and `xs` fields are additions.
+- `hub.test.ts:169` `counts.total` is the *runs* document, not to-do.
+- The Go-to labels at `views.test.ts:267` come from `vscode/src`.
+- `embed.test.ts:9` (`POST /api/review` allowed) tests `embed.ts` only, and the hub route still exists.
+
+Verdict: **should pass**. Not run.
+
+### Probe of `coverage_phrase` (44 phrasings: the earlier set plus new ones)
+- **Fires, correctly:** "every dataset"; "all 6 datasets" and "all six datasets"; "each of the datasets"; "every one of the datasets"; "across all data sets"; "every single dataset"; "every benchmark dataset"; "consistently across the evaluated benchmarks"; "consistently beats ADWIN on all datasets"; "With no tuning, ours wins on every dataset" (the "no" is outside the 4-word window); "모든 데이터셋에서 우수하다"; "모든 dataset에서"; "모든 데이터 세트에서 일관되게"; "각 데이터셋에서 MCD가 가장 좋다".
+- **Silent, correctly:** all metrics; every seed; all baselines; all but one dataset; most datasets; across datasets; "not better on every dataset"; "not best on all datasets"; "doesn't win on every dataset"; "never worse on any dataset"; "all datasets except Weather"; "On all datasets but Weather"; "all datasets apart from Covtype"; the qualified subsets; "Each task's"; "모든 데이터셋에서 우수하지 않다"; "모든 데이터셋에서 Weather를 제외하고".
+- **Remaining false positives:**
+  - **R1:** "**Weather를 제외한** 모든 데이터셋에서 우수하다". Korean puts the exception *before* the phrase, and `_EXCEPTION` looks only after it. This fires exactly when Weather is the missing dataset, which is the same failure as F2.
+  - **R2:** "**전체 데이터셋**에서 정확도가 높다" usually means "on the whole dataset" (one dataset), not every dataset.
+  - **R3:** "각" has no word boundary, so "생**각 데이터셋**" matches. This is unlikely in a claim.
+- **Remaining false negatives (silent, which is acceptable):** "every dataset, but it is slower" and "every dataset without extra tuning", because the exception words "but" and "without" also act as conjunctions; "each of the six datasets".
+- Non-result sentences such as "Each dataset is split 80/20" and "All datasets are public" match the phrase. They fire only if they are a claim's text and the claim's experiments miss runs, which is acceptable.
+
+### Defects, by severity
+1. **R1 MEDIUM (Korean):** add a before-the-phrase Korean exception check: no `제외한|제외하고|빼고|외의` within about 20 characters before the match. Add "Weather를 제외한 모든 데이터셋에서 우수하다" to the silent cases.
+2. **R2 LOW:** drop `전체` from the Korean quantifiers, or require a plural marker (`전체 데이터셋들`).
+3. **R3 LOW:** require the start of the text or a non-Hangul character before `각`, e.g. `(?<![가-힣])각`.
+4. **LOW, for the handoff:** list the fail-silent cases ("but", "without", "each of the N datasets").
+
+### What still blocks the merge
+- R1 (a correct Korean claim shows as a mismatch). R2 and R3 can go with it or later.
+- `S36-02-handoff.md`. It should list the accepted gaps, the fail-silent cases, and the founder's waiver of the screenshots and the extension suites (not run on this machine).
+- Juhyeong's approval of the merge.

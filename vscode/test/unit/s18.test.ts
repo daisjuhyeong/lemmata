@@ -88,5 +88,5 @@ test('Claims tree per width mode: the vertical graph (circles on lines) when wid
   assert.match(appCss, /\.rxt-caret \{[^}]*display:none;/, 'no arrows by default');
   assert.match(narrow, /\.rxt-caret \{ display:inline-block; \}/, 'narrow: collapse arrows, as in the file explorer');
   assert.match(narrow, /border-left-color:transparent/, 'narrow: no lines, an indented outline');
-  assert.match(narrow, /\.rx-rv-r \{ grid-template-columns:32px minmax\(0,1fr\); \}/, 'narrow: Review rows keep two columns');
+  // S36: Review is not a tab page (BENCH_PAGES, app.js) and its old .rx-rv-r rows are gone, so no Review-row rule is checked here.
 });

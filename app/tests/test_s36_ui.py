@@ -163,7 +163,7 @@ class PageHeadsTest(unittest.TestCase):
         self.assertRegex(self.css, r"\.sd-n \{[^}]*color:var\(--text-secondary\)")
 
     def test_tree_frame_scrolls_on_its_own_below_1100px(self):
-        self.assertRegex(self.css, r"@media \(max-width:1100px\) \{ \.rx-treeframe \{ overflow-x:auto;")
+        self.assertRegex(self.css, r"@container app \(max-width: 1100px\) \{ \.rx-treeframe \{ overflow-x:auto;")
         self.assertIn("rx-treeframe", self.js)
 
     def test_needs_you_rows_use_the_your_turn_dot_and_one_nowrap_line(self):
@@ -204,6 +204,47 @@ class PageHeadsTest(unittest.TestCase):
 
     def test_decision_commits_are_not_sand(self):
         self.assertNotIn("plainChip('◆', 'Decision', 'proposed')", self.js)
+
+    def test_the_two_closed_blocks_stay_gone(self):
+        for gone in ("rxDigestBox", "rxDigestProse", "This week, to copy", "hm-week", "rxReviewContinue", "Should you continue", "RX_VERDICT", "RX_CONF_PROMPT", "rxBaselineTable", "nbSummary"):
+            self.assertNotIn(gone, self.js + self.app, gone)
+        self.assertNotIn("hm-week", self.css)
+        for cls in ("rx-rv-checks", "rx-rv-hoped", "rx-rv-two", "rv-cont", "rx-dg-l"):
+            self.assertNotIn(cls, self.css + self.js, cls)
+
+    def test_coverage_mismatches_use_the_shared_list_and_the_table(self):
+        self.assertIn("i.group === 'paper'", self.js[self.js.index("const rxMismatches"):][:200])
+        det = self.js[self.js.index("function rxRvDetail("):]
+        det = det[:det.index("\n}\n")]
+        self.assertIn("it.xs", det)
+        self.assertIn("rxRvTable(x", det)
+        self.assertIn("'task_done'", self.js)
+
+    def test_settings_carries_the_weekly_slack_digest(self):
+        st = self.js[self.js.index("function pageSettings("):]
+        st = st[:st.index("\n}\n")]
+        self.assertIn("['digest', 'Weekly Slack digest']", st)
+        self.assertIn("if (HUB_ON && RX.hub && !READONLY) root.append(sec('digest', rxDigestSettings()))", st)
+        box = self.js[self.js.index("function rxDigestSettings("):]
+        box = box[:box.index("\n}\n")]
+        for part in ("'/digest/send'", "post({ webhook: '', enabled: false })", "post({ enabled: !d.enabled })", "post({ weekday: +day.value })", "'Slack webhook URL'", "'Send now'"):
+            self.assertIn(part, box)
+        self.assertNotIn("primary", box)      # none of these is your turn
+
+    def test_settings_lists_the_digest_only_where_it_exists(self):
+        st = self.js[self.js.index("function pageSettings("):]
+        st = st[:st.index("\n}\n")]
+        self.assertNotIn("['digest', 'Weekly Slack digest'], ['agents'", st)      # not in the fixed list
+        self.assertIn("HUB_ON && RX.hub && !READONLY", st[:st.index("root.append(h('nav'")])      # the jump list is built under the same condition
+
+    def test_faq_names_home_sections_that_exist(self):
+        self.assertNotIn("Next to do", self.js)
+
+    def test_width_modes_are_container_queries(self):
+        """vscode/test/unit/s18.test.ts: width modes are container queries on #app, never viewport media queries."""
+        medias = re.findall(r"@media[^{]*", self.css)
+        self.assertTrue(all("prefers-reduced-motion" in m for m in medias), medias)
+        self.assertNotRegex(self.css, r"@media[^{]*(?:max|min)-width")
 
 
 if __name__ == "__main__":

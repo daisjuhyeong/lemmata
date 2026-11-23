@@ -102,7 +102,6 @@ async function rxLoad() {
     try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
     let baselines = null; try { baselines = await apiGet('/api/baselines'); } catch (e) { /* S30: older hubs and snapshots have no Baselines page */ }
     let latex = null; try { latex = await apiGet('/api/latex'); } catch (e) { /* S31: same for the LaTeX page */ }
-    try { RX.review = await apiGet(READONLY ? '/api/review' : '/api/review?days=' + (RX.rvDays || 30)); } catch (e) { RX.review = null; }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
     Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
@@ -949,26 +948,6 @@ function rxTaskCard(t) {
       : h('div', { class: 'rx-task-l muted' }, 'Lemmata could not tell what this is about. Name a table, figure, section, theorem or file in the feedback, or link one.'),
     !done && t.also_check && t.also_check.length ? h('div', { class: 'rx-task-l' }, h('span', { class: 'muted' }, 'When you change that, also recheck: '), t.also_check.slice(0, 8).map((x, i) => [i ? ', ' : null, rxNodeBtn(x.node_id, x.name)])) : null);
 }
-/* One baseline, opened: every shared experiment with ours and the baseline side by side (no hover needed to see the numbers). */
-function rxBaselineTable(b, ours) {
-  const G = { ahead: ['▲', 'fine', 'Ahead'], behind: ['▼', 'fix', 'Behind'], tie: ['=', 'ign', 'Level'] };
-  const oursName = (b.experiments.find(x => x.ours_label) || {}).ours_label || ours;
-  const dir = x => x.target != null ? '→ ' + x.target : x.lower ? '↓' : '↑';
-  return h('div', { class: 'rx-rv-bd' }, h('table', { class: 'tbl rx-bt' },
-    h('thead', null, h('tr', null, h('th', null, 'Experiment'), h('th', null, 'Metric'), h('th', { class: 'num me' }, oursName), h('th', { class: 'num' }, b.name), h('th', { class: 'num' }, 'Gap'))),
-    h('tbody', null, b.experiments.map(x => { const g = G[x.state] || G.tie;
-      return h('tr', { class: 'x-' + x.state },
-        h('td', null, h('button', { class: 'linkbtn', title: (x.question ? x.question + ' · ' : '') + 'Open this experiment', onclick: () => rxOpenExp(x.id) }, x.name)),
-        h('td', { class: 'muted small' }, (x.metric || '') + (x.col ? ' · ' + x.col : ''), h('span', { title: x.target != null ? 'Closest to ' + x.target + ' is best' : x.lower ? 'Lower is better' : 'Higher is better' }, ' ' + dir(x))),
-        h('td', { class: 'num mono me' }, x.ours == null ? '—' : rxFmt(x.ours)),
-        h('td', { class: 'num mono' }, x.value == null ? '—' : rxFmt(x.value)),
-        h('td', { class: 'num mono' }, h('span', { class: 'rx-bt-g ' + g[1], title: g[2] + ' (positive means ' + oursName + ' is better)' }, g[0] + ' ' + (x.gap > 0 ? '+' : x.gap < 0 ? '−' : '') + rxFmt(Math.abs(x.gap)))));
-    }))),
-    h('div', { class: 'muted small rx-bt-n' }, 'Gap: how much better ' + oursName + ' is on that experiment\'s metric. Positive means ahead, whichever direction the metric goes.'));
-}
-/* Review: should I continue? Three checks on top, the questions under them, the checklist one click down. */
-const RX_VERDICT = { yes: ['✓', 'Yes', 'fine'], partly: ['◐', 'Partly', 'look'], no: ['✕', 'No', 'fix'], none: ['○', 'Not yet', 'ign'] };
-const RX_CONF_PROMPT = name => 'Use Lemmata to check confounds for the project "' + name + '": call confound_brief, open the scripts and settings it names, then report_confounds for every question.';
 /* S20 next experiments: Claude Code (the researcher's own) plans them from experiment_brief; the researcher reviews and copies the prompt. */
 const RX_PLAN_PROMPT = (name, target, what) => 'Use Lemmata to plan the next experiment for the ' + what + ' "' + target + '" in the project "' + name + '": call experiment_brief with that target, open the scripts and settings it names, then call propose_experiments with up to three options, each as a structured spec in the format experiment_brief gives. Plan only: do not change code or run anything.';
 const RX_PLAN_KIND = { rerun: 'Rerun', seeds: 'More seeds', baseline: 'Baseline', ablation: 'Ablation', sensitivity: 'Sensitivity', new: 'New', fix: 'Fix' };
@@ -1036,69 +1015,6 @@ function rxPlanBox(target, what, label) {
       h('button', { class: 'btn sm', title: 'Paste it into your Claude Code: ' + ask, onclick: () => copyText(ask) }, mine.length ? 'Plan again with Claude Code' : 'Plan with Claude Code'),
       h('button', { class: 'linkbtn small', onclick: refresh }, 'Check for new plans')));
 }
-function rxReviewContinue() {      // the earlier Review page: three checks, hoped conclusion, baselines, questions. Now one closed section under the four of S36.
-  const R = RX.review, days = RX.rvDays || 30, name = S.project ? S.project.name : 'this project';
-  const setDays = async d => { RX.rvDays = d; try { RX.review = await apiGet('/api/review?days=' + d); } catch (e) { /* keep */ } renderPage(true); };
-  const seg = h('div', { class: 'rx-seg', role: 'group', 'aria-label': 'Period' }, [[30, '30 days'], [7, '1 week'], [1, '1 day']].map(([d, l]) => h('button', { 'aria-pressed': String(days === d), disabled: READONLY && days !== d, onclick: () => setDays(d) }, l)));
-  const root = h('div', { class: 'rx-rv-old' }, h('div', { class: 'row' }, h('span', { class: 'grow' }), R ? seg : null));
-  if (!R) return root.append(h('p', { class: 'muted' }, 'Not available.')), root;
-  const post = async body => { const r = await rxPost('/api/review', Object.assign({ days }, body)); if (r) { RX.review = r; renderPage(true); } };
-  const F = RX.rvFilter, fc = F && R.checks.find(c => c.k === F);
-  root.append(h('div', { class: 'rx-rv-checks' }, R.checks.map((c, i) => { const v = RX_VERDICT[c.verdict];
-    return h('button', { class: 'rx-rv-check v-' + c.verdict + (F === c.k ? ' sel' : ''), 'aria-pressed': String(F === c.k), title: (c.help || '') + ' Click to see the questions behind this.', onclick: () => { RX.rvFilter = F === c.k ? null : c.k; renderPage(true); } },
-      h('span', { class: 'rx-rv-q' }, c.q), h('span', { class: 'rx-rv-v ' + v[2] }, v[0] + ' ' + (c.k === 'paper' && c.verdict === 'partly' ? 'For a smaller paper' : v[1])), h('span', { class: 'rx-rv-l' }, c.line)); })));
-  // hoped vs supported
-  const hopedIn = h('textarea', { class: 'rx-rv-hoped serif', rows: 2, disabled: READONLY, placeholder: 'The best-case conclusion, in one or two sentences. Write it before the results are in.', 'aria-label': 'Hoped conclusion' }, R.hoped || '');
-  hopedIn.addEventListener('change', () => post({ hoped: hopedIn.value }));
-  root.append(h('div', { class: 'rx-rv-two' },
-    h('div', { class: 'rx-rv-pane' }, h('div', { class: 'rx-label' }, 'Hoped conclusion'), hopedIn),
-    h('div', { class: 'rx-rv-pane' }, h('div', { class: 'rx-label' }, 'Supported today'),
-      R.supported.length ? R.supported.map(c => h('div', { class: 'serif rx-rv-s' }, h('b', null, c.label + ' '), rxMath(trunc(c.text, 140)))) : h('div', { class: 'muted' }, 'No claim is fully backed yet.'),
-      R.not_yet.length ? h('details', { class: 'rx-rv-ny' }, h('summary', null, plural(R.not_yet.length, 'claim') + ' not yet'), R.not_yet.map(c => h('div', { class: 'serif rx-rv-s no', title: 'Missing: ' + c.missing.join(', ') }, h('b', null, c.label + ' '), h('s', null, rxMath(trunc(c.text, 140)))))) : null)));
-  // ours against each baseline
-  if (R.baselines && R.baselines.length) { const BV = { ahead: ['▲', 'Ahead', 'fine'], behind: ['▼', 'Behind', 'fix'], mixed: ['=', 'Mixed', 'look'] };
-    const sec = h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-rv-b head' }, h('span', null, R.ours + ' against'), h('span', null, 'Experiments'), h('span', null, ''), h('span', null, 'Overall')));
-    for (const b of (RX.rvAllB ? R.baselines : R.baselines.slice(0, 6))) { const open = RX.rvB === b.name, v = BV[b.verdict];
-      sec.append(h('button', { class: 'rx-rv-b' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: () => { RX.rvB = open ? null : b.name; renderPage(true); } },
-        h('span', null, h('b', null, b.name), b.base ? h('span', { class: 'tag', title: 'The method this work extends' }, 'base') : null),
-        h('span', { class: 'rx-m-meter', title: b.ahead + ' ahead, ' + b.tie + ' level, ' + b.behind + ' behind' }, ['ahead', 'tie', 'behind'].map(k => b[k] ? h('span', { class: 'm-' + k, style: 'flex:' + b[k] }) : null)),
-        h('span', { class: 'muted small' }, b.ahead + ' of ' + b.of + ' ahead'), h('span', { class: 'rx-rv-tr ' + v[2] }, v[0] + ' ' + v[1])));
-      if (open) sec.append(rxBaselineTable(b, R.ours));
-    }
-    if (R.baselines.length > 6) sec.append(h('div', { class: 'rx-x-none' }, h('button', { class: 'linkbtn small', onclick: () => { RX.rvAllB = !RX.rvAllB; renderPage(true); } }, RX.rvAllB ? 'Show fewer' : 'Show all ' + R.baselines.length + ' baselines')));
-    root.append(sec); }
-  if (R.study === 'benchmark' && RX.numbers) root.append(nbSummary(RX.numbers));
-  // behind list for the "ahead" check
-  // questions
-  const TREND = { moved: ['↗', 'Moved', 'fine'], stalled: ['–', 'Stalled', 'ign'], none: ['○', 'Not started', 'ign'] };
-  const rows = R.questions.filter(q => !fc || fc.rows.includes(q.id));
-  const tbl = h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-rv-r head' }, h('span', null, 'Claim'), h('span', null, 'Question'), h('span', null, 'Complete'), h('span', null, days === 30 ? '30 days' : days === 7 ? '1 week' : '1 day')));
-  for (const q of rows) {
-    const open = RX.rvOpen === q.id, t = TREND[q.trend];
-    const segs = q.started ? h('span', { class: 'rx-rv-segs' }, q.checklist.map(c => h('i', { class: 's-' + c.state, title: c.label + ': ' + c.why })), h('span', { class: 'muted small' }, ' ' + q.done + '/' + q.of)) : h('span', { class: 'muted small' }, 'Not started');
-    tbl.append(h('button', { class: 'rx-rv-r' + (open ? ' open' : ''), 'aria-expanded': String(open), onclick: () => { RX.rvOpen = open ? null : q.id; renderPage(true); } },
-      h('b', { title: q.ref && q.ref !== q.label ? q.ref + ' in the project map' : null }, q.label), h('span', { class: 'rx-rv-q' }, q.stage ? rxStageChip(q) : null, q.scope ? rxScopeTag({ scope: q.scope === 'extension' ? 'new' : q.scope === 'base' ? 'original' : null }) : null, h('span', { class: 'serif rx-rv-t' }, rxMath(trunc(q.text, 120)))), segs,
-      h('span', { class: 'rx-rv-tr ' + t[2] }, t[0] + ' ' + (q.behind && q.trend !== 'none' ? 'Behind in ' + q.behind : t[1]))));
-    if (open) { const conf = q.checklist.find(c => c.k === 'confounds'), rep = conf && conf.report;
-      const G = { done: ['✓', 'fine', 'Done'], todo: ['○', 'look', 'To do'], stale: ['↻', 'look', 'Check again'], na: ['–', 'ign', 'Not applicable'] };
-      tbl.append(h('div', { class: 'rx-rv-d' },
-        q.checklist.map(c => h('div', { class: 'rx-rv-item' }, h('span', { class: 'sg ' + G[c.state][1], title: G[c.state][2] }, G[c.state][0]), h('b', null, c.label), h('span', { class: 'muted' }, c.why))),
-        rep && rep.confounds.length ? h('div', { class: 'rx-rv-conf' }, rep.confounds.map((c, i) => h('div', { class: 'rx-rv-cf' + (c.resolved ? ' ok' : '') },
-          h('input', { type: 'checkbox', checked: c.resolved ? '' : null, disabled: READONLY, 'aria-label': 'Resolved', title: 'Resolved', onchange: () => post({ question: q.id, resolve: i }) }),
-          h('span', null, c.text), rxWhere(c.evidence, c.evidence.repo)))) : null,
-        rxPlanBox('q:' + q.id, 'claim', true),
-        h('div', { class: 'row rx-rv-act' },
-          READONLY ? null : h('button', { class: 'btn sm', title: 'Paste it into your Claude Code: ' + RX_CONF_PROMPT(name), onclick: () => copyText(RX_CONF_PROMPT(name)) }, 'Copy confound check for Claude Code'),
-          READONLY ? null : h('button', { class: 'btn sm', title: 'Mark confounds as checked by you, without an agent', onclick: () => post({ question: q.id, mine: !(rep && rep.by === 'you') }) }, rep && rep.by === 'you' ? 'Undo my check' : 'I checked it myself'),
-          q.started ? h('button', { class: 'btn sm', onclick: () => { RX.exView = 'map'; RX.mapSel = 'q:' + q.id; openTab('experiments'); } }, 'Open experiments') : null,
-          q.started ? rxVsLink('q:' + q.id) : null,
-          rep ? h('span', { class: 'muted small' }, 'Confounds: ' + rep.by + ', ' + dmon(rep.at)) : null)));
-    }
-  }
-  if (!rows.length) tbl.append(h('div', { class: 'rx-x-none' }, R.questions.length ? 'Nothing behind this check.' : R.study === 'benchmark' ? 'No claim yet. Confirm the hypotheses on Thesis.' : 'No questions yet. Confirm a project map on the Experiments page.'));
-  root.append(tbl);
-  return root;
-}
 /* ---------- Review (S36): what disagrees. Mismatches, Stale, To confirm, then Checked and fine (closed) ---------- */
 // A number opens its file: straight to the file when the trace resolves to exactly one, otherwise to the trace (Setup) that lists them.
 async function rxOpenNumber(xid, method, col) {
@@ -1129,10 +1045,10 @@ function rxRvPair(pr) {
     ), pr.file ? h('div', { class: 'small' }, 'File: ', rxWhere({ path: pr.file, line: 1 }, 'code')) : null);
 }
 function rxRvDetail(it) {
-  const sel = (it.target || {}).sel || '', x = sel.startsWith('x:') ? rxExpById(sel.slice(2)) : null, kids = [];
-  if (x) {
-    kids.push(rxRvTable(x, (it.cells || [])[0] ? { row: it.cells[0].row, col: it.cells[0].col } : null));
-  } else if (it.pair) kids.push(rxRvPair(it.pair));
+  const sel = (it.target || {}).sel || '', ids = it.xs && it.xs.length ? it.xs : sel.startsWith('x:') ? [sel.slice(2)] : [], xs = ids.map(rxExpById).filter(Boolean), kids = [];
+  if (it.kind === 'coverage') kids.push(h('p', { class: 'rv-why' }, it.why));      // the names of the datasets with no run
+  if (xs.length) xs.forEach(x => kids.push(xs.length > 1 ? h('div', { class: 'small muted' }, x.name) : null, rxRvTable(x, it.cells && it.cells[0] && it.cells[0].side === 'paper' ? { row: it.cells[0].row, col: it.cells[0].col } : null)));
+  else if (it.pair) kids.push(rxRvPair(it.pair));
   const f = it.kind === 'finding' && S.findings ? (S.findings.findings || []).find(g => 'finding:' + g.id === it.key) : null;
   if (f) kids.push(h('div', { class: 'rv-ev' }, (f.evidence || []).slice(0, 4).map(ev => h('div', null, rxWhere(ev, ev.repo), h('span', { class: 'muted small' }, ' ' + trunc(ev.text, 100))))));
   if (!kids.length) kids.push(h('p', { class: 'rv-why' }, 'There is nothing to compare side by side here: this check names one place, not two numbers.'));
@@ -1142,7 +1058,7 @@ function rxRvDetail(it) {
 // one sentence with both sides; the numbers in it open their file
 function rxRvSentence(it) {
   const c = it.cells;
-  if (c && c.length === 2) {
+  if (c && c.length === 2 && c[0].side === 'paper') {
     const nb = cell => h('button', { class: 'linkbtn mono', title: 'Open the file this number came from', onclick: () => rxOpenNumber(cell.x, cell.row, cell.col) }, cell.side === 'file' ? rxFmt(cell.v) : String(cell.v));
     return [c[0].row + ', ' + c[0].col + ': the paper says ', nb(c[0]), ', the file says ', nb(c[1]), '.'];
   }
@@ -1179,7 +1095,6 @@ function pageReview() {
     clean.map(x => h('div', { class: 'hm-row rv' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ok', 'aria-hidden': 'true' }), 'fine'), h('span', { class: 'hm-line' }, x.name + ': its numbers match the files'), h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', onclick: () => rxOpenExp(x.id) }, 'Open')))),
     checks.map(c => h('div', { class: 'hm-row rv' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ok', 'aria-hidden': 'true' }), 'fine'), h('span', { class: 'hm-line' }, c.title + ': none found'), h('span', { class: 'hm-act' }))),
     fine ? null : none('No check has run yet.')));
-  root.append(h('details', { class: 'details rv-cont' }, h('summary', null, 'Should you continue? The three checks, your hoped conclusion and the baselines'), rxReviewContinue()));
   return root;
 }
 function pageTasks() {
@@ -1202,42 +1117,6 @@ function pageTasks() {
   if (rest.length) root.append(h('details', { class: 'details' }, h('summary', null, 'Done and dropped (' + rest.length + ')'), rest.map(rxTaskCard)));
   return root;
 }
-/* The digest as plain prose: one line each, every line a link to the page it is about (Copy still copies the text as sent). */
-function rxDigestProse(text) {
-  const out = h('div', { class: 'rx-digest-p' });
-  String(text || '').split('\n').forEach(raw => {
-    const line = raw.trim(); if (!line) return;
-    const head = /^\*(.+)\*$/.exec(line);
-    if (head) { out.append(h('p', { class: 'rx-dg-h' }, head[1])); return; }
-    const sub = /^[–-]\s/.test(line), txt = line.replace(/^[•–-]\s*/, '');
-    const to = /result file|results\/|\.(csv|json|ya?ml)\b/i.test(txt) ? 'experiments' : /claim|^C\d+\b/i.test(txt) ? 'claims' : /task|feedback/i.test(txt) ? 'tasks' : /recheck|to look at/i.test(txt) ? 'changes' : 'history';
-    out.append(h('div', { class: 'rx-dg-l' + (sub ? ' sub' : '') }, h('button', { class: 'ilink', onclick: () => openTab(to) }, txt)));
-  });
-  return out;
-}
-function rxDigestBox() {
-  const box = h('div', { class: 'card' });
-  const paint = () => {
-    clear(box);
-    if (!RX.digest) { box.append(h('p', { class: 'muted' }, 'Loading…')); return; }
-    box.append(rxDigestProse(RX.digest.text),
-      h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => copyText(RX.digest.text) }, 'Copy')));
-    if (HUB_ON && RX.hub) {
-      const d = RX.hub.digest || {};
-      const url = h('input', { type: 'text', 'aria-label': 'Slack webhook URL', placeholder: d.configured ? 'A Slack webhook is saved. Paste a new one to replace it.' : 'https://hooks.slack.com/services/…' });
-      const post = async body => { try { const r = await fetch('/api/hub/projects/' + encodeURIComponent(PID) + '/digest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw new Error(j.error.message); RX.hub.digest = j; paint(); return true; } catch (e) { toast(e.message); return false; } };
-      box.append(h('div', { class: 'rx-digest-s' },
-        h('p', { class: 'muted' }, 'Send this to a Slack channel every Monday morning. Create an “incoming webhook” in Slack and paste its URL. Lemmata contacts hooks.slack.com and nothing else.'),
-        h('div', { class: 'btnrow' }, url, h('button', { class: 'btn', onclick: async () => { if (url.value.trim() && await post({ webhook: url.value.trim(), enabled: true })) toast('Saved. The digest goes out on Mondays.'); } }, 'Save'),
-          d.configured ? h('button', { class: 'btn', onclick: async () => { try { const r = await fetch('/api/hub/projects/' + encodeURIComponent(PID) + '/digest/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const j = await r.json(); if (!r.ok) throw new Error(j.error.message); rxTrack('digest_sent'); toast('Sent to Slack.'); } catch (e) { toast(e.message); } } }, 'Send now') : null,
-          d.configured ? h('button', { class: 'linkbtn', onclick: () => post({ webhook: '', enabled: false }) }, 'Stop and forget the webhook') : null),
-        d.configured ? h('div', { class: 'muted small' }, (d.enabled ? 'On. ' : 'Off. ') + (d.last_sent ? 'Last sent ' + absTime(d.last_sent) + '.' : 'Not sent yet.')) : null));
-    }
-  };
-  paint();
-  if (!RX.digest) apiGet('/api/digest').then(d => { RX.digest = d; paint(); }).catch(e => { clear(box).append(h('p', { class: 'muted' }, e.message)); });
-  return box;
-}
 
 
 /* ---------- Home (S36): the question, what needs you, what changed since you last looked, this month ---------- */
@@ -1249,6 +1128,7 @@ async function rxSettle(it) {
   if (a.do === 'confirm_claim') { r = await rxPost('/api/claims', { id: a.id, state: 'confirmed' }, 'Confirmed.'); if (r) rxTrack('claim_confirmed'); }
   else if (a.do === 'confirm_map') r = await rxPost('/api/map/confirm', {}, 'Confirmed.');
   else if (a.do === 'confirm_hypothesis') r = await rxPost('/api/hypothesis', { action: 'confirm', target: a.target }, 'Confirmed.');
+  else if (a.do === 'task_done') { r = await rxPost('/api/tasks', { id: a.id, state: 'done' }, 'Marked done.'); if (r) rxTrack('task_done'); }
   else if (a.do === 'confirm_baseline') r = await rxPost('/api/baselines', { action: 'confirm', name: a.name }, 'Confirmed.');
   else if (a.do === 'confirm_link') { await decideLink(a.id, 'approved', 'Linked.'); renderPage(true); return; }      // app.js reloads the graph; the suggestion is then no longer proposed
   if (r) await rxRefresh(); else renderPage(true);      // the row leaves the list because the rule that made it stopped firing
@@ -1257,7 +1137,7 @@ function rxNeedsRow(it) {
   const can = !!it.act && !READONLY;
   return h('div', { class: 'hm-row ny' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-dot', 'aria-hidden': 'true' }), 'your turn'),
     h('span', { class: 'hm-line', title: it.text + (it.why ? ' (' + it.why + ')' : '') }, it.text),
-    h('span', { class: 'hm-act' }, can ? h('button', { class: 'btn sm primary', onclick: ev => { ev.currentTarget.disabled = true; rxSettle(it); } }, 'Confirm') : null,
+    h('span', { class: 'hm-act' }, can ? h('button', { class: 'btn sm' + (it.act.do === 'task_done' ? '' : ' primary'), onclick: ev => { ev.currentTarget.disabled = true; rxSettle(it); } }, it.act.do === 'task_done' ? 'Done' : 'Confirm') : null,
       h('button', { class: 'btn sm', onclick: () => rxOpenTarget(it.target) }, can ? 'Open' : 'Look')));
 }
 function rxSinceLoad() {      // opening Home records the visit; what the person had not seen comes back in the same answer
@@ -1302,7 +1182,6 @@ function pageDigest() {      // Home (S24 step 8, S36): the tab key stays 'diges
     root.append(rxSection('This month', null, null, h('section', { class: 'hm-cal' }, trMonth(T, ym, 'all', true), RX.trDay ? trDayPanel(T, RX.trDay) : h('div', { class: 'muted small su-hint' }, 'Click a day.')),
       T.ahead.length ? h('div', { class: 'hm-dls' }, T.ahead.slice(0, 5).map(d => { const days = Math.round((Date.parse(d.date) - Date.parse(T.today)) / 864e5); return h('div', { class: 'hm-dl' }, h('span', { class: 'hm-dd' + (days <= 7 ? ' soon' : '') }, 'D-' + days), h('span', { class: 'grow' }, d.title), h('span', { class: 'muted small' }, dmon(d.date))); })) : h('div', { class: 'muted small' }, 'No deadlines yet. Add one on the Trail.')));
   }
-  if (!READONLY) root.append(h('details', { class: 'details hm-week' }, h('summary', null, 'This week, to copy into your notes'), rxDigestBox()));
   root.classList.add('wide');
   return root;
 }
@@ -2144,9 +2023,9 @@ const FAQ = [
     ['How does what I used connect to the thesis?', 'The board at the top of Setup: thesis (or problem), claims, experiments, and what was used, as four columns of cards. Click a card and its path to the thesis stays lit, with one sentence saying the path. A dashed card is not connected yet, such as an experiment that tests no claim.', [['Setup', 'setup']]],
     ['Which datasets, metrics and baselines do I use, and where?', 'Each Setup sheet names them. Click a name to see every experiment that uses it and where the paper and the code mention it. A “!” marks something to check, such as a baseline missing on one dataset.', [['Setup', 'setup']]],
     ['What did I, or my coding agent, do on a given day?', 'Click the day in the calendar on Home. The day is shown as work sessions: what was done, for which claim, by whom, on which server and folder, with which script, and what came out. The raw commands are behind “Show the records”.', [['Home', 'digest'], ['Trail', 'history']]],
-    ['What should I do next?', '“Next to do” on Home is made by rules: feedback someone is waiting on, things waiting for you to confirm, places where the paper disagrees with the results, results that are out of date, and gaps. Each item opens the thing it is about.', [['Home', 'digest']]],
-    ['Does the paper still agree with the results?', 'Items tagged [paper] in “Next to do” are cells where the paper and the result files differ. Checks lists every mismatch with the file and line. Each Setup sheet also says how many cells match.', [['Checks', 'checks'], ['Home', 'digest']]],
-    ['Which results are out of date?', 'A result is out of date when the code or settings behind it changed after it was written. These show as [old] items in “Next to do” and as a warning on the experiment’s Setup sheet.', [['Home', 'digest'], ['Setup', 'setup']]],
+    ['What should I do next?', '“Needs you” on Home lists what only you can settle: drafts to confirm and feedback to settle. “All to-do” on Home, in the line under the question, lists everything else made by rules: places where the paper disagrees with the results, results that are out of date, and gaps. Each item opens the thing it is about.', [['Home', 'digest']]],
+    ['Does the paper still agree with the results?', 'Items tagged [paper] in “All to-do” on Home are cells where the paper and the result files differ. Checks lists every mismatch with the file and line. Each Setup sheet also says how many cells match.', [['Checks', 'checks'], ['Home', 'digest']]],
+    ['Which results are out of date?', 'A result is out of date when the code or settings behind it changed after it was written. These show as [old] items in “All to-do” on Home, under Stale on Review, and as a warning on the experiment’s Setup sheet.', [['Home', 'digest'], ['Setup', 'setup']]],
     ['My work has no method of its own. Why does Lemmata look for “ours”?', 'It should not. Set the study to “Benchmark study” on Home, Thesis or Setup. Nothing is then called “ours”: the methods in your result files are listed as compared methods, datasets and test rows are no longer mistaken for methods, and each claim is decided by its own test instead of a method’s rank. A method paper keeps “ours” and the baseline comparison.', [['Home', 'digest'], ['Setup', 'setup']]],
     ['Where does a number in my report come from, and is it still right?', 'Key numbers lists the numbers the study rests on under the claim each belongs to: what the report says, what the committed file holds today, the commit that last wrote the file and the runs behind it. A number no file stores, a file no logged run wrote and a mismatch are listed as open gaps.', [['Key numbers', 'numbers']]],
     ['Lemmata says a run or a file is not in GitHub, but it is.', 'Look for the “Sync with GitHub is failing” note. While syncing fails, Lemmata’s copy of your repository is behind, and the note says why: usually the saved GitHub sign-in has expired or covers public repositories only. Sign in to GitHub again on the Projects page, then use “Sync now”.', [['Home', 'digest']]],
@@ -2164,11 +2043,10 @@ const FAQ = [
     ['How do I add a deadline?', 'On Trail, under Ahead. For a conference, type the venue and year and Lemmata looks up the abstract and paper deadlines. For a journal or your own milestone, set the date yourself. Deadlines show in the calendar on Home.', [['Trail', 'history']]],
     ['Can I see the deadlines in Google Calendar?', 'Yes. On the website, open “Google Calendar and other calendar apps” on Trail and make a subscription link. Google can only read it when the hub has a public address.', [['Trail', 'history']]],
     ['My advisor gave feedback. Where does it go?', 'Use “Add feedback” on Home and paste the notes. Lemmata splits them into tasks, links each to the part of the paper or the files it is about, and shows what else to re-check when it is done.', [['Home', 'digest'], ['Tasks', 'tasks']]],
-    ['What do I bring to a meeting?', '“This week” at the bottom of Home is a short digest of the last seven days: claims that changed stage, runs, open tasks. Copy it into your notes.', [['Home', 'digest']]],
-    ['What should I check before I submit?', 'Review answers three questions for a period: are there new results, how does your method compare with the baselines, and is the evidence enough to write the paper. Checks lists the problems found in the paper and code, each with its file and line. Then clear the [paper] and [old] items in “Next to do”, and read the checklist at the bottom of each Setup sheet.', [['Review', 'review'], ['Checks', 'checks'], ['Setup', 'setup']]],
+    ['What should I check before I submit?', 'Review lists where the paper and the files disagree, what is out of date and what waits for you to confirm; each mismatch opens the numbers side by side. Checks lists the problems found in the paper and code, each with its file and line. Then clear the [paper] and [old] items in “All to-do” on Home, and read the checklist at the bottom of each Setup sheet.', [['Review', 'review'], ['Checks', 'checks'], ['Setup', 'setup']]],
   ]],
   ['A routine that works', [
-    ['How do I get the most out of Lemmata each week?', 'Start the week on Home: clear “Next to do” and look at the deadlines. After a batch of runs, open the day and confirm the session summaries while you still remember why you ran them. Before a meeting, copy “This week”. Before a deadline, go through Review, Checks and the Setup checklists.', [['Home', 'digest']]],
+    ['How do I get the most out of Lemmata each week?', 'Start the week on Home: clear “Needs you” and look at the deadlines. After a batch of runs, open the day and confirm the session summaries while you still remember why you ran them. Before a deadline, go through Review, Checks and the Setup checklists.', [['Home', 'digest']]],
     ['Website or VS Code?', 'They show the same pages. Use VS Code while you work: it jumps to the file and line, and it records the runs. Use the website for the wide views: the calendar, the sidebar and the calendar link.', []],
   ]],
 ];
@@ -2389,7 +2267,7 @@ function nbRead(n) {
   return (r.agg === 'value' ? r.column : r.agg + (r.column ? ' of ' + r.column : '')) + (wh ? ' where ' + wh : '') + (am ? ' among ' + am : '');
 }
 function nbTable(g, compact) {
-  const act = async body => { const r = await rxPost('/api/numbers', body); if (r) { RX.numbers = r; RX.review = await apiGet('/api/review?days=' + (RX.rvDays || 30)).catch(() => RX.review); RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
+  const act = async body => { const r = await rxPost('/api/numbers', body); if (r) { RX.numbers = r; RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
   return h('div', { class: 'su-tw' }, h('table', { class: 'tbl nb-t' }, h('thead', null, h('tr', null, ['', 'Number', 'Report', 'File', 'Stored in', compact ? null : 'Written by', ''].filter(t => t !== null).map(t => h('th', null, t)))),
     h('tbody', null, g.numbers.map(n => { const st = NB_ST[n.status], q = n.quoted;
       return h('tr', { class: 'nb-r s-' + n.status + (n.state === 'proposed' ? ' prop' : '') + (RX.nbSel === n.id ? ' hl' : ''), id: 'nb-' + n.id.replace(/[^\w]/g, '_') },
@@ -2403,12 +2281,6 @@ function nbTable(g, compact) {
         compact ? null : h('td', { class: 'small' }, n.runs.length ? n.runs.map(r => h('div', { class: 'mono small', title: r.state }, r.run_id + (r.sha ? ' @' + r.sha : ''))) : n.scripts.length ? h('span', { class: 'muted' }, n.scripts.join(', ') + ' (by name, no logged run)') : n.found != null ? h('span', { class: 'muted' }, 'no logged run') : ''),
         h('td', null, READONLY || n.state === 'test' ? null : h('button', { class: 'linkbtn small', title: 'Remove this number from the list', onclick: () => act({ action: 'remove', number: n.id }) }, '✕'))); }))));
 }
-function nbSummary(N) {      // one strip, on Review: where the study's numbers stand
-  const c = N.counts;
-  return h('section', { class: 'rx-x-sec nb-sum' }, h('div', { class: 'rx-x-h' }, h('span', { class: 'rx-x-q static' }, 'Key numbers'),
-    h('span', { class: 'rx-x-qt' }, c.total ? nbCounts(c) : 'None listed yet.'), c.gaps ? h('span', { class: 'muted small' }, plural(c.gaps, 'open provenance gap')) : null, h('span', { class: 'grow' }),
-    c.proposed ? h('span', { class: 'hf-tag' }, '[' + c.proposed + ' to confirm]') : null, h('button', { class: 'linkbtn', onclick: () => openTab('numbers') }, 'Open')));
-}
 function pageNumbers() {
   const nr = rxNotReady('Key numbers'); if (nr) return nr;
   S.outline = [];
@@ -2416,7 +2288,7 @@ function pageNumbers() {
   const root = doc(h('h1', { class: 'ptitle' }, 'Key numbers'));
   root.classList.add('wide');
   if (!N) return root.append(h('p', { class: 'muted' }, 'This hub has no Key numbers page yet. It appears after the hub updates.')), root;
-  const act = async (body, msg) => { const r = await rxPost('/api/numbers', body, msg); if (r) { RX.numbers = r; RX.review = await apiGet('/api/review?days=' + (RX.rvDays || 30)).catch(() => RX.review); RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
+  const act = async (body, msg) => { const r = await rxPost('/api/numbers', body, msg); if (r) { RX.numbers = r; RX.todo = await apiGet('/api/todo').catch(() => RX.todo); renderAll(); } };
   const c = N.counts;
   root.append(h('p', { class: 'lede muted' }, 'The numbers the study rests on, each read again from its committed file and compared with what the report says.'), rxBehindNote());
   root.append(h('div', { class: 'rx-x-sum' }, h('span', null, h('b', null, c.total), ' numbers'), h('span', null, h('b', null, c.ok), ' agree'), c.mismatch ? h('span', { class: 'bad' }, h('b', null, c.mismatch), ' differ') : null,
@@ -2586,10 +2458,33 @@ function pageBaselines() {
 /* ---------- Settings (S31) ----------
    Founder (chat 2026-11-19 23:53 KST): a Settings button at the bottom left holding the FAQ, how Lemmata works and light / dark
    mode, like the settings of the Claude app. One page of sections; nothing here is a modal. */
+/* The weekly Slack digest (hub only): the webhook, on or off, the weekday, send now, and forget. Moved here from Home in S36 (the code is the old Home box's). */
+const RX_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+function rxDigestSettings() {
+  const box = h('div', { class: 'rx-digest-s' });
+  const url = (p, f) => '/api/hub/projects/' + encodeURIComponent(PID) + p;
+  const paint = () => {
+    clear(box);
+    const d = RX.hub.digest || {};
+    const input = h('input', { type: 'text', 'aria-label': 'Slack webhook URL', placeholder: d.configured ? 'A Slack webhook is saved. Paste a new one to replace it.' : 'https://hooks.slack.com/services/…' });
+    const post = async body => { try { const r = await fetch(url('/digest'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json(); if (!r.ok) throw new Error(j.error.message); RX.hub.digest = j; paint(); return true; } catch (e) { toast(e.message); return false; } };
+    const day = h('select', { 'aria-label': 'Day of the week', disabled: !d.configured }, RX_WEEKDAYS.map((w, i) => h('option', { value: String(i), selected: (d.weekday || 0) === i ? '' : null }, w)));
+    day.addEventListener('change', () => post({ weekday: +day.value }));
+    box.append(h('p', { class: 'muted' }, 'A summary of the last seven days goes to a Slack channel once a week, on the day you choose, in the morning. Create an “incoming webhook” in Slack and paste its URL. Lemmata contacts hooks.slack.com and nothing else.'),
+      h('div', { class: 'btnrow' }, input, h('button', { class: 'btn', onclick: async () => { if (input.value.trim() && await post({ webhook: input.value.trim(), enabled: true })) toast('Saved. The digest goes out on ' + RX_WEEKDAYS[d.weekday || 0] + 's.'); } }, 'Save')),
+      d.configured ? h('div', { class: 'btnrow' }, h('button', { class: 'btn', 'aria-pressed': String(!!d.enabled), onclick: () => post({ enabled: !d.enabled }) }, d.enabled ? 'On: turn off' : 'Off: turn on'), day,
+        h('button', { class: 'btn', onclick: async () => { try { const r = await fetch(url('/digest/send'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const j = await r.json(); if (!r.ok) throw new Error(j.error.message); rxTrack('digest_sent'); toast('Sent to Slack.'); } catch (e) { toast(e.message); } } }, 'Send now'),
+        h('button', { class: 'btn', onclick: () => post({ webhook: '', enabled: false }) }, 'Stop and forget the webhook')) : null,
+      d.configured ? h('div', { class: 'muted small' }, (d.enabled ? 'On. ' : 'Off. ') + (d.last_sent ? 'Last sent ' + absTime(d.last_sent) + '.' : 'Not sent yet.')) : null);
+  };
+  paint();
+  return box;
+}
 function pageSettings() {
   S.outline = [];
   const root = doc(h('h1', { class: 'ptitle' }, 'Settings'));
   const SECS = [['appearance', 'Appearance'], ['project', 'Project'], ['agents', 'Agents'], ['how', 'How Lemmata works'], ['faq', 'FAQ'], ['about', 'About']];
+  if (HUB_ON && RX.hub && !READONLY) SECS.splice(2, 0, ['digest', 'Weekly Slack digest']);      // the weekly Slack digest exists only on a hub
   const sec = (id, kids) => h('section', { class: 'st-sec', id: 'st-' + id }, h('h2', { class: 'st-h' }, SECS.find(x => x[0] === id)[1]), kids);
   const row = (label, hint, control) => h('div', { class: 'st-row' }, h('div', { class: 'st-l' }, h('div', null, label), hint ? h('div', { class: 'muted small' }, hint) : null), control ? h('div', { class: 'st-c' }, control) : null);
   root.append(h('nav', { class: 'st-nav', 'aria-label': 'Sections' }, SECS.map(([id, l]) => h('button', { class: 'linkbtn', onclick: () => { const el = document.getElementById('st-' + id); if (el) el.scrollIntoView({ block: 'start' }); } }, l))));
@@ -2604,6 +2499,7 @@ function pageSettings() {
   if (!READONLY) pk.push(row('Export report', 'A single HTML file you can share. It is a copy; it does not update.', h('a', { class: 'btn sm', href: apiUrl('/api/export'), download: '' }, 'Download')));
   hc.menu.forEach(m => pk.push(row(m.label, m.hint || null, m.fn ? h('button', { class: 'btn sm', onclick: m.fn }, /^←/.test(m.label) ? 'Open' : 'Change') : null)));
   if (pk.length) root.append(sec('project', pk));
+  if (HUB_ON && RX.hub && !READONLY) root.append(sec('digest', rxDigestSettings()));      // only where the digest exists: on a hub
   // agents for the researcher's own Claude Code
   if (!READONLY) root.append(h('section', { class: 'st-sec', id: 'st-agents' }, h('h2', { class: 'st-h' }, 'Agents for Claude Code'),
     row('LaTeX agent and paper agents', 'They run in your own Claude Code, on your own plan and model. Paste the prompt in Claude Code inside your research repository: it fetches the agent files from Lemmata and writes them to .claude/.', h('button', { class: 'btn sm', id: 'st-kit', title: KIT_PROMPT, onclick: () => copyText(KIT_PROMPT) }, 'Copy install prompt')),
