@@ -1,12 +1,13 @@
 ---
 type: handoff
 owner_agent: lead
-status: built; browser check passed on the test_map project; not yet seen on a hub, mcd_extension or temporal_dependency
+status: built; browser check passed on the test_map project; not yet seen on a hub, mcd_extension or temporal_dependency (the founder checks mcd_extension on the hub after the merge)
 sources:
   - "S36-03-task.md (acceptance lines 1-7) ; S36-01-task.md (lines 8, 12, 15) ; S36-02-handoff.md"
   - "founder answers in chat, 2026-11-23 12:58 KST (recorded in S36-03-task.md): '1. Yes. this is important. 2. instal Playwright in a temporary folder on the Mac mini 3. Yes 4. and 5. let CTO agent decide.'"
   - "founder answers in this chat, 2026-11-23, after being shown that two sessions had recorded different answers: 'Install Playwright (S36-03)' and 'Push; this session does S36-03 (Recommended)'"
   - "relayed by the other session (lemmata-30), 2026-11-23: the founder's newest instruction wins; line 2 stays as built (a feedback task joins Needs you when it points at a claim or at nothing)"
+  - "founder answers in chat, 2026-11-23, to the open questions below: '1. look at it after the merge 2. sure 3. did it 4. ok' (3 answered the request to remove the Playwright folder)"
   - "qa-S36-03-browser.md (the browser check, its measurements and re-checks) ; screenshots/ in this folder"
   - "code on branch s36-design-system: app/src/lemmata/web/{app.js,research.js,app.css}, app/src/lemmata/engine/todo.py, app/tests/{test_s36_ui.py,test_s36_home.py,test_map.py}"
 last_reviewed: 2026-11-23
@@ -51,7 +52,7 @@ Also: [Settings, after](screenshots/after-settings-light.png) · [Review with a 
 | 1 | Built (`app.js` `goHome()`, `titleGoesToProjects`; `renderTabbar()` sets the tooltip and label once the hub is known). A test covers hub, local and tab. Seen in the browser on the local server (the title opens Home). **The hub case was not run:** there is no hub on this Mac; it was checked only in the code and the test |
 | 2 | Done in `a349a64`, before this card was built: a feedback task joins Needs you when it points at a claim or at nothing. A task that points only at an experiment or file stays in the to-do list. The founder confirmed this reading (relayed by lemmata-30). The card's "claim or node" wording is superseded |
 | 3 | The approval is recorded here (sources). The Settings sentence is above. Nothing more is stored than S36-02 built |
-| 4 | Done. Playwright 1.60 and Chromium 148 were installed in a session scratchpad outside the repository on this Mac mini; nothing was added to `pyproject.toml` or `uv.lock`. **The folder is not yet removed:** the permission check refused the delete, so Juhyeong is asked to remove it. The "before" pages came from a `git archive` of `bc26f66` (not a worktree, so `.git/worktrees` was not touched), served on a throwaway local port. **`mcd_extension` was not shot:** the permission check refused the step that serves a temporary project pointing read-only at `~/mcd_extension`, and it was not tried another way. `temporal_dependency` is not on this Mac |
+| 4 | Done. Playwright 1.60 and Chromium 148 were installed in a session scratchpad outside the repository on this Mac mini; nothing was added to `pyproject.toml` or `uv.lock`. The permission check refused the delete, so **Juhyeong removed the folder** (2026-11-23), together with the `bc26f66` copy. The "before" pages came from a `git archive` of `bc26f66` (not a worktree, so `.git/worktrees` was not touched), served on a throwaway local port. **`mcd_extension` was not shot:** the permission check refused the step that serves a temporary project pointing read-only at `~/mcd_extension`, and it was not tried another way. `temporal_dependency` is not on this Mac |
 | 5 | Every defect seen was fixed or is listed below. **S36-01 line 8: checked**: no page scrolls sideways at 1360, 760 or 420px, before or after, and the Setup board and the tree keep their lines. **S36-01 line 15: checked on `test_map` only**: no overlapping labels at 1280, 1000, 760 or 420; the tree scrolls inside its frame when it overflows |
 | 6 | The CTO's decisions, one reason each: **the claim-text rule is built now** (`coverage`, in `a349a64`). The founder answered "Now" in the other chat, and it reuses the mismatch rows that already existed, so a separate card would only have re-planned built work. **Both closed blocks are dropped.** They repeated what the four sections and Needs you show; the one feature that had no other home, the weekly Slack digest, moved to Settings |
 | 7 | The Python suite passes: 287 ran, OK, 2 skipped (with the `pytest.raises` stand-in, as in S36-01/02); JavaScriptCore parses `app.js` and `research.js`. `vscode/` changed only in `a349a64`, where one stale test assertion was removed; the extension's shipped files are unchanged. Its suites were not run (no node), but the 31 checks in its unit tests that read the web files were rerun in Python and hold |
@@ -68,22 +69,24 @@ Also: [Settings, after](screenshots/after-settings-light.png) · [Review with a 
 | D9 | The tree was cut at the frame edge with no hint | "Scroll sideways to see the whole tree →", shown only when the frame overflows |
 | D10 | Settings mentioned "Mark everything as looked at" | Rewritten |
 | Copy | "dropout ?"; "5 checks found nothing" vs "Checks 7"; "Last looked at" vs "Since you last looked" | "with no value"; "5 things were checked and are fine"; "Checkpoint: none yet" |
-| D7 | At 420px the floating Settings button covers content | **Not fixed.** It was there before S36, and the card's scope is S36's changes |
-| D8 | At 420px, "+5"/"+6" overlap the dates in the experiment tables, and claim titles wrap one word per line | **Not fixed.** It was there before S36 |
+| D7 | At 420px the floating Settings button covers content | **Not fixed.** It was there before S36, and the card's scope is S36's changes. Now [S36-04](S36-04-task.md) |
+| D8 | At 420px, "+5"/"+6" overlap the dates in the experiment tables, and claim titles wrap one word per line | **Not fixed.** It was there before S36. Now [S36-04](S36-04-task.md) |
 
 No console errors in any visit, before or after.
 
 ## Not checked
 - **The title on a hub** (line 1), and anything else that needs a hub, such as two people and the Slack digest in Settings.
-- **`mcd_extension` and `temporal_dependency`** (S36-01 line 15).
+- **`mcd_extension` and `temporal_dependency`** (S36-01 line 15). The founder will look at `mcd_extension` on the hub after the merge.
 - **The VS Code extension's own suites** (no node).
 - **Real projects.** Everything was seen on the `test_map` fixture only.
 
-## Open questions for Juhyeong
-1. `mcd_extension`'s Thesis at 1280px needs a local server pointing read-only at that repository, and the permission check
-   refused it. Approve that step, or check it on the hub after the merge?
-2. D7 and D8 (narrow-window overlaps from before S36): a small follow-up card?
-3. `next` is ready for your look. Merge to main when you have checked it on the hub.
+## Open questions for Juhyeong (answered 2026-11-23)
+| # | Question | Answer |
+|---|---|---|
+| 1 | `mcd_extension`'s Thesis at 1280px needs a local server pointing read-only at that repository, and the permission check refused it. Approve that step, or check it on the hub after the merge? | **On the hub, after the merge** |
+| 2 | D7 and D8 (narrow-window overlaps from before S36): a small follow-up card? | **Yes:** [S36-04-task.md](S36-04-task.md) |
+| 3 | Remove the Playwright folder, which the permission check would not let the session delete | **Done** by the founder |
+| 4 | `next` is ready for your look. Merge to main when you have checked it on the hub | **Ok**: the merge is the founder's |
 
 ## References named
 - None borrowed in this card. The scroll hint uses the wording Setup's board already uses.
