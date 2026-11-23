@@ -1973,7 +1973,7 @@ function restoreUI() {
   if (u) {
     Object.assign(S, { leftOpen: u.leftOpen !== false, rightOpen: u.rightOpen !== false, leftW: u.leftW || 260, rightW: u.rightW || 300, treeOpen: u.treeOpen || {} });
     if (u.gf) { Object.assign(S.gf, u.gf); S.hadGf = true; }
-    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'baselines', 'settings', 'latex'].includes(t.k)); S.active = u.active != null ? u.active : 0;
+    S.tabs = (u.tabs || []).filter(t => ['changes', 'graph', 'item', 'node', 'checks', 'history', 'digest', 'review', 'claims', 'timeline', 'experiments', 'setup', 'tasks', 'ask', 'faq', 'notation', 'numbers', 'survey', 'baselines', 'settings', 'latex'].includes(t.k)); S.active = u.active != null ? u.active : 0;
   }
   if (window.LEMMATA_EMBED) { const act = S.tabs[S.active]; S.tabs = S.tabs.filter(t => BENCH_PAGES.includes(t.k)); S.active = Math.max(0, S.tabs.indexOf(act)); }
   if (!S.tabs.length) { S.tabs = [{ k: window.LEMMATA_EMBED ? 'setup' : 'digest' }]; S.active = 0; }
@@ -1988,7 +1988,7 @@ function tabTitle(t) {
   switch (t.k) {
     case 'changes': { const d = cpDate(); return d ? 'Changes since ' + d : 'Changes'; }
     case 'graph': return 'Graph'; case 'checks': return 'Checks'; case 'history': return 'History'; case 'digest': return 'Digest';
-    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': case 'baselines': case 'settings': case 'latex': return RX_TABS[t.k][1];
+    case 'review': case 'claims': case 'timeline': case 'experiments': case 'setup': case 'tasks': case 'ask': case 'faq': case 'notation': case 'numbers': case 'survey': case 'baselines': case 'settings': case 'latex': return RX_TABS[t.k][1];
     case 'item': { const it = M.byId.get(t.id); return it ? trunc(it.short || it.title, 24) : 'Item'; }
     case 'node': { const n = IX.node.get(t.id); return n ? trunc(basename(pathOf(n)), 24) : 'File'; }
   }
@@ -1999,7 +1999,7 @@ const TAB_GLYPH = { digest: '',  changes: '◔', graph: '◉', checks: '!', hist
    detail of one item or file); every other page opens on the website. This lives here, not in the extension, because the
    hub updates itself and the extension does not. */
 const BENCH_PAGES = ['experiments', 'setup', 'item', 'node'];
-const GO_PAGES = ['digest', 'experiments', 'setup', 'review', 'history', 'claims', 'baselines', 'numbers', 'changes', 'checks', 'graph', 'timeline', 'notation', 'tasks', 'latex', 'ask', 'settings'];
+const GO_PAGES = ['digest', 'experiments', 'setup', 'review', 'history', 'claims', 'survey', 'baselines', 'numbers', 'changes', 'checks', 'graph', 'timeline', 'notation', 'tasks', 'latex', 'ask', 'settings'];
 function openOnSite(k) {
   const site = window.LEMMATA_EMBED && window.LEMMATA_EMBED.site;
   if (!site) { toast('That page is on the Lemmata website.'); return; }
@@ -2056,7 +2056,7 @@ function navGo(d) {
 /* ---------- shell DOM (S18): band, one column, footer ---------- */
 /* The four top-level pages. Every other page belongs to one of them (shown as active) and is reached from a link on that page or from the footer. */
 const NAV = [['digest', 'Home'], ['experiments', 'Thesis'], ['setup', 'Setup'], ['review', 'Review'], ['history', 'Trail']];
-const NAV_OF = { claims: 'experiments', timeline: 'experiments', notation: 'experiments', graph: 'experiments', item: 'experiments', node: 'experiments', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'history', trail: 'history', ask: 'digest', review: 'review', changes: 'review', checks: 'review', numbers: 'review', baselines: 'setup' };
+const NAV_OF = { claims: 'experiments', timeline: 'experiments', notation: 'experiments', graph: 'experiments', item: 'experiments', node: 'experiments', experiments: 'experiments', setup: 'setup', digest: 'digest', tasks: 'digest', history: 'history', trail: 'history', ask: 'digest', review: 'review', changes: 'review', checks: 'review', numbers: 'review', survey: 'review', baselines: 'setup' };
 const navShort = l => l.slice(0, 1);
 function buildShell() {
   const app = $('#app');
@@ -2112,11 +2112,12 @@ function renderLeft() {
   if (!S.project) return;
   const t = S.tabs[S.active], cur = t ? t.k : null;
   const nb = RX.numbers && RX.numbers.counts ? RX.numbers.counts : null;
-  const n = { changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0, latex: RX.latex && RX.latex.counts ? RX.latex.counts.stale + RX.latex.counts.open : 0 };
+  const sv = RX.survey && RX.survey.counts ? RX.survey.counts : null;
+  const n = { survey: sv ? sv.differs + sv.still + sv.check + sv.list : 0, changes: M.todo || 0, checks: ((S.findings && S.findings.findings) || []).length, tasks: RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0, numbers: nb ? nb.mismatch + nb.missing + nb.gap + nb.proposed : 0, baselines: RX.baselines && RX.baselines.counts ? RX.baselines.counts.proposed : 0, latex: RX.latex && RX.latex.counts ? RX.latex.counts.stale + RX.latex.counts.open : 0 };
   const go = k => k === 'search' ? quickSwitcher() : openTab(k);
   const top = NAV_OF[cur] || null;
-  side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' + (k === 'digest' && RX.todo ? ' turn' : '') }, k === 'digest' && RX.todo ? h('i', { class: 'sd-dot', title: 'Waiting for you', 'aria-hidden': 'true' }) : null, b) : null); })));      // S36: only Home carries the your-turn dot, beside its count
-  SIDE.forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
+  side.append(h('div', { class: 'sd-g sd-main' }, NAV.map(([k, label]) => { const b = navBadge(k); return h('button', { class: 'sd-i' + (k === top && cur !== 'survey' && !SIDE.some(g => g[1].some(i => i[0] === cur)) ? ' on' : ''), 'aria-current': k === top ? 'page' : null, onclick: () => openTab(k) }, h('span', null, label), b ? h('span', { class: 'sd-n' + (k === 'digest' && RX.todo ? ' turn' : '') }, k === 'digest' && RX.todo ? h('i', { class: 'sd-dot', title: 'Waiting for you', 'aria-hidden': 'true' }) : null, b) : null); })));      // S36: only Home carries the your-turn dot, beside its count
+  (rxSurvey() ? [['Survey', [['survey', 'Changes to apply']]]].concat(SIDE) : SIDE).forEach(([head, items]) => side.append(h('div', { class: 'sd-g' }, h('div', { class: 'sd-h' }, head),
     items.map(([k, label]) => h('button', { class: 'sd-i' + (k === cur ? ' on' : ''), 'aria-current': k === cur ? 'page' : null, onclick: () => go(k) },
       h('span', null, label), n[k] ? h('span', { class: 'sd-n' }, n[k]) : null)))));
   side.append(h('div', { class: 'sd-g sd-foot' }, h('button', { class: 'sd-i sd-set' + (cur === 'settings' ? ' on' : ''), id: 'sd-settings', 'aria-current': cur === 'settings' ? 'page' : null, title: 'Appearance, project, how Lemmata works, FAQ', onclick: () => openTab('settings') }, h('span', null, 'Settings'))));
@@ -2142,7 +2143,7 @@ function renderPage(keepScroll) {
   const pg = $('#page'), st = window.scrollY, t = S.tabs[S.active];
   if (!t) return;
   if (GR.el && GR.el.parentNode) GR.el.parentNode.removeChild(GR.el);
-  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'review' || t.k === 'history' || t.k === 'trail' || t.k === 'numbers' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
+  clear(pg); pg.className = t.k === 'graph' ? 'graph' : t.k === 'setup' || t.k === 'experiments' || t.k === 'digest' || t.k === 'review' || t.k === 'history' || t.k === 'trail' || t.k === 'numbers' || t.k === 'survey' || t.k === 'baselines' || t.k === 'latex' ? 'wide' : '';
   S.outline = [];
   let el;
   if (S.error && !S.graph.nodes.length) el = doc(emptyState('!', 'Can\'t reach Lemmata.', 'The local server isn\'t answering. Check that Lemmata is still running, then try again.', [h('button', { class: 'btn', onclick: () => loadAll() }, 'Try again')]));
@@ -2221,7 +2222,7 @@ function renderStatus() {
   const nChecks = ((S.findings && S.findings.findings) || []).length;
   const embed = !!window.LEMMATA_EMBED;
   const link = (label, fn, extra) => h('button', Object.assign({ class: 'linkbtn flink', onclick: fn }, extra || {}), label);
-  const more = [link('Baselines', () => openTab('baselines')), link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
+  const more = [rxSurvey() ? link('Changes to apply', () => openTab('survey')) : null, link('Baselines', () => openTab('baselines')), link('Key numbers', () => openTab('numbers')), link('Changes', () => openTab('changes')), link('Checks' + (nChecks ? ' (' + nChecks + ')' : ''), () => openTab('checks')), link('Trail', () => openTab('history')), link('Graph', () => openTab('graph')),
     link('Growth', () => openTab('timeline')), link('Notation', () => openTab('notation')), link('Tasks', () => openTab('tasks')), link('LaTeX', () => openTab('latex')), link('Ask', () => openTab('ask')), link('Search', () => quickSwitcher()), link('Settings', () => openTab('settings'))];
   bar.append(h('div', { class: 'flinks' + (embed ? '' : ' dup') }, embed ? null : more, embed ? (window.LEMMATA_EMBED.site ? h('a', { class: 'flink', href: window.LEMMATA_EMBED.site, id: 'open-site' }, 'Open on website') : null) : [link('Project menu', ev => projectMenu(ev.currentTarget), { id: 'foot-menu' }), link('How Lemmata works', () => intro(true))]),
     h('div', { class: 'fstate' },

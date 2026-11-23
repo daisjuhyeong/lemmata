@@ -30,6 +30,7 @@ from . import sessions as sessionsmod
 from . import setup as setupmod
 from . import since as sincemod
 from . import study as studymod
+from . import survey as surveymod
 from . import board as boardmod
 from . import todo as todomod
 from . import trail as trailmod
@@ -268,7 +269,7 @@ class Engine:
                                               for x in sec["experiments"]]
         claimsmod.restage(doc, claimsmod.load(self.hub), tests, meta)
         self._hf_stages(doc)
-        if self.study()["kind"] == "benchmark":      # no "ours" to be ahead or behind: say what would decide the claim instead (rule C10)
+        if self.study()["kind"] in ("benchmark", "survey"):      # no "ours" to be ahead or behind: say what would decide the claim instead (rule C10)
             for c in doc["claims"]:
                 if not c.get("hypothesis") and c.get("stage_rule") == "C5":
                     c["stage_why"] = "%s. A benchmark claim is decided by its own test, and none is set for it yet." % c["stage_why"].replace(", none with a comparison yet.", " with results")
@@ -541,9 +542,9 @@ class Engine:
         if m and (detail is None or str(detail).startswith("map:")):
             return trackmod.build(m, s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self.ledger(),
                                   expmod.load(self.hub), self._github(), detail, "proposed" if d["proposed"] else "confirmed",
-                                  study=st["kind"], roles=studymod.roles_of(m))
+                                  study=self._exp_kind(st), roles=studymod.roles_of(m))
         doc = expmod.build(s["G"], s["trees"], s["infos"], s["events"], s["alarms"], s["findings"], self._claims_base(), self.ledger(),
-                           expmod.load(self.hub), self._github(), detail, study=st["kind"], roles=studymod.roles_of(None))
+                           expmod.load(self.hub), self._github(), detail, study=self._exp_kind(st), roles=studymod.roles_of(None))
         if detail is None:
             doc["map"] = {"state": "proposed" if d["proposed"] else "none"}
         return doc
@@ -791,7 +792,7 @@ class Engine:
         hf = hd["enabled"] if hd["enabled"] is not None else hypomod.wanted(src, has_paper)
         m = undmod.load(self.hub)["confirmed"]
         st = studymod.load(self.hub)
-        out = studymod.resolve(st, m, hf)
+        out = studymod.resolve(st, m, hf, survey_hint=has_paper and self._no_work_files(s))
         out.update(word=studymod.WORDS[out["kind"]], kinds=[{"k": k, "word": studymod.WORDS[k]} for k in studymod.KINDS], chosen=st["kind"],
                    roles={r: list((m or {}).get("roles", {}).get(r) or []) for r in studymod.ROLES if (m or {}).get("roles", {}).get(r)},
                    map_study=(m or {}).get("study"), ours=((m or {}).get("method") or {}).get("name") if out["kind"] == "method" else None)
@@ -799,11 +800,155 @@ class Engine:
             out["note"] = "The confirmed map names %s as the work's own method. As a benchmark study it is listed with the other compared methods." % m["method"]["name"]
         return out
 
+    @staticmethod
+    def _no_work_files(s):
+        """S37 rule Y5: every code repository holds no code and no result files (a markdown list of surveyed models, say)."""
+        codes = [r for r in s["repos"] if r["role"] == "code"]
+        if not codes:
+            return False
+        return all(studymod.no_work_files(s["trees"][r["id"]].list_files()) for r in codes)
+
+    @staticmethod
+    def _exp_kind(st):
+        """A survey has no "ours": the experiment pages read it like a benchmark study."""
+        return "benchmark" if st["kind"] == "survey" else st["kind"]
+
     def set_study(self, kind):
         st = studymod.choose(studymod.load(self.hub), kind, now_iso())
         self.hub.write_json("study.json", st)
         self._exp_cache = None
         return self.study()
+
+    # ------------------------------------------------------------------ survey papers (S37, ADR-013)
+    LIST_MD_MAX = 30
+
+    def _survey_lists(self, s):
+        """The supplementary repositories' markdown files: {path: text}, and which repository each came from."""
+        files, repo_of = {}, {}
+        for r in s["repos"]:
+            if r["role"] != "code":
+                continue
+            t = s["trees"][r["id"]]
+            for name in t.list_files():
+                if not name.lower().endswith(".md") or name.count("/") > 1 or name.startswith(".lemmata/"):
+                    continue
+                if t.size(name) > surveymod.MAX_FILE_BYTES or len(files) >= self.LIST_MD_MAX:
+                    continue
+                data = t.read(name)
+                if data is None:
+                    continue
+                key = name if name not in files else "%s/%s" % (r["id"], name)
+                files[key] = data.decode("utf-8", "replace")
+                repo_of[key] = (r["id"], name)
+        return files, repo_of
+
+    def _survey_core(self):
+        """The comparison itself, cached per scan and baseline (marks are applied on top, every time)."""
+        s = self._ensure()
+        paper = next((r for r in s["repos"] if r["role"] == "paper"), None)
+        st = surveymod.load(self.hub)
+        if paper is None:
+            return None, st
+        src = surveymod.Source(paper["abs_path"])
+        versions = src.versions()
+        if st["baseline"] is None and versions:
+            st["baseline"], st["baseline_at"] = versions[0]["sha"], now_iso()      # the first look: nothing has changed yet
+            self.hub.write_json(surveymod.STORE, st)
+        base = src.resolve(st["baseline"]) if st["baseline"] else None
+        dirty = src.dirty()
+        key = (s["scanned_at"], base, versions[0]["sha"] if versions else None, dirty)
+        c = getattr(self, "_sv_cache", None)
+        if c is not None and c[0] == key:
+            return c[1], st
+        md, repo_of = self._survey_lists(s)
+        models, datasets, lplaces = surveymod.read_list(md)
+        for p in lplaces:
+            p["repo"], p["path"] = repo_of[p["path"]]
+        base_files = src.tex_files(base) if base else {}
+        head_files = src.tex_files(None)
+        changes = surveymod.compare(base_files, head_files, lplaces, list(models))
+        head_places = [p for f in sorted(head_files) for p in surveymod.places_of(f, head_files[f])]
+        list_rows, mentions = surveymod.list_check(models, datasets, head_places)
+        for r in list_rows:
+            if r.get("source") == "list" and r["path"] in repo_of:
+                r["repo"], r["path"] = repo_of[r["path"]]
+            elif r.get("source") == "list":
+                r["repo"] = next((v[0] for k, v in repo_of.items() if v[1] == r["path"]), None)
+        core = {"paper_repo": paper["id"], "versions": versions, "base": base, "dirty": dirty, "changes": changes, "list_rows": list_rows,
+                "models": len(models), "mentioned": sum(1 for v in mentions.values() if v), "datasets": len(datasets),
+                "list_files": sorted({v[1] for v in repo_of.values()}), "tex_files": len(head_files),
+                "places": len(head_places)}
+        self._sv_cache = (key, core)
+        return core, st
+
+    def survey(self):
+        """What else must change: every change since the confirmed version, and the places that still say the old words."""
+        core, st = self._survey_core()
+        kind = self.study()["kind"]
+        if core is None:
+            return {"schema": surveymod.SCHEMA, "state": "no_paper", "kind": kind, "changes": [], "list": {"rows": []}, "counts": {}}
+        changes = copy.deepcopy(core["changes"])
+        list_rows = copy.deepcopy(core["list_rows"])
+        for ch in changes:
+            for r in ch["rows"]:
+                r["repo"] = r.pop("repo", None) or (core["paper_repo"] if r["source"] == "paper" else None)
+            if ch.get("path") is not None:
+                ch["repo"] = core["paper_repo"]
+        for r in list_rows:
+            if r.get("source") == "paper":
+                r["repo"] = core["paper_repo"]
+        rows = [r for ch in changes for r in ch["rows"]]
+        surveymod.apply_marks(rows + list_rows, st["marks"])
+        for ch in changes:
+            ch["open"] = sum(1 for r in ch["rows"] if r["shown"] in ("differs", "still", "check"))
+        by_sha = {v["sha"]: v for v in core["versions"]}
+        base = by_sha.get(core["base"]) if core["base"] else None
+        if core["base"] and not base:
+            base = {"sha": core["base"], "short": core["base"][:7], "time": None, "author": None, "subject": "(older than the last %d versions)" % surveymod.MAX_VERSIONS}
+        head = core["versions"][0] if core["versions"] else None
+        newer = 0
+        for v in core["versions"]:
+            if v["sha"] == core["base"]:
+                break
+            newer += 1
+        cnt = lambda pred: sum(1 for r in rows if pred(r))
+        return {"schema": surveymod.SCHEMA, "state": "ok", "kind": kind, "paper_repo": core["paper_repo"],
+                "baseline": base, "baseline_at": st.get("baseline_at"), "head": head, "dirty": core["dirty"], "newer": newer,
+                "versions": [dict(v, is_base=v["sha"] == core["base"], is_head=i == 0) for i, v in enumerate(core["versions"][:60])],
+                "changes": changes, "confirmed": st["confirmed"][-10:],
+                "list": {"rows": list_rows, "models": core["models"], "mentioned": core["mentioned"], "datasets": core["datasets"], "files": core["list_files"],
+                         "counts": {k: sum(1 for r in list_rows if r["kind"] == k and r["shown"] != "left") for k in ("add", "update", "not_in_paper", "two_lists", "dataset_model")}},
+                "counts": {"changes": len(changes), "differs": cnt(lambda r: r["shown"] == "differs"), "still": cnt(lambda r: r["shown"] == "still"),
+                           "check": cnt(lambda r: r["shown"] == "check"), "left": cnt(lambda r: r["shown"] == "left"),
+                           "fixed": cnt(lambda r: r["mark"] == "fixed" and r["shown"] != "still"),
+                           "list": sum(1 for r in list_rows if r["shown"] != "left" and r["kind"] != "not_in_paper"),      # the quiet rows are not counted
+                           "places": core["places"], "tex_files": core["tex_files"]}}
+
+    def survey_act(self, action, rev=None, row=None, state=None):
+        """baseline (compare with this version) | mark (a row fixed, leave or open) | confirm (this version is right)."""
+        core, st = self._survey_core()
+        if core is None:
+            raise BadRequest("this project has no paper yet")
+        if action == "baseline":
+            s = self._ensure()
+            paper = next(r for r in s["repos"] if r["role"] == "paper")
+            sha_ = surveymod.Source(paper["abs_path"]).resolve(rev)
+            if not sha_:
+                raise BadRequest("unknown version %r" % rev)
+            st["baseline"], st["baseline_at"] = sha_, now_iso()
+        elif action == "mark":
+            surveymod.mark(st, row, state, now_iso())
+        elif action == "confirm":
+            if not core["versions"]:
+                raise BadRequest("the paper has no version to confirm")
+            st["confirmed"].append({"from": core["base"], "to": core["versions"][0]["sha"], "at": now_iso(),
+                                    "open": sum(1 for ch in core["changes"] for r in ch["rows"])})
+            st["confirmed"] = st["confirmed"][-50:]
+            st["baseline"], st["baseline_at"], st["marks"] = core["versions"][0]["sha"], now_iso(), {}
+        else:
+            raise BadRequest("action must be baseline, mark or confirm")
+        self.hub.write_json(surveymod.STORE, st)
+        return self.survey()
 
     LINK_WORDS = ("supports", "contradicts", "inconclusive", "not_run")
 
@@ -1199,7 +1344,7 @@ class Engine:
         """A proposal made by rules alone, for when no agent has read the project."""
         s = self._ensure()
         doc = undmod.draft(s["G"], s["trees"], s["infos"], s["events"], self.claims())
-        if self.study()["kind"] == "benchmark":
+        if self.study()["kind"] in ("benchmark", "survey"):
             doc.update(study="benchmark", method=None)
         return self._propose(doc, "rules")
 

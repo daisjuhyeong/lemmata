@@ -5,7 +5,7 @@
 'use strict';
 const RX = { tree: null, view: 'tree', sel: null, t: 1, playing: null, claims: null, timeline: null, ledger: null, tasks: null, loaded: false, error: null, open: {}, filter: 'all', tlFilter: 'all', exFilter: 'all',
   ask: { q: '', busy: false, res: null, history: [] }, hub: null, digest: null };
-const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'], baselines: ['≡', 'Baselines'], settings: ['', 'Settings'], latex: ['', 'LaTeX'] };
+const RX_TABS = { digest: ['', 'Digest'], review: ['◎', 'Review'], notation: ['𝑥', 'Notation'], claims: ['◆', 'Claims'], timeline: ['⚑', 'Timeline'], experiments: ['▦', 'Experiments'], setup: ['⊞', 'Setup'], tasks: ['☑', 'Tasks'], ask: ['?', 'Ask'], faq: ['?', 'FAQ'], numbers: ['#', 'Key numbers'], survey: ['≠', 'Changes to apply'], baselines: ['≡', 'Baselines'], settings: ['', 'Settings'], latex: ['', 'LaTeX'] };
 const RX_VIEW_TAB = { claims: 'claims', inbox: 'changes', timeline: 'timeline', ask: 'ask' };
 const RX_STATUS = { supported: ['✓', 'Supported', 'fine'], partial: ['◐', 'Partly supported', 'look'], unsupported: ['✕', 'Not supported', 'fix'] };
 // One kind of item, a claim, moving through stages. The stage classes reuse the status colours.
@@ -17,9 +17,9 @@ function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', 
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
 /* S36 (ADR-012): every page starts with the question it answers and one line that answers it from counts the hub already
    returns. A zero is said in words. Standing explanations sit behind a "?" in their own section. */
-const RX_Q = { digest: 'What needs you today?', experiments: 'Is each claim backed?', setup: 'What was used?', review: 'What disagrees?', history: 'What did you do, and when?' };
+const RX_Q = { survey: 'What else must change?', digest: 'What needs you today?', experiments: 'Is each claim backed?', setup: 'What was used?', review: 'What disagrees?', history: 'What did you do, and when?' };
 const rxB = n => h('b', null, String(n));
-const RX_SHORT = { digest: 'Home', experiments: 'Thesis', setup: 'Setup', review: 'Review', history: 'Trail' };
+const RX_SHORT = { survey: 'Changes', digest: 'Home', experiments: 'Thesis', setup: 'Setup', review: 'Review', history: 'Trail' };
 // The VS Code tab keeps its one-word title and no answer line (vscode.css and the extension's tests know it); the website gets the question and the answer.
 function rxPageHead(question, ...answer) {
   if (EMBED) return h('h1', { class: 'ptitle' }, RX_SHORT[Object.keys(RX_Q).find(k => RX_Q[k] === question)] || question);
@@ -102,24 +102,26 @@ async function rxLoad() {
     try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
     let baselines = null; try { baselines = await apiGet('/api/baselines'); } catch (e) { /* S30: older hubs and snapshots have no Baselines page */ }
     let latex = null; try { latex = await apiGet('/api/latex'); } catch (e) { /* S31: same for the LaTeX page */ }
+    let survey = null; if (study && study.kind === 'survey') { try { survey = await apiGet('/api/survey'); } catch (e) { /* S37: older hubs have no survey check */ } }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, survey, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
 /* S29 (ADR-009): a project is a method paper (it has an "ours") or a benchmark study (it has none). One line says which,
    and the researcher can change it there. Shown on Home, Thesis and Setup. */
-const rxBench = () => !!(RX.study && RX.study.kind === 'benchmark');
+const rxBench = () => !!(RX.study && (RX.study.kind === 'benchmark' || RX.study.kind === 'survey'));
+const rxSurvey = () => !!(RX.study && RX.study.kind === 'survey');
 const ST_BY = { you: 'set by you', map: 'from the confirmed map', rule: 'Lemmata’s reading' };
 function rxStudyLine() {
   const D = RX.study; if (!D) return null;
-  const bench = D.kind === 'benchmark';
-  const set = async kind => { const r = await rxPost('/api/study', { kind }, kind === 'auto' ? 'Lemmata decides again.' : 'Now read as a ' + (kind === 'benchmark' ? 'benchmark study' : 'method paper') + '.'); if (r) { RX.study = r; RX.setup = null; await rxRefresh(); } };
+  const bench = D.kind === 'benchmark', survey = D.kind === 'survey';
+  const set = async kind => { const r = await rxPost('/api/study', { kind }, kind === 'auto' ? 'Lemmata decides again.' : 'Now read as a ' + (kind === 'benchmark' ? 'benchmark study' : kind === 'survey' ? 'survey' : 'method paper') + '.'); if (r) { RX.study = r; RX.setup = null; await rxRefresh(); } };
   const sel = READONLY ? null : h('select', { class: 'st-sel', 'aria-label': 'Kind of study' }, D.kinds.map(k => h('option', { value: k.k, selected: D.kind === k.k ? '' : null }, k.word)), D.chosen ? h('option', { value: 'auto' }, 'Let Lemmata decide') : null);
   if (sel) sel.addEventListener('change', () => set(sel.value));
   return h('div', { class: 'st-line' + (D.by === 'rule' ? ' unsure' : ''), title: D.why },
     h('span', { class: 'tag' }, 'Study'), sel || h('b', null, D.word), h('span', { class: 'muted small' }, ST_BY[D.by] || D.by),
-    (EMBED ? (t => h('span', { class: 'st-w' }, t)) : (t => rxHelp('study', t)))(bench ? 'No method of its own. Methods are compared; each claim is decided by its own test.' : 'Ours' + (D.ours ? ': ' + D.ours : '') + ', ranked against baselines.'),
+    (EMBED ? (t => h('span', { class: 'st-w' }, t)) : (t => rxHelp('study', t)))(survey ? 'No experiments. When a sentence changes, Lemmata lists every other place in the paper, the tables, the taxonomy and the model list that still says the old words (Changes to apply).' : bench ? 'No method of its own. Methods are compared; each claim is decided by its own test.' : 'Ours' + (D.ours ? ': ' + D.ours : '') + ', ranked against baselines.'),
     D.by === 'rule' && !READONLY ? h('button', { class: 'linkbtn small', title: 'Keep this reading', onclick: () => set(D.kind) }, 'Confirm') : null,
     D.note ? h('span', { class: 'muted small' }, D.note) : null);
 }
@@ -1169,6 +1171,12 @@ function pageDigest() {      // Home (S24 step 8, S36): the tab key stays 'diges
   else if (T) ans.push('No deadline is set. ');
   if (RX.todo) ans.push(h('button', { class: 'linkbtn', id: 'hm-todo-link', 'aria-expanded': String(!!RX.hmTodo), onclick: () => { RX.hmTodo = !RX.hmTodo; renderPage(true); } }, 'All to-do (' + RX.todo.counts.total + ')'));
   root.append(rxPageHead(RX_Q.digest, ans), rxBehindNote());
+  if (rxSurvey() && RX.survey && RX.survey.state === 'ok') {      // S37: a survey's main question sits at the top of Home
+    const c = RX.survey.counts, n = c.differs + c.still + c.check;
+    root.append(h('div', { class: 'hm-row sv-home' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (n ? 'err' : 'ok'), 'aria-hidden': 'true' }), n ? 'to apply' : 'in step'),
+      h('span', { class: 'hm-line' }, n ? [rxB(n), n === 1 ? ' place still says what you changed' : ' places still say what you changed', ' since the version you confirmed', RX.survey.baseline ? ' (' + RX.survey.baseline.short + ')' : '', '.'] : (c.changes ? 'Everything you changed is applied everywhere it appears.' : 'Nothing changed since the version you confirmed.')),
+      h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', onclick: () => openTab('survey') }, 'Changes to apply'))));
+  }
   if (RX.hmTodo && RX.todo) root.append(rxSection('To do', RX.todo.counts.total, null, rxTodoList(0), h('div', { class: 'btnrow' }, h('button', { class: 'linkbtn small', onclick: () => openTab('tasks') }, 'Add feedback'))));
   // Needs you: only what the researcher can settle
   const shown = RX.hmAll ? needs : needs.slice(0, NY_MORE);
@@ -2618,7 +2626,86 @@ function pageLatex() {
   }
   return root;
 }
-const RX_PAGES = { latex: pageLatex, settings: pageSettings, baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
+/* ---------- Changes to apply (S37, ADR-013) ----------
+   Founder (chat 2026-11-23 17:12 KST): "whenever I make a change to a sentence or so, the change is checked across the page so that
+   I can see where else I need to apply the change." A survey repeats its facts in the text, the tables, the taxonomy and the
+   model list. Each change since the confirmed version is listed with the places that still say the old words. */
+const SV_SHOWN = { differs: ['err', 'differs'], still: ['err', 'still differs'], check: ['warn', 'check'], left: ['ok', 'left as is'] };
+const SV_WHAT = { changed: 'Changed', added: 'Added', removed: 'Removed', label: 'Label removed' };
+const SV_LIST = { add: ['err', 'add'], update: ['err', 'update'], not_in_paper: ['warn', 'check'], two_lists: ['warn', 'check'], dataset_model: ['warn', 'check'] };
+function svHi(text, match) {
+  if (!match || !text) return text || '';
+  const i = text.toLowerCase().indexOf(match.toLowerCase());
+  if (i < 0) return text;
+  return [text.slice(0, i), h('mark', { class: 'sv-m' }, text.slice(i, i + match.length)), text.slice(i + match.length)];
+}
+function svVer(v) { return v ? [h('span', { class: 'mono' }, v.short), v.time ? ' · ' + dmon(v.time) + ' ' + v.time.slice(11, 16) : '', v.subject ? ' · ' + trunc(v.subject, 70) : ''] : '—'; }
+async function svAct(body, msg) { const r = await rxPost('/api/survey', body, msg); if (r) { RX.survey = r; renderLeft(); renderPage(true); } }
+function svMarkBtns(r) {
+  if (READONLY) return null;
+  if (r.mark) return h('button', { class: 'btn sm', title: 'Put this row back in the list', onclick: () => svAct({ action: 'mark', row: r.key, state: 'open' }) }, 'Undo');
+  return [h('button', { class: 'btn sm', title: 'You changed this place too. It is checked again with the next version.', onclick: () => svAct({ action: 'mark', row: r.key, state: 'fixed' }, 'Marked fixed. Checked again with the next version.') }, 'Fixed'),
+    h('button', { class: 'btn sm', title: 'This place should keep its words', onclick: () => svAct({ action: 'mark', row: r.key, state: 'leave' }) }, 'Leave as is')];
+}
+function svRow(r) {
+  const st = SV_SHOWN[r.shown] || SV_SHOWN.check;
+  return h('div', { class: 'hm-row sv-row' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + st[0], 'aria-hidden': 'true' }), st[1]),
+    h('span', { class: 'hm-line' }, h('div', { class: 'sv-q' + (r.source === 'list' ? ' mono small' : ' serif') }, svHi(r.quote, r.match)),
+      h('div', { class: 'muted small' }, rxWhere({ path: r.path, line: r.line, end_line: r.end }, r.repo || 'paper'), r.source === 'list' ? ' · model list (GitHub)' : r.kind === 'row' ? ' · table row' : r.kind === 'node' ? ' · taxonomy tree' : r.kind === 'heading' ? ' · heading' : '',
+        r.float ? ' · in “' + trunc(r.float, 60) + '”' : '', ' · ', r.shown === 'still' ? 'You marked it fixed, but it still says “' + r.match + '”.' : r.why)),
+    h('span', { class: 'hm-act' }, svMarkBtns(r)));
+}
+function svChange(ch) {
+  const open = RX.svOpen && RX.svOpen[ch.id];
+  const tog = () => { RX.svOpen = RX.svOpen || {}; RX.svOpen[ch.id] = !open; renderPage(true); };
+  const where = ch.path ? rxWhere({ path: ch.path, line: ch.line }, ch.repo || 'paper') : null;
+  const spans = (ch.spans || []).filter(x => x.old || x.new).slice(0, 6).map(x => h('span', { class: 'sv-sp' }, x.old ? h('del', null, x.old) : null, x.old && x.new ? ' → ' : null, x.new ? h('ins', null, x.new) : null));
+  return h('section', { class: 'sv-ch' }, h('div', { class: 'sv-h' }, h('span', { class: 'tag' }, SV_WHAT[ch.what] || ch.what), where, ch.float ? h('span', { class: 'muted small' }, 'in “' + trunc(ch.float, 50) + '”') : null,
+      h('span', { class: 'sv-sps' }, spans), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, ch.open ? plural(ch.open, 'place') + ' to look at' : ch.rows.length ? 'all handled' : 'nothing else says it'),
+      h('button', { class: 'linkbtn small', 'aria-expanded': String(!!open), onclick: tog }, open ? 'Hide before and after' : 'Before and after')),
+    open ? h('div', { class: 'sv-ba' }, ch.old ? h('div', null, h('span', { class: 'tag' }, 'before'), ' ', h('span', { class: 'serif' }, ch.old)) : null, ch.new ? h('div', null, h('span', { class: 'tag' }, 'now'), ' ', h('span', { class: 'serif' }, ch.new)) : null) : null,
+    ch.rows.map(svRow), ch.more ? h('div', { class: 'muted small sv-more' }, 'And ' + plural(ch.more, 'more place') + '.') : null);
+}
+function pageSurvey() {
+  const nr = rxNotReady('Changes to apply'); if (nr) return nr;
+  S.outline = [];
+  const D = RX.survey;
+  if (!D || D.state !== 'ok') return doc(rxPageHead(RX_Q.survey, D && D.state === 'no_paper' ? 'This project has no paper yet.' : 'Not available on this hub yet.'), rxStudyLine());
+  const c = D.counts, n = c.differs + c.still + c.check;
+  const root = doc(rxPageHead(RX_Q.survey, c.changes ? [rxB(c.changes), c.changes === 1 ? ' change' : ' changes', ' since the version you confirmed. ',
+    n ? [rxB(n), n === 1 ? ' place still says the old words.' : ' places still say the old words.'] : 'Nothing else says the old words.'] : 'Nothing changed since the version you confirmed.'), rxBehindNote(), rxStudyLine());
+  root.classList.add('wide');
+  // which two versions are compared
+  const sel = READONLY ? null : h('select', { class: 'st-sel', 'aria-label': 'Compare with this version' }, D.versions.map(v => h('option', { value: v.sha, selected: v.is_base ? '' : null }, v.short + (v.time ? ' · ' + dmon(v.time) + ' ' + v.time.slice(11, 16) : '') + ' · ' + trunc(v.subject || '', 40) + (v.is_head ? ' (newest)' : ''))));
+  if (sel) sel.addEventListener('change', () => svAct({ action: 'baseline', rev: sel.value }, 'Now comparing with ' + sel.value.slice(0, 7) + '.'));
+  const confirm = () => modal('Confirm this version', h('p', null, 'The newest version becomes the one Lemmata compares with. The rows above are cleared; a place you left as is will not be asked about again unless it changes.'),
+    [{ label: 'Cancel' }, { label: 'Confirm', primary: true, fn: () => svAct({ action: 'confirm' }, 'Confirmed. New changes are compared with this version.') }]);
+  root.append(h('div', { class: 'sv-src' },
+    h('div', null, h('span', { class: 'tag' }, 'Compared with'), ' ', sel || svVer(D.baseline), D.baseline_at ? h('span', { class: 'muted small' }, ' confirmed ' + dmon(D.baseline_at)) : null),
+    h('div', null, h('span', { class: 'tag' }, 'Now'), ' ', svVer(D.head), D.newer ? h('span', { class: 'muted small' }, ' · ' + plural(D.newer, 'newer version')) : null, D.dirty ? h('span', { class: 'muted small' }, ' · plus edits not committed yet') : null),
+    READONLY ? null : h('div', { class: 'btnrow' }, h('button', { class: 'btn sm', title: 'Fetch the newest version of the paper now', onclick: () => syncNow() }, 'Check for a new version'),
+      c.changes ? h('button', { class: 'btn sm', onclick: confirm }, 'Confirm this version') : null)));
+  const live = D.changes.filter(ch => ch.open), done = D.changes.filter(ch => !ch.open);
+  root.append(rxSection('To apply', live.length, rxHelp('sv-apply', 'A term you replaced is looked for everywhere in the paper. A fact about a model, a cited paper or a symbol is looked for only where the same model, paper or symbol appears: in the text, the tables, the taxonomy tree and the model list on GitHub. A changed number is looked for before the same word ("87 papers"). Mark a place Fixed when you changed it too, or Leave as is when it should keep its words. Rules only; no AI reads your paper here.'),
+    live.length ? live.map(svChange) : h('div', { class: 'muted hm-none' }, c.changes ? 'Every change is applied everywhere it appears.' : 'Nothing changed since the version you confirmed. Edit the paper; the next version shows up here.')));
+  if (done.length) root.append(h('details', { class: 'details rv-fine', open: RX.svDone ? '' : null, ontoggle: ev => { RX.svDone = ev.target.open; } }, h('summary', null, 'Changes with nothing else to apply', h('span', { class: 'hm-n' }, String(done.length))), done.map(svChange)));
+  // the model list on GitHub against the paper
+  const L = D.list || { rows: [] };
+  if (L.files && L.files.length) {
+    const rows = L.rows.filter(r => r.shown !== 'left'), left = L.rows.filter(r => r.shown === 'left');
+    const main = rows.filter(r => r.kind !== 'not_in_paper'), quiet = rows.filter(r => r.kind === 'not_in_paper');
+    const lrow = r => { const st = SV_LIST[r.kind] || SV_LIST.two_lists; return h('div', { class: 'hm-row sv-row' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (r.shown === 'left' ? 'ok' : st[0]), 'aria-hidden': 'true' }), r.shown === 'left' ? 'left as is' : st[1]),
+      h('span', { class: 'hm-line' }, r.why, h('div', { class: 'muted small' }, rxWhere({ path: r.path, line: r.line }, r.repo || 'paper'), r.paper ? [' · paper: ', rxWhere({ path: r.paper.path, line: r.paper.line }, 'paper')] : null)),
+      h('span', { class: 'hm-act' }, READONLY ? null : r.mark ? h('button', { class: 'btn sm', onclick: () => svAct({ action: 'mark', row: r.key, state: 'open' }) }, 'Undo') : h('button', { class: 'btn sm', onclick: () => svAct({ action: 'mark', row: r.key, state: 'leave' }) }, 'Leave as is'))); };
+    root.append(rxSection('Model list on GitHub', main.length, rxHelp('sv-list', 'The model and dataset tables in ' + L.files.join(', ') + ', read against the paper. The paper is the reference: “add” is a model the paper surveys that the list lacks, “update” a column the paper and the list share and disagree on. Lemmata never writes to the repository.'),
+      h('p', { class: 'muted small' }, plural(L.models, 'model') + ' in the list, ' + L.mentioned + ' named in the paper; ' + plural(L.datasets, 'dataset') + '.'),
+      main.length ? main.map(lrow) : h('div', { class: 'muted hm-none' }, 'The list and the paper agree.'),
+      quiet.length ? h('details', { class: 'details' }, h('summary', null, plural(quiet.length, 'model') + ' in the list that the paper never names'), quiet.map(lrow)) : null,
+      left.length ? h('details', { class: 'details' }, h('summary', null, plural(left.length, 'row') + ' left as is'), left.map(lrow)) : null));
+  }
+  return root;
+}
+const RX_PAGES = { survey: pageSurvey, latex: pageLatex, settings: pageSettings, baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

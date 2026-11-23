@@ -30,14 +30,18 @@ TEX2 = TEX1.replace("91.2", "93.4")
 class Units(unittest.TestCase):
     def test_parse_ok(self):
         for v in (PID1, PID1.upper(), "https://www.overleaf.com/project/" + PID1, " https://www.overleaf.com/project/%s/ " % PID1,
-                  "https://overleaf.com/project/%s?x=1#y" % PID1, "www.overleaf.com/project/" + PID1):
+                  "https://overleaf.com/project/%s?x=1#y" % PID1, "www.overleaf.com/project/" + PID1,
+                  # S37: the Git link from the project's Integrations -> Git dialog, as Overleaf shows it
+                  "https://git.overleaf.com/" + PID1, "https://git@git.overleaf.com/" + PID1, "git clone https://git@git.overleaf.com/" + PID1,
+                  "git.overleaf.com/" + PID1):
             self.assertEqual(parse_project(v), PID1, v)
 
     def test_parse_rejects(self):
         for v in (None, 5, "", "  ", "abc", PID1[:-1], PID1 + "0", "zz" + PID1[2:], "https://www.overleaf.com/project/abc",
                   "https://www.overleaf.com/", "http://www.overleaf.com/project/" + PID1, "https://evil.example/project/" + PID1,
                   "https://www.overleaf.com.evil.example/project/" + PID1, "https://u:p@www.overleaf.com/project/" + PID1,
-                  "https://git.overleaf.com/" + PID1, "file:///etc/passwd", "https://www.overleaf.com/project/" + PID1 + "x"):
+                  "http://git.overleaf.com/" + PID1, "https://evil@git.overleaf.com/" + PID1, "https://git:pw@git.overleaf.com/" + PID1,
+                  "https://git.overleaf.com/" + PID1 + "/x", "https://git.overleaf.com:8443/" + PID1, "file:///etc/passwd", "https://www.overleaf.com/project/" + PID1 + "x"):
             with self.assertRaises(OverleafError, msg=repr(v)) as cm:
                 parse_project(v)
             self.assertEqual((cm.exception.status, cm.exception.code), (400, "bad_request"))

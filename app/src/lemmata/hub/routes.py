@@ -385,8 +385,10 @@ class HubHandler(Handler):
                 ext = extension_build()
                 if ext:      # S35: the extension offers its own update from here
                     st["extension"] = {"version": ext["version"], "path": "/api/hub/extension.vsix"}
-            if hub.mgr.overleaf_on() and not pub:
+            if hub.mgr.overleaf_on() and (not pub or self._is_admin(dev)):
                 st["overleaf_configured"] = hub.mgr.ol.configured()
+            if self._is_admin(dev):      # S37: the owner can switch Overleaf on from the new-project page
+                st["overleaf_enabled"] = hub.mgr.overleaf_on()
             return self._json(st)
         if (method, r) == ("GET", "/extension.vsix"):
             if not dev:
@@ -519,9 +521,19 @@ class HubHandler(Handler):
             out = hub.ab_summary()
             out["accounts"] = len(hub.gh.logins())
             return self._json(out)
-        # --- Overleaf token (never echoed back)
-        if r.startswith("/overleaf") and (pub or not self._is_admin(dev)):
+        # --- Overleaf token (never echoed back). Only the hub's owner, also through the public address (S37: the owner works there;
+        # the session is the owner's GitHub sign-in and the address is https). Everyone else gets 404.
+        if r.startswith("/overleaf") and not self._is_admin(dev):
             raise ApiError(404, "not_found", "unknown route")
+        if r == "/overleaf/enabled":      # S37: the owner switches the feature on or off here (default off, as since S06)
+            if method == "PUT":
+                body = self._body()
+                if not isinstance(body.get("enabled"), bool):
+                    raise ApiError(400, "bad_request", "enabled must be true or false")
+                hub.cfg.update(overleaf_enabled=body["enabled"])
+            elif method != "GET":
+                raise ApiError(405, "method_not_allowed", "method not allowed")
+            return self._json({"enabled": hub.mgr.overleaf_on(), "configured": hub.mgr.ol.configured() if hub.mgr.overleaf_on() else None})
         if r.startswith("/overleaf") and not hub.mgr.overleaf_on():
             return self._json({"error": "feature_disabled"}, 404)
         if r == "/overleaf/token":

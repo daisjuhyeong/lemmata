@@ -188,7 +188,10 @@ class StudyKindTest(StudyBase):
         s = self.e.set_study("auto")
         self.assertEqual((s["kind"], s["by"], s["chosen"]), ("benchmark", "rule", None))
         with self.assertRaises(BadRequest):
-            self.e.set_study("survey")
+            self.e.set_study("review")
+        self.assertEqual(self.e.set_study("survey")["kind"], "survey")      # S37: a third kind
+        self.assertEqual(self.e.experiments()["study"], "benchmark")       # no "ours": the experiment pages read it like a benchmark
+        self.e.set_study("auto")
 
     def test_no_ours_without_a_map(self):
         """The case that started this: with no map, every label column was a list of methods and one of them was "ours"."""

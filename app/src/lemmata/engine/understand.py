@@ -381,10 +381,10 @@ def verify(doc, G, trees, infos, claims_doc):
     for k in sorted(set(doc) - {"schema", "study", "method", "base", "goal", "roles", "questions", "experiments", "ignore", "proposed_by"}):
         note("dropped", "map", "unknown field %r (the map has: study, method, base, goal, roles, questions, experiments, ignore)" % str(k)[:30])
     # the kind of study (S29): a benchmark study has no method of its own
-    if doc.get("study") in studymod.KINDS:
+    if doc.get("study") in studymod.MAP_KINDS:
         out["study"] = doc["study"]
     elif doc.get("study") is not None:
-        note("dropped", "study", "study must be one of %s" % ", ".join(studymod.KINDS))
+        note("dropped", "study", "study must be one of %s" % ", ".join(studymod.MAP_KINDS))
     bench = out["study"] == "benchmark"
     for k in sorted(set(doc.get("method") or {}) - {"name", "aliases", "evidence", "note"} if isinstance(doc.get("method"), dict) else []):
         note("dropped", "method", "unknown field %r inside method%s" % (str(k)[:30], "; base and goal go at the top level of the map" if k in ("base", "goal") else ""))
@@ -636,8 +636,8 @@ def edit(m, patch):
         raise BadRequest("the change must be an object")
     m = {k: (dict(v) if isinstance(v, dict) else [dict(x) if isinstance(x, dict) else x for x in v] if isinstance(v, list) else v) for k, v in m.items()}
     if "study" in patch:
-        if patch["study"] not in studymod.KINDS + (None,):
-            raise BadRequest("study must be one of %s" % ", ".join(studymod.KINDS))
+        if patch["study"] not in studymod.MAP_KINDS + (None,):
+            raise BadRequest("study must be one of %s" % ", ".join(studymod.MAP_KINDS))
         m["study"] = patch["study"]
         if m["study"] == "benchmark":
             m["method"], m["base"], m["goal"] = None, None, None

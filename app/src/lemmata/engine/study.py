@@ -16,8 +16,13 @@ from .errors import BadRequest
 from .experiments import norm
 
 SCHEMA = "lemmata.study/1"
-KINDS = ("method", "benchmark")
-WORDS = {"method": "Method paper", "benchmark": "Benchmark study"}
+KINDS = ("method", "benchmark", "survey")
+MAP_KINDS = ("method", "benchmark")      # what a project map may say; a survey is chosen by the researcher or by rule Y5
+WORDS = {"method": "Method paper", "benchmark": "Benchmark study", "survey": "Survey"}
+# S37: files that mean a repository holds code or results. A repository with none of them (a list of surveyed models in
+# markdown, say) next to a paper is read as a survey.
+WORK_EXT = (".py", ".ipynb", ".r", ".m", ".jl", ".sh", ".c", ".cc", ".cpp", ".h", ".hpp", ".java", ".js", ".ts", ".go", ".rs", ".scala",
+            ".csv", ".tsv", ".npy", ".npz", ".pt", ".pth", ".ckpt", ".pkl", ".h5", ".hdf5", ".parquet", ".log", ".jsonl")
 ROLES = ("method", "condition", "dataset", "group", "seed")     # in the order a column is classified
 DEFAULT_ROLES = {
     "method": ("model", "method", "detector", "algorithm", "algo", "approach", "baseline", "learner", "classifier", "system"),
@@ -40,15 +45,20 @@ def load(hub):
 
 
 def choose(store, kind, at):
-    """The researcher's own choice. kind: method | benchmark | auto (auto: forget the choice, let the map or the rule decide)."""
+    """The researcher's own choice. kind: method | benchmark | survey | auto (auto: forget the choice, let the map or the rule decide)."""
     if kind not in KINDS + ("auto",):
         raise BadRequest("study must be one of %s, or auto" % ", ".join(KINDS))
     store["kind"], store["at"] = (None if kind == "auto" else kind), at
     return store
 
 
-def resolve(store, confirmed_map, hypothesis_first):
-    """-> {kind, by: you | map | rule, why}. Rules Y1-Y4 (ADR-009)."""
+def no_work_files(names):
+    """True when none of these file names is code or a result file."""
+    return not any(n.lower().endswith(WORK_EXT) for n in names)
+
+
+def resolve(store, confirmed_map, hypothesis_first, survey_hint=False):
+    """-> {kind, by: you | map | rule, why}. Rules Y1-Y4 (ADR-009), Y5 (S37)."""
     k = (store or {}).get("kind")
     if k in KINDS:
         return {"kind": k, "by": "you", "rule": "Y1", "why": "Set by you."}
@@ -57,6 +67,9 @@ def resolve(store, confirmed_map, hypothesis_first):
         return {"kind": m["study"], "by": "map", "rule": "Y2", "why": "The confirmed project map says so."}
     if m.get("method"):
         return {"kind": "method", "by": "map", "rule": "Y2", "why": "The confirmed project map names a method of its own (%s)." % m["method"]["name"]}
+    if survey_hint:
+        return {"kind": "survey", "by": "rule", "rule": "Y5",
+                "why": "A paper, and a repository with no code and no result files: read as a survey. Change it if the work runs experiments."}
     if hypothesis_first:
         return {"kind": "benchmark", "by": "rule", "rule": "Y3",
                 "why": "No paper and no method of its own named: read as a study that compares existing methods. Change it if the work proposes a method."}

@@ -241,7 +241,7 @@
       if (ps.subdir) return 'Paper: the folder ' + ps.subdir + '/ ' + (same ? 'in your code repo' : 'in ' + ps.repo) + ' (GitHub)';
       return 'Paper: GitHub repo ' + ps.repo;
     }
-    if (ps.kind === 'overleaf') return 'Paper: Overleaf project (no longer supported here)';
+    if (ps.kind === 'overleaf') return 'Paper: Overleaf project (Git)' + (v ? ', ' + v + (v === 1 ? ' version' : ' versions') : '');
     return v ? 'Paper: uploaded zip, version ' + v : 'No paper yet';
   }
   async function viewHome() {
@@ -386,13 +386,17 @@
     const drop = h('div', { class: 'drop', id: 'drop' }, dropMsg);
     const progress = h('div', { class: 'hidden', id: 'progress' });
     const form = h('div');
-    const repoBox = h('div', { id: 'paper-repo-box' }), folderBox = h('div', { id: 'paper-folder-box' }), zipBox = h('div', { id: 'zip-box' });
+    const repoBox = h('div', { id: 'paper-repo-box' }), folderBox = h('div', { id: 'paper-folder-box' }), zipBox = h('div', { id: 'zip-box' }), olBox = h('div', { id: 'overleaf-box' });
+    // S37: a paper written in Overleaf, followed through Overleaf's Git (the owner of this hub only; the token is the hub's)
+    const olUrl = h('input', { type: 'text', id: 'ol-url', autocomplete: 'off', spellcheck: 'false', placeholder: 'https://git.overleaf.com/…', 'aria-label': 'Git link of the Overleaf project' });
+    const olTok = h('input', { type: 'password', id: 'ol-token', autocomplete: 'off', spellcheck: 'false', placeholder: 'olp_…', 'aria-label': 'Overleaf Git token' });
+    let olReplace = false;
     const tabs = h('div', { class: 'seg', role: 'group', 'aria-label': 'Where your paper lives' });
-    const MODES = [['repo', 'A GitHub repo of its own'], ['folder', 'A folder in the code repo'], ['zip', 'Upload a zip instead']];
+    const MODES = (S.status.is_admin ? [['overleaf', 'Overleaf (Git)']] : []).concat([['repo', 'A GitHub repo of its own'], ['folder', 'A folder in the code repo'], ['zip', 'Upload a zip instead']]);
     function paintMode() {
       clear(tabs).append(...MODES.map(([k, label]) =>
         h('button', { class: 'btn sm', 'aria-pressed': String(mode === k), onclick: () => { mode = k; clear(errs); paintMode(); } }, label)));
-      repoBox.classList.toggle('hidden', mode !== 'repo'); folderBox.classList.toggle('hidden', mode !== 'folder'); zipBox.classList.toggle('hidden', mode !== 'zip');
+      repoBox.classList.toggle('hidden', mode !== 'repo'); folderBox.classList.toggle('hidden', mode !== 'folder'); zipBox.classList.toggle('hidden', mode !== 'zip'); olBox.classList.toggle('hidden', mode !== 'overleaf');
     }
     function paintDrop() {
       clear(dropMsg);
@@ -432,7 +436,13 @@
       paper_branch_not_found: 'That repository has no branch with that name.',
       paper_subdir_missing: 'The code repo has no folder with that name. Type the folder that holds your main .tex file, for example paper.',
       paper_too_large: 'That paper repository is too large to copy.',
-      feature_disabled: 'That option is switched off.'
+      feature_disabled: 'That option is switched off.',
+      overleaf_token_missing: 'Paste your Overleaf Git token below first.',
+      overleaf_auth_failed: 'Overleaf refused the token for that project. Check that the token is current (they expire after a year) and that the project is shared with your Overleaf account.',
+      overleaf_not_found: 'Overleaf has no project with that link. Copy the link again from the project’s Integrations → Git.',
+      overleaf_rate_limited: 'Overleaf asks Lemmata to slow down. Try again in a few minutes.',
+      overleaf_unavailable: 'Overleaf is not reachable from the hub right now. Try again in a few minutes.',
+      overleaf_too_large: 'That Overleaf project is larger than 500 MB.'
     };
     const plain = e => PLAIN[e.code] || e.message;
     function back() { busy = false; progress.classList.add('hidden'); form.classList.remove('hidden'); createBtn.disabled = false; }
@@ -441,7 +451,17 @@
       if (!cp || busy) return;
       const body = { code_repo: cp.full_name, branch: branchSel.value || cp.default_branch };
       paperKind = 'none';
-      if (mode === 'repo' && paper.picked) {
+      if (mode === 'overleaf') {
+        const url = olUrl.value.trim();
+        if (!url) { clear(errs).append(errBox('Paste the Git link of your Overleaf project: in Overleaf open the project, then Integrations → Git.')); return; }
+        const needTok = !S.status.overleaf_configured || olReplace;
+        if (needTok && !olTok.value.trim()) { clear(errs).append(errBox('Paste your Overleaf Git token. In Overleaf: Account Settings → Git integration, or Generate token in the project’s Git dialog.')); return; }
+        try {
+          if (!S.status.overleaf_enabled) { await api('PUT', '/api/hub/overleaf/enabled', { enabled: true }); S.status.overleaf_enabled = true; }
+          if (needTok) { await api('PUT', '/api/hub/overleaf/token', { token: olTok.value.trim() }); olTok.value = ''; S.status.overleaf_configured = true; olReplace = false; paintOl(); }
+        } catch (e) { clear(errs).append(errBox(plain(e))); return; }
+        paperKind = 'overleaf'; body.paper_overleaf = url;
+      } else if (mode === 'repo' && paper.picked) {
         paperKind = 'github'; body.paper_repo = paper.picked.full_name; body.paper_branch = paper.picked.default_branch;
       } else if (mode === 'folder') {
         const sd = sub.value.trim().replace(/^\/+|\/+$/g, '');
@@ -479,11 +499,11 @@
       h('div', { class: 'crumb' }, h('button', { class: 'linkbtn', onclick: () => { S.view = 'home'; route(); } }, '← Projects')),
       h('h1', null, 'New project'),
       h('h3', null, 'Step 1 · Your code'),
-      h('p', { class: 'muted' }, 'Pick the GitHub repository with your experiments: scripts, settings and results.'),
+      h('p', { class: 'muted' }, 'Pick the GitHub repository with your experiments: scripts, settings and results. For a survey: the repository with your list of surveyed models.'),
       code.box, branchBox,
       h('h3', null, 'Step 2 · Your paper (you can add it later)'),
       h('p', { class: 'muted' }, 'Where is the LaTeX source of your paper?'),
-      tabs, repoBox, folderBox, zipBox, errs,
+      tabs, olBox, repoBox, folderBox, zipBox, errs,
       h('div', { class: 'acts' }, createBtn));
     repoBox.append(
       h('p', { class: 'muted' }, 'Your LaTeX paper in its own GitHub repo. Pick it below. Lemmata reads the .tex files as they are on GitHub; it does not compile them.'),
@@ -491,6 +511,16 @@
     folderBox.append(
       h('p', { class: 'muted' }, 'Your paper sits in a folder inside the code repo you picked in step 1. Type that folder’s name.'),
       h('label', { class: 'field' }, h('span', null, 'Folder name'), sub));
+    function paintOl() {
+      clear(olBox).append(
+        h('p', { class: 'muted' }, 'For a paper you write in Overleaf. In Overleaf open the project, then Integrations → Git, and paste the link it shows. Lemmata fetches the paper every few minutes and compares each version with the one you confirmed. It only reads; it never writes to Overleaf.'),
+        h('label', { class: 'field' }, h('span', null, 'Git link of the Overleaf project'), olUrl),
+        S.status.overleaf_configured && !olReplace
+          ? h('p', { class: 'muted small' }, 'Your Overleaf Git token is saved on this hub. ', h('button', { class: 'linkbtn small', onclick: () => { olReplace = true; paintOl(); } }, 'Use a new token'))
+          : [h('label', { class: 'field' }, h('span', null, 'Overleaf Git token'), olTok),
+            h('p', { class: 'muted small' }, 'Make one in Overleaf: Account Settings → Git integration, or Generate token in the project’s Git dialog. It is kept on this hub only and never shown again. Overleaf tokens expire after a year.')]);
+    }
+    paintOl();
     zipBox.append(h('p', { class: 'muted' }, 'For a paper that lives in Overleaf: in Overleaf choose Menu → Download → Source and drop that zip here. It is a snapshot. Lemmata reads the claims, proofs, tables and figures from it, but will not see later edits until you upload a new zip.'), drop, fileIn);
     paintMode();
     root.append(form, progress);

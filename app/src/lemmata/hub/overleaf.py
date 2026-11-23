@@ -11,7 +11,7 @@ from .config import read_json, write_private
 OVERLEAF_HOST = "https://git.overleaf.com"
 ID_RE = re.compile(r"^[0-9a-f]{24}$")
 SHARE_MSG = "Use the project link from your Overleaf dashboard, not a share link."
-BAD_ID_MSG = "That is not an Overleaf project: paste https://www.overleaf.com/project/<24-character id> or the id itself."
+BAD_ID_MSG = "That is not an Overleaf project: paste the Git link from the project's Integrations → Git (https://git.overleaf.com/<24-character id>), the project's address https://www.overleaf.com/project/<id>, or the id itself."
 
 
 class OverleafError(Exception):
@@ -21,16 +21,25 @@ class OverleafError(Exception):
 
 
 def parse_project(value):
-    """Project id from a `https://www.overleaf.com/project/<24hex>` URL or a bare 24-hex id; share links are refused."""
+    """Project id from a `https://www.overleaf.com/project/<24hex>` URL, the Git URL `https://git.overleaf.com/<24hex>` (with or
+    without `git@`, or the whole `git clone ...` line), or a bare 24-hex id; share links are refused."""
     if not isinstance(value, str) or not value.strip() or len(value) > 500:
         raise OverleafError(400, "bad_request", BAD_ID_MSG)
     v = value.strip()
     if ID_RE.match(v.lower()):
         return v.lower()
-    if "://" not in v and v.startswith(("www.overleaf.com/", "overleaf.com/")):
+    if "://" not in v and v.startswith(("www.overleaf.com/", "overleaf.com/", "git.overleaf.com/", "git@git.overleaf.com/")):
         v = "https://" + v
+    if v.lower().startswith("git clone "):
+        v = v[len("git clone "):].strip()
     u = urlsplit(v)
     host = (u.hostname or "").lower()
+    # S37: the Git URL from the project's Integrations -> Git dialog, https://git@git.overleaf.com/<id> or https://git.overleaf.com/<id>
+    if host == "git.overleaf.com" and u.scheme == "https" and u.username in (None, "git") and not u.password and u.port in (None, 443):
+        parts = [x for x in u.path.split("/") if x]
+        if len(parts) == 1 and ID_RE.match(parts[0].lower()):
+            return parts[0].lower()
+        raise OverleafError(400, "bad_request", BAD_ID_MSG)
     if u.scheme != "https" or u.username or u.password or u.port not in (None, 443) or host not in ("www.overleaf.com", "overleaf.com"):
         raise OverleafError(400, "bad_request", BAD_ID_MSG)
     parts = [x for x in u.path.split("/") if x]
