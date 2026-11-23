@@ -17,9 +17,9 @@ function rxStageChip(c) { const k = RX_STAGE[c.stage] ? c.stage : 'hypothesis', 
 function rxScopeTag(c) { const s = RX_SCOPE[c.scope]; return s ? h('span', { class: 'tag', title: s[1] }, s[0]) : null; }
 /* S36 (ADR-012): every page starts with the question it answers and one line that answers it from counts the hub already
    returns. A zero is said in words. Standing explanations sit behind a "?" in their own section. */
-const RX_Q = { survey: 'What else must change?', digest: 'What needs you today?', experiments: 'Is each claim backed?', setup: 'What was used?', review: 'What disagrees?', history: 'What did you do, and when?' };
+const RX_Q = { svmap: 'What does the survey claim?', survey: 'What else must change?', digest: 'What needs you today?', experiments: 'Is each claim backed?', setup: 'What was used?', review: 'What disagrees?', history: 'What did you do, and when?' };
 const rxB = n => h('b', null, String(n));
-const RX_SHORT = { survey: 'Changes', digest: 'Home', experiments: 'Thesis', setup: 'Setup', review: 'Review', history: 'Trail' };
+const RX_SHORT = { svmap: 'Thesis', survey: 'Changes', digest: 'Home', experiments: 'Thesis', setup: 'Setup', review: 'Review', history: 'Trail' };
 // The VS Code tab keeps its one-word title and no answer line (vscode.css and the extension's tests know it); the website gets the question and the answer.
 function rxPageHead(question, ...answer) {
   if (EMBED) return h('h1', { class: 'ptitle' }, RX_SHORT[Object.keys(RX_Q).find(k => RX_Q[k] === question)] || question);
@@ -102,9 +102,13 @@ async function rxLoad() {
     try { numbers = await apiGet('/api/numbers'); } catch (e) { /* the page says so */ }
     let baselines = null; try { baselines = await apiGet('/api/baselines'); } catch (e) { /* S30: older hubs and snapshots have no Baselines page */ }
     let latex = null; try { latex = await apiGet('/api/latex'); } catch (e) { /* S31: same for the LaTeX page */ }
-    let survey = null; if (study && study.kind === 'survey') { try { survey = await apiGet('/api/survey'); } catch (e) { /* S37: older hubs have no survey check */ } }
+    let survey = null, svmap = null;
+    if (study && study.kind === 'survey') {
+      try { survey = await apiGet('/api/survey'); } catch (e) { /* S37: older hubs have no survey check */ }
+      try { svmap = await apiGet('/api/survey/map'); } catch (e) { /* S37: older hubs have no survey map */ }
+    }
     if (!READONLY) { try { RX.plans = await apiGet('/api/plans'); } catch (e) { RX.plans = null; } }
-    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, survey, loaded: true, error: null });
+    Object.assign(RX, { claims, timeline, ledger, tasks, tree, notation, experiments, map, setup, todo, trail, hf, study, numbers, baselines, latex, survey, svmap, loaded: true, error: null });
   } catch (e) { RX.loaded = true; RX.error = e.status === 501 ? 'Not available on sample data.' : e.message; }
 }
 async function rxRefresh(render) { await rxLoad(); if (render !== false) { renderLeft(); renderPage(true); renderStatus(); } }
@@ -1176,6 +1180,14 @@ function pageDigest() {      // Home (S24 step 8, S36): the tab key stays 'diges
     root.append(h('div', { class: 'hm-row sv-home' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (n ? 'err' : 'ok'), 'aria-hidden': 'true' }), n ? 'to apply' : 'in step'),
       h('span', { class: 'hm-line' }, n ? [rxB(n), n === 1 ? ' place still says what you changed' : ' places still say what you changed', ' since the version you confirmed', RX.survey.baseline ? ' (' + RX.survey.baseline.short + ')' : '', '.'] : (c.changes ? 'Everything you changed is applied everywhere it appears.' : 'Nothing changed since the version you confirmed.')),
       h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', onclick: () => openTab('survey') }, 'Changes to apply'))));
+    const SM = RX.svmap, mc = SM ? SM.counts : null;
+    if (SM) root.append(h('div', { class: 'hm-row sv-home' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (SM.state === 'confirmed' && !mc.changed && !mc.taxonomy ? 'ok' : SM.state === 'none' ? 'warn' : 'err'), 'aria-hidden': 'true' }),
+        SM.state === 'proposed' ? 'to confirm' : SM.state === 'none' ? 'not mapped' : mc.changed || mc.taxonomy ? 'to look at' : 'in step'),
+      h('span', { class: 'hm-line' }, SM.state === 'none' ? 'The survey’s claims and taxonomy are not mapped yet. Your own agent reads the paper and proposes them.'
+        : SM.state === 'proposed' ? [rxB(mc.proposed), (mc.proposed === 1 ? ' claim' : ' claims') + ' proposed by ' + (SM.proposed_by || 'your agent') + '. Nothing counts until you confirm.']
+        : [rxB(mc.claims), mc.claims === 1 ? ' claim' : ' claims', ', ' + plural(mc.axes, 'taxonomy axis', 'taxonomy axes') + '. ', mc.changed ? [rxB(mc.changed), mc.changed === 1 ? ' claim rests on a sentence that changed. ' : ' claims rest on sentences that changed. '] : '',
+          mc.taxonomy ? [rxB(mc.taxonomy), mc.taxonomy === 1 ? ' place puts a model in another category.' : ' places put a model in another category.'] : (mc.changed ? '' : 'Everything is in step.')]),
+      h('span', { class: 'hm-act' }, h('button', { class: 'btn sm', onclick: () => openTab('experiments') }, 'Claims and taxonomy'))));
   }
   if (RX.hmTodo && RX.todo) root.append(rxSection('To do', RX.todo.counts.total, null, rxTodoList(0), h('div', { class: 'btnrow' }, h('button', { class: 'linkbtn small', onclick: () => openTab('tasks') }, 'Add feedback'))));
   // Needs you: only what the researcher can settle
@@ -2685,6 +2697,12 @@ function pageSurvey() {
     h('div', null, h('span', { class: 'tag' }, 'Now'), ' ', svVer(D.head), D.newer ? h('span', { class: 'muted small' }, ' · ' + plural(D.newer, 'newer version')) : null, D.dirty ? h('span', { class: 'muted small' }, ' · plus edits not committed yet') : null),
     READONLY ? null : h('div', { class: 'btnrow' }, h('button', { class: 'btn sm', title: 'Fetch the newest version of the paper now', onclick: () => syncNow() }, 'Check for a new version'),
       c.changes ? h('button', { class: 'btn sm', onclick: confirm }, 'Confirm this version') : null)));
+  const SM = RX.svmap;      // claims of the confirmed map whose sentences changed: the first thing to look at
+  if (SM && SM.state !== 'none' && SM.claims && SM.claims.some(x => x.state === 'changed')) {
+    const ch = SM.claims.filter(x => x.state === 'changed');
+    root.append(rxSection('Claims resting on changed sentences', ch.length, null, ch.map(x => smClaim(SM.confirmed, x, true)),
+      h('div', { class: 'muted small' }, h('button', { class: 'linkbtn small', onclick: () => openTab('experiments') }, 'Open the claims and taxonomy'))));
+  }
   const live = D.changes.filter(ch => ch.open), done = D.changes.filter(ch => !ch.open);
   root.append(rxSection('To apply', live.length, rxHelp('sv-apply', 'A term you replaced is looked for everywhere in the paper. A fact about a model, a cited paper or a symbol is looked for only where the same model, paper or symbol appears: in the text, the tables, the taxonomy tree and the model list on GitHub. A changed number is looked for before the same word ("87 papers"). Mark a place Fixed when you changed it too, or Leave as is when it should keep its words. Rules only; no AI reads your paper here.'),
     live.length ? live.map(svChange) : h('div', { class: 'muted hm-none' }, c.changes ? 'Every change is applied everywhere it appears.' : 'Nothing changed since the version you confirmed. Edit the paper; the next version shows up here.')));
@@ -2705,7 +2723,78 @@ function pageSurvey() {
   }
   return root;
 }
-const RX_PAGES = { survey: pageSurvey, latex: pageLatex, settings: pageSettings, baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: pageExperiments, setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
+/* ---------- Claims and taxonomy (S37) ----------
+   Founder (chat 2026-11-23 18:08 KST): "for a survey, the claim is the most important thing, along with the taxonomy that is
+   organizing. Use AI to fully understand the paper and re-organize the key claims." The researcher's own agent reads the whole
+   paper and proposes the map; Lemmata checks every quote, cite key and model against the paper; the researcher confirms.
+   For a survey this is the Thesis page. */
+const SM_KIND = { contribution: 'contribution', finding: 'finding', position: 'position', gap: 'gap', trend: 'trend', definition: 'definition', limitation: 'limitation', future: 'future work' };
+const SM_PROMPT = name => 'Use the Lemmata MCP server for the project "' + name + '". Call survey_brief with page=1 and read every page until next_page is empty. ' +
+  'Then, following the guide in survey_brief, re-organise the survey: its thesis, its research questions with their answers, its key claims (each with short exact quotes, the cite keys behind it and the taxonomy categories it is about) and its taxonomy (axes, categories with definitions, and the models in each). ' +
+  'Submit it with propose_survey_map. If the checker drops anything, fix it and propose again. Tell me when it is ready to confirm in Lemmata.';
+async function smAct(body, msg) { const r = await rxPost('/api/survey/map', body, msg); if (r) { RX.svmap = r; try { RX.survey = await apiGet('/api/survey'); } catch (e) { /* keep */ } renderLeft(); renderPage(true); } }
+function smWhere(ws) { return (ws || []).map((w, i) => [i ? ' ' : '', rxWhere({ path: w.path, line: w.line }, (RX.survey && RX.survey.paper_repo) || 'paper')]); }
+function smCatName(M, id) { for (const a of M.taxonomy || []) for (const c of a.categories) if (c.id === id) return c.name; return id; }
+function smClaim(M, c, live) {
+  const changed = live && c.state === 'changed';
+  return h('div', { class: 'hm-row sm-claim', id: 'sm-' + c.id.replace(/[^\w]/g, '_') },
+    h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (live ? (changed ? 'err' : 'ok') : 'warn'), 'aria-hidden': 'true' }), live ? (changed ? 'changed' : 'in step') : 'proposed'),
+    h('span', { class: 'hm-line' }, h('div', { class: 'serif sm-t' }, h('span', { class: 'tag' }, c.id), ' ', rxMath(c.text)),
+      h('div', { class: 'muted small' }, h('span', { class: 'tag' }, SM_KIND[c.kind] || c.kind), ' ', smWhere(c.where),
+        c.cites.length ? h('span', { title: c.cites.join(', ') }, ' · ' + plural(c.cites.length, 'cited paper')) : null,
+        c.taxonomy.length ? [' · ', c.taxonomy.map(t => h('span', { class: 'tag sm-cat' }, smCatName(M, t)))] : null),
+      changed ? h('div', { class: 'rx-tl warn small' }, 'The sentence behind it changed: “' + trunc(c.gone[0].quote, 90) + '” is no longer at ' + c.gone[0].path + ':' + c.gone[0].line + '. Check the claim still holds.') : null),
+    h('span', { class: 'hm-act' }));
+}
+function smMap(M, live) {
+  const out = [], claims = live ? RX.svmap.claims : M.claims;
+  if (M.thesis) out.push(h('div', { class: 'sm-thesis serif' }, rxMath(M.thesis)));
+  const byQ = {}; claims.forEach(c => { (byQ[c.question || ''] = byQ[c.question || ''] || []).push(c); });
+  (M.questions || []).forEach(q => out.push(h('section', { class: 'sm-q' }, h('h3', null, h('span', { class: 'tag' }, q.id), ' ', q.text),
+    q.answer ? h('p', { class: 'sm-a' }, q.answer, ' ', smWhere(q.where)) : null,
+    (byQ[q.id] || []).map(c => smClaim(M, c, live)), (byQ[q.id] || []).length ? null : h('div', { class: 'muted hm-none' }, 'No claim answers this question.'))));
+  if ((byQ[''] || []).length) out.push(h('section', { class: 'sm-q' }, h('h3', null, (M.questions || []).length ? 'Other claims' : 'Claims'), byQ[''].map(c => smClaim(M, c, live))));
+  const T = M.taxonomy || [];
+  if (T.length) out.push(rxSection('Taxonomy', T.length, rxHelp('sm-tax', 'The survey’s own organisation: each axis it classifies methods by, its categories and the models it puts in each. When a sentence, a table row or the tree names one model and another category of the same axis, it is listed under “Placed differently”.'),
+    T.map(a => h('div', { class: 'sm-axis' }, h('h4', null, a.name, ' ', smWhere(a.where)),
+      h('div', { class: 'sm-cats' }, a.categories.map(c => h('div', { class: 'sm-catc' }, h('b', null, c.name), ' ', smWhere(c.where),
+        c.definition ? h('div', { class: 'muted small' }, c.definition) : null,
+        h('div', { class: 'sm-models' }, c.models.length ? c.models.map(m => h('span', { class: 'tag sm-model' }, m)) : h('span', { class: 'muted small' }, 'no model named'))))))))); 
+  return out;
+}
+function pageSvMap() {
+  const nr = rxNotReady('Thesis'); if (nr) return nr;
+  S.outline = [];
+  const D = RX.svmap, name = S.project ? S.project.name : 'this project';
+  if (!D) return doc(rxPageHead(RX_Q.svmap, 'Not available on this hub yet.'), rxStudyLine());
+  const c = D.counts;
+  const root = doc(rxPageHead(RX_Q.svmap, D.state === 'confirmed' ? [rxB(c.claims), c.claims === 1 ? ' claim' : ' claims', D.confirmed.questions.length ? ' under ' + plural(D.confirmed.questions.length, 'question') : '', ', ' + plural(c.axes, 'taxonomy axis', 'taxonomy axes') + '. ',
+      c.changed ? [rxB(c.changed), ' rest on sentences that changed. '] : '', c.taxonomy ? [rxB(c.taxonomy), c.taxonomy === 1 ? ' place puts a model in another category.' : ' places put a model in another category.'] : (c.changed ? '' : 'Everything is in step with the paper.')]
+    : D.state === 'proposed' ? [rxB(c.proposed), c.proposed === 1 ? ' claim proposed. ' : ' claims proposed. ', 'Nothing counts until you confirm.'] : 'Not mapped yet.'), rxBehindNote(), rxStudyLine());
+  root.classList.add('wide');
+  const copyBtn = label => h('button', { class: 'btn', title: SM_PROMPT(name), onclick: () => copyText(SM_PROMPT(name)) }, label);
+  if (D.state === 'none') {
+    root.append(emptyState('◆', 'Let your own agent read the survey', 'In Claude Code with Lemmata connected, paste the prompt. Your agent reads every page, proposes the thesis, the research questions, the key claims with quotes, and the taxonomy. Lemmata checks each quote, cite key and model against the paper; you confirm. No AI runs on the hub.',
+      READONLY ? [] : [copyBtn('Copy prompt for Claude Code')]));
+    return root;
+  }
+  if (D.proposed) {
+    const dropped = (D.report || []).filter(r => r.level === 'dropped'), notes = (D.report || []).filter(r => r.level !== 'dropped');
+    root.append(h('div', { class: 'flag nb-prop' }, h('b', null, plural(c.proposed, 'claim') + ' proposed'), ' by ' + (D.proposed_by || 'agent') + (D.proposed_at ? ', ' + dmon(D.proposed_at) + ' ' + D.proposed_at.slice(11, 16) : '') + '. Read it below; nothing counts until you confirm. ',
+      READONLY ? null : [h('button', { class: 'btn sm primary', onclick: () => smAct({ action: 'confirm' }, 'Confirmed.') }, 'Confirm'), ' ', h('button', { class: 'btn sm', onclick: () => smAct({ action: 'discard' }, 'Proposal discarded.') }, 'Discard')]));
+    if (dropped.length || notes.length) root.append(h('details', { class: 'details' }, h('summary', null, 'What the checker said (' + dropped.length + ' dropped, ' + notes.length + ' notes)'),
+      dropped.map(r => h('div', { class: 'rx-warn' }, '✕ ' + r.where + ': ' + r.why)), notes.map(r => h('div', { class: 'muted small' }, '! ' + r.where + ': ' + r.why))));
+    root.append(h('div', { class: 'sm-prop' }, smMap(D.proposed, false)));
+    if (D.confirmed) root.append(h('details', { class: 'details' }, h('summary', null, 'The map you confirmed before'), smMap(D.confirmed, true)));
+  } else {
+    root.append(...smMap(D.confirmed, true));
+    if (D.taxonomy_rows.length) root.append(rxSection('Placed differently', c.taxonomy, null, D.taxonomy_rows.map(r => svRow(Object.assign({}, r, { match: r.said, source: 'paper', repo: (RX.survey && RX.survey.paper_repo) || 'paper' })))));
+  }
+  if (!READONLY) root.append(h('div', { class: 'rx-map-ask' }, copyBtn('Copy prompt for Claude Code'), h('span', { class: 'muted small' }, D.confirmed ? ' to re-read the paper and propose again' : ''),
+    D.confirmed && !D.proposed ? [' ', h('button', { class: 'linkbtn small', onclick: () => modal('Forget the confirmed map', h('p', null, 'The claims and taxonomy you confirmed are removed from Lemmata. The paper is not touched.'), [{ label: 'Cancel' }, { label: 'Forget', fn: () => smAct({ action: 'forget' }, 'Forgotten.') }]) }, 'Forget the confirmed map')] : null));
+  return root;
+}
+const RX_PAGES = { survey: pageSurvey, svmap: pageSvMap, latex: pageLatex, settings: pageSettings, baselines: pageBaselines, numbers: pageNumbers, digest: pageDigest, review: pageReview, notation: pageNotation, claims: pageClaims, timeline: pageTimeline, experiments: () => (rxSurvey() ? pageSvMap() : pageExperiments()), setup: pageSetup, history: pageTrail, trail: pageTrail, tasks: pageTasks, ask: pageAsk, faq: pageFaq };
 /* First visit to a project: open on the start view chosen on the Projects page (or assigned for the comparison). */
 async function rxStartView() {
   if (!HUB_ON || READONLY) return;

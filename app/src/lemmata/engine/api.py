@@ -875,6 +875,7 @@ class Engine:
             elif r.get("source") == "list":
                 r["repo"] = next((v[0] for k, v in repo_of.items() if v[1] == r["path"]), None)
         core = {"paper_repo": paper["id"], "versions": versions, "base": base, "dirty": dirty, "changes": changes, "list_rows": list_rows,
+                "head_files": head_files, "head_places": head_places, "models_list": sorted(models),
                 "models": len(models), "mentioned": sum(1 for v in mentions.values() if v), "datasets": len(datasets),
                 "list_files": sorted({v[1] for v in repo_of.values()}), "tex_files": len(head_files),
                 "places": len(head_places)}
@@ -923,6 +924,80 @@ class Engine:
                            "fixed": cnt(lambda r: r["mark"] == "fixed" and r["shown"] != "still"),
                            "list": sum(1 for r in list_rows if r["shown"] != "left" and r["kind"] != "not_in_paper"),      # the quiet rows are not counted
                            "places": core["places"], "tex_files": core["tex_files"]}}
+
+    # ---- the survey map: claims and taxonomy, proposed by the researcher's own agent, checked by rules, confirmed by them
+    def _map_ctx(self):
+        core, st = self._survey_core()
+        if core is None:
+            raise BadRequest("this project has no paper yet")
+        text = surveymod.PaperText(core["head_files"])
+        cites = {c for p in core["head_places"] for c in p["cites"]}
+        place_text = "\n".join(p["plain"] for p in core["head_places"])
+        return core, text, cites, place_text
+
+    def survey_brief(self, page=1):
+        """What the researcher's agent reads before proposing the map: the guide, the paper as numbered lines (in pages), the
+        models of the GitHub list, and what is already proposed or confirmed."""
+        core, text, cites, _ = self._map_ctx()
+        pages = text.pages()
+        try:
+            page = max(1, int(page or 1))
+        except (TypeError, ValueError):
+            raise BadRequest("page must be a number")
+        if page > max(1, len(pages)):
+            raise BadRequest("there are only %d pages" % len(pages))
+        cur = pages[page - 1] if pages else []
+        m = surveymod.load_map(self.hub)
+        return {"schema": surveymod.MAP_SCHEMA, "guide": surveymod.MAP_GUIDE, "page": page, "pages": len(pages),
+                "next_page": page + 1 if page < len(pages) else None,
+                "files": [{"path": f, "lines": len(t.split("\n"))} for f, t in sorted(core["head_files"].items())],
+                "text": [{"path": f, "start": a, "end": b, "text": t} for f, a, b, t in cur],
+                "cite_keys": sorted(cites)[:2000], "github_models": core["models_list"][:500],
+                "version": (core["versions"][0]["short"] if core["versions"] else None),
+                "already": {"proposed": bool(m["proposed"]), "confirmed": bool(m["confirmed"]),
+                            "confirmed_claims": [{"id": c["id"], "text": c["text"]} for c in (m["confirmed"] or {}).get("claims", [])][:80]}}
+
+    def propose_survey_map(self, doc, by=None):
+        core, text, cites, place_text = self._map_ctx()
+        clean, report = surveymod.clean_map(doc, text, cites, place_text)
+        m = surveymod.load_map(self.hub)
+        m.update(proposed=clean, proposed_by=by or "agent", proposed_at=now_iso(), report=report,
+                 proposed_from=core["versions"][0]["sha"] if core["versions"] else None)
+        self.hub.write_json(surveymod.MAP_STORE, m)
+        return self.survey_map()
+
+    def survey_map_act(self, action):
+        m = surveymod.load_map(self.hub)
+        if action == "confirm":
+            if not m["proposed"]:
+                raise BadRequest("nothing is proposed")
+            m.update(confirmed=m["proposed"], confirmed_at=now_iso(), confirmed_from=m.get("proposed_from"), proposed=None, report=None)
+        elif action == "discard":
+            if not m["proposed"]:
+                raise BadRequest("nothing is proposed")
+            m.update(proposed=None, report=None)
+        elif action == "forget":
+            m.update(confirmed=None, confirmed_at=None, confirmed_from=None)
+        else:
+            raise BadRequest("action must be confirm, discard or forget")
+        self.hub.write_json(surveymod.MAP_STORE, m)
+        return self.survey_map()
+
+    def survey_map(self):
+        """The confirmed claims and taxonomy as the paper stands now, and any proposal waiting for the researcher."""
+        core, text, cites, _ = self._map_ctx()
+        m = surveymod.load_map(self.hub)
+        st = surveymod.load(self.hub)
+        conf = m["confirmed"]
+        claims = surveymod.claims_now(conf, text) if conf else []
+        tax_rows = surveymod.taxonomy_now(conf, core["head_places"]) if conf else []
+        surveymod.apply_marks(tax_rows, st["marks"])
+        return {"schema": surveymod.MAP_SCHEMA, "state": "proposed" if m["proposed"] else ("confirmed" if conf else "none"),      # a proposal waits for the researcher first
+                "confirmed": conf, "confirmed_at": m["confirmed_at"], "claims": claims, "taxonomy_rows": tax_rows,
+                "proposed": m["proposed"], "proposed_by": m["proposed_by"], "proposed_at": m["proposed_at"], "report": m["report"] or [],
+                "counts": {"claims": len(claims), "changed": sum(1 for c in claims if c["state"] == "changed"),
+                           "taxonomy": sum(1 for r in tax_rows if r["shown"] != "left"),
+                           "axes": len((conf or {}).get("taxonomy", [])), "proposed": len((m["proposed"] or {}).get("claims", []))}}
 
     def survey_act(self, action, rev=None, row=None, state=None):
         """baseline (compare with this version) | mark (a row fixed, leave or open) | confirm (this version is right)."""

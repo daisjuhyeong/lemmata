@@ -1,7 +1,7 @@
 ---
 type: handoff
 owner_agent: lead
-status: phases 1, 2 and 3 built (rules), on s37-survey and next; phases 2b and 4 and the meaning pass not built; not on main
+status: phases 1, 2 and 3 built (rules), plus the survey map (claims and taxonomy, 18:08 KST follow-up); on s37-survey and next; phases 2b and 4 and the meaning pass not built; not on main
 sources:
   - "S37-01-task.md (the card) ; ../../decisions/ADR-013-survey-papers.md"
   - "founder message in chat, 2026-11-23 17:34 KST: 'just make it.' (the lead built it in the chat session instead of waiting for the agent team)"
@@ -57,3 +57,20 @@ token only in git's environment.
    to the private address only.)
 2. Phase 2b next, or the VS Code panel first?
 3. The two names in Dataset.md (`CybserCScope`, `Belacel etl al.`): typos to fix in the repository?
+
+## Follow-up, 2026-11-23 18:08 KST: claims and taxonomy first; two false "add" rows
+Founder: "'The paper surveys Abdulrahaman et al. (2025); the list does not have it' — this is more of a paper. 'The paper surveys
+Annthyroid' — this is a dataset. Also, most importantly, for a survey, the claim is the most important thing, along with the
+taxonomy that is organizing. Use AI to fully understand the paper and re-organize the key claims."
+
+| Part | What |
+|---|---|
+| List fix | "Add to the list" only from tables whose first column header names models (Model, Method, Approach, Framework, Detector, Algorithm, ...); never an author-year name ("et al.", a year, brackets, "and") and never a name that `Dataset.md` lists as a dataset. Test `ListNotModels` |
+| Survey map | `survey.py`: the guide, the paper as numbered lines in pages of about 90,000 characters, `clean_map` (every quote must be in the paper, matched on the rendered text so `\emph{x}` matches "x"; unknown cite keys and models the paper never names are dropped; a claim with no surviving quote is dropped), `claims_now` (a confirmed claim whose sentence is no longer in the paper reads "changed"), `taxonomy_now` (a sentence, table row or tree node that names one model and another category of the same axis, not its own) |
+| API | `GET /api/survey/brief?page=`, `GET /api/survey/map`, `POST /api/survey/map` with `map` (propose) or `action` confirm / discard / forget. Store `.lemmata/survey_map.json` |
+| MCP | `survey_brief` (read only, paged) and `propose_survey_map`. The researcher's Claude Code does the reading; the hub calls no model (ADR-006) |
+| Website | For a survey, **Thesis** is "What does the survey claim?": the thesis, each research question with its answer and the claims under it (kind, quotes, cited papers, taxonomy categories, in step or changed), the taxonomy as axes and category cards with their models, and "Placed differently". A proposal shows with Confirm / Discard and what the checker dropped. "Copy prompt for Claude Code" when nothing is mapped. Home has a line for it; Changes to apply lists the claims whose sentences changed first |
+
+Checked: Python 306 OK (2 skipped; 5 new). Browser on the sample at 1360 and 420 px, confirmed and proposed states, no console
+errors, no sideways scroll: [confirmed](screenshots/thesis-confirmed-1360.png), [proposed](screenshots/thesis-proposed-1360.png),
+[proposed at 420](screenshots/thesis-proposed-420.png). Not checked: a real agent run on the real survey (the founder's first run).

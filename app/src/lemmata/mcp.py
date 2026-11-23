@@ -955,6 +955,43 @@ def t_key_numbers(ctx, args):
     return _numbers_text(d, _need_str(args, "claim", required=False)), d, "Pass claim=<H1> for one claim, or brief=true for how to propose numbers."
 
 
+def t_survey_brief(ctx, args):
+    """S37: a survey's paper, page by page, with the guide for proposing its claims and taxonomy."""
+    pid, eng = _project(ctx, args)
+    page = args.get("page", 1)
+    b = eng.survey_brief(page)
+    head = [b["guide"], "", "Paper version %s. Files: %s." % (b["version"] or "?", ", ".join("%s (%d lines)" % (f["path"], f["lines"]) for f in b["files"])),
+            "Page %d of %d.%s" % (b["page"], b["pages"], (" Call survey_brief with page=%d next." % b["next_page"]) if b["next_page"] else " This is the last page."),
+            "Cite keys in the paper (%d): %s" % (len(b["cite_keys"]), ", ".join(b["cite_keys"][:400])),
+            "Models in the GitHub list (%d): %s" % (len(b["github_models"]), ", ".join(b["github_models"])) if b["github_models"] else "No GitHub model list.",
+            ("A map is already confirmed with %d claims; a new proposal replaces only the proposal, the researcher decides." % len(b["already"]["confirmed_claims"])) if b["already"]["confirmed"] else ""]
+    body = "\n\n".join("=== %s, lines %d-%d ===\n%s" % (t["path"], t["start"], t["end"], t["text"]) for t in b["text"])
+    return "\n".join(x for x in head if x) + "\n\n" + body, {k: v for k, v in b.items() if k != "text"}, \
+        ("Read page %d next." % b["next_page"]) if b["next_page"] else "Now call propose_survey_map."
+
+
+def t_propose_survey_map(ctx, args):
+    pid, eng = _project(ctx, args)
+    if not isinstance(args.get("map"), dict):
+        raise _Fail("Argument 'map' must be an object. Call survey_brief for the format.")
+    lock = getattr(ctx, "write_lock", None)
+    if lock is not None:
+        with lock:
+            d = eng.propose_survey_map(args["map"], "agent")
+    else:
+        d = eng.propose_survey_map(args["map"], "agent")
+    p = d["proposed"] or {}
+    dropped = [r for r in d["report"] if r["level"] == "dropped"]
+    lines = ["Proposed: %d claims, %d questions, %d taxonomy axes (%s)." % (len(p.get("claims", [])), len(p.get("questions", [])), len(p.get("taxonomy", [])),
+             "; ".join("%s: %d categories" % (a["name"], len(a["categories"])) for a in p.get("taxonomy", [])) or "none")]
+    if dropped:
+        lines.append("Dropped by the checker (%d):" % len(dropped))
+        lines += ["- %s: %s" % (r["where"], r["why"]) for r in dropped[:40]]
+    lines.append("This is a proposal. Fix what was dropped and propose again if needed; it replaces the previous proposal. Only the researcher "
+                 "can confirm it, on the Claims and taxonomy page of Lemmata. Tell them it is ready.")
+    return "\n".join(lines), {"counts": d["counts"], "report": d["report"]}, "Nothing to narrow."
+
+
 def t_propose_numbers(ctx, args):
     pid, eng = _project(ctx, args)
     if not isinstance(args.get("numbers"), list):
@@ -1320,6 +1357,19 @@ TOOLS = [
      "inputSchema": _schema({"project": _PROJECT_PROP, "claim": {"type": "string", "description": "Only this hypothesis or claim, e.g. H1."},
                              "brief": {"type": "boolean", "description": "Return the format and the context for proposing key numbers."}}, ["project"]),
      "annotations": dict(_RO)},
+    {"name": "survey_brief", "fn": t_survey_brief, "title": "Survey: the paper and how to propose its claims and taxonomy", "max_text": 120000,
+     "description": "For a survey paper: the guide for proposing the survey's key claims, research questions and taxonomy, and the paper "
+                    "itself as numbered LaTeX lines, one page at a time (page=1, 2, ... until next_page is empty). Read every page before "
+                    "calling propose_survey_map. Only call it when the user asked you to map or re-organise a survey's claims.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "page": {"type": "integer", "description": "Page of the paper text, from 1."}}, ["project"]),
+     "annotations": dict(_RO)},
+    {"name": "propose_survey_map", "fn": t_propose_survey_map, "title": "Propose a survey's claims and taxonomy",
+     "description": "Submit the survey map in the format given by survey_brief: thesis, research questions with answers, key claims with "
+                    "short exact quotes (path, line, quote), cite keys and taxonomy categories, and the taxonomy (axes, categories, "
+                    "models). Lemmata checks every quote, cite key and model name against the paper, drops what it cannot find, and "
+                    "stores the rest as a proposal the researcher confirms. It never edits the paper.",
+     "inputSchema": _schema({"project": _PROJECT_PROP, "map": {"type": "object", "description": "The survey map."}}, ["project", "map"]),
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "propose_numbers", "fn": t_propose_numbers, "title": "Propose key numbers",
      "description": "Submit a list of key numbers in the format given by key_numbers(brief=true): for each, the claim, the result file, how "
                     "the number is read from it, and what the report says with a quote. Lemmata reads every file itself, drops what it "

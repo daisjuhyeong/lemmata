@@ -771,6 +771,11 @@ def _row(ch, seen, p, old, new, status, why):
 
 
 # ------------------------------------------------------------------ the list against the paper
+MODEL_HEADERS = {"model", "models", "method", "methods", "approach", "approaches", "framework", "frameworks", "detector", "detectors",
+                 "algorithm", "algorithms", "odad model", "odad models", "name"}
+AUTHOR_YEAR_RE = re.compile(r"\bet\s*al\b|\b(?:19|20)\d\d\b|\(|&| and ", re.I)
+
+
 def list_check(models, datasets, head_places):
     """Rows: add (the paper surveys a model the list lacks), update (a shared column disagrees), check (the list names a
     model the paper never mentions; a dataset's model the list does not have)."""
@@ -788,17 +793,19 @@ def list_check(models, datasets, head_places):
     # models the paper surveys: first cells of table rows that cite something, bold names followed by a cite
     known = {vnorm(m) for m in models}
     cand = {}
+    ds_names = {vnorm(d["name"]) for d in datasets}
     for p in head_places:
-        if p["kind"] == "row" and not p.get("is_header") and p.get("cells_raw"):
-            c0 = p["cells_raw"][0]
-            if CITE_RE.search(c0):
-                nm = plain(c0).strip(" ,;:")
-                if 1 <= len(nm) <= 40 and len(nm.split()) <= 4:
-                    cand.setdefault(nm, p)
-        for m in re.finditer(r"\\textbf\{([^{}]{2,40})\}\s*(?:~|\\,|\s)?\s*\\cite", p.get("raw", "")):
-            nm = plain(m.group(1)).strip(" ,;:")
-            if len(nm.split()) <= 4:
-                cand.setdefault(nm, p)
+        # only a table whose first column names models (Model, Method, ...) says "this is a surveyed model"; a related-survey
+        # table ("Abdulrahaman et al. (2025)") or a dataset table ("Annthyroid") is not a list of models
+        if p["kind"] != "row" or p.get("is_header") or not p.get("cells_raw") or not p.get("header"):
+            continue
+        if hnorm(p["header"][0]) not in MODEL_HEADERS:
+            continue
+        c0 = p["cells_raw"][0]
+        nm = plain(c0).strip(" ,;:")
+        if not (1 <= len(nm) <= 40 and len(nm.split()) <= 4) or AUTHOR_YEAR_RE.search(nm) or vnorm(nm) in ds_names:
+            continue
+        cand.setdefault(nm, p)
     for nm, p in sorted(cand.items()):
         if vnorm(nm) in known or not vnorm(nm):
             continue
@@ -878,4 +885,266 @@ def apply_marks(rows, marks):
             r["shown"] = "still"      # marked fixed, but the place still says the old words
         else:
             r["shown"] = r["status"]
+    return rows
+
+
+# ------------------------------------------------------------------ the survey map: claims and taxonomy (S37, founder 2026-11-23 18:08 KST)
+# "For a survey, the claim is the most important thing, along with the taxonomy that is organizing. Use AI to fully understand
+# the paper and re-organize the key claims." The researcher's own agent reads the whole paper and proposes the map; rules check
+# every quote, cite key and model name against the paper; the researcher confirms. The hub calls no model.
+MAP_STORE = "survey_map.json"
+MAP_SCHEMA = "lemmata.surveymap/1"
+CLAIM_KINDS = ("contribution", "finding", "position", "gap", "trend", "definition", "limitation", "future")
+MAX_CLAIMS, MAX_AXES, MAX_CATS, MAX_MODELS, MAX_EV = 60, 8, 24, 300, 6
+PAGE_CHARS = 90000
+
+MAP_GUIDE = """You are reading a survey paper so that its author can see, at a glance, what the survey claims and how it is organised.
+Read every page of the paper below (call survey_brief again with page=2, 3, ... until next_page is null). Then call
+propose_survey_map with one JSON object:
+
+{
+  "thesis": "One or two sentences: what the survey as a whole argues or contributes.",
+  "questions": [ {"id": "RQ1", "text": "the research question as the paper states it", "answer": "what the paper answers, in one or two sentences",
+                  "where": [ {"path": "sec/intro.tex", "line": 42, "quote": "a short exact phrase from that line"} ]} ],
+  "claims": [ {"id": "C1", "text": "one claim, in the paper's own terms, one sentence",
+               "kind": "contribution | finding | position | gap | trend | definition | limitation | future",
+               "question": "RQ1 (or null)",
+               "where": [ {"path": ..., "line": ..., "quote": ...} ],          (1 to 6 places the paper states or supports it)
+               "cites": ["bibkey", ...],                                       (cite keys that back it, as written in \\cite{})
+               "taxonomy": ["A1.generative", ...]} ],                         (categories it is about, ids from "taxonomy")
+  "taxonomy": [ {"id": "A1", "name": "the axis, e.g. Base model", "where": [...],
+                 "categories": [ {"id": "A1.generative", "name": "Generative", "definition": "one sentence, as the paper defines it",
+                                  "where": [...], "models": ["ARCUS", "METER", ...]} ]} ]
+}
+
+Rules:
+- The key claims, not every sentence: what a reader must accept to accept the survey (its framing, its taxonomy, its findings
+  per research question, the gaps and open problems it names). Usually 8 to 30. Re-organise them under the research questions;
+  merge a claim the paper repeats in several sections into one claim with several "where".
+- Quotes are short exact phrases (5 to 15 words) from the LaTeX source as shown, with its file and line. Lemmata drops any
+  quote it cannot find, and any claim left without one.
+- "taxonomy" is the paper's own organisation: each axis the paper classifies methods by, its categories and the models the
+  paper puts in each, by the name the paper uses. A model may sit in one category per axis.
+- Use only cite keys that appear in the paper. Do not invent claims the paper does not make; say "position" for the authors'
+  opinions and "gap" for what they say is missing.
+- This is a proposal. The author confirms it in Lemmata; nothing counts before that."""
+
+
+def squash(t):
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+class PaperText:
+    """The paper's files as numbered lines, for quotes and for the brief."""
+
+    def __init__(self, files):
+        self.files = files
+        self.lines = {f: t.split("\n") for f, t in files.items()}
+        self._pl = {}
+
+    def plain_lines(self, f):
+        if f not in self._pl:
+            self._pl[f] = [squash(plain(strip_comment(l))) for l in self.lines.get(f, [])]
+        return self._pl[f]
+
+    def find(self, ev):
+        """{path, line, quote} -> the same with the line where the quote really is, or None."""
+        if not isinstance(ev, dict):
+            return None
+        path = str(ev.get("path") or ev.get("file") or "").strip().lstrip("./")
+        quote = " ".join(str(ev.get("quote") or "").split())[:300]
+        q = squash(plain(quote))
+        if not q or len(q) < 8:
+            return None
+        cands = [path] if path in self.lines else [f for f in self.lines if f.endswith("/" + path) or os.path.basename(f) == os.path.basename(path)] or list(self.lines)
+        for f in cands:
+            pl = self.plain_lines(f)
+            line = ev.get("line") if isinstance(ev.get("line"), int) else None
+            near = list(range(max(0, line - 10), min(len(pl), line + 10))) if line else []
+            for i in near + [i for i in range(len(pl)) if i not in near]:
+                if q in " ".join(pl[i:i + 4]):
+                    first = " ".join(q.split()[:3])
+                    hit = next((j for j in range(i, min(i + 4, len(pl))) if first in pl[j]), i)
+                    return {"path": f, "line": hit + 1, "quote": quote}
+        return None
+
+    def pages(self):
+        """Numbered text in pages of about PAGE_CHARS characters: [[(path, start, end, text)]]."""
+        out, cur, size = [], [], 0
+        for f in sorted(self.files, key=lambda x: (not x.lower().startswith("main"), x)):
+            ls = self.lines[f]
+            i = 0
+            while i < len(ls):
+                chunk, j, n = [], i, 0
+                while j < len(ls) and n < PAGE_CHARS - size:
+                    t = "%5d  %s" % (j + 1, ls[j])
+                    chunk.append(t)
+                    n += len(t) + 1
+                    j += 1
+                if chunk:
+                    cur.append((f, i + 1, j, "\n".join(chunk)))
+                    size += n
+                i = j
+                if size >= PAGE_CHARS:
+                    out.append(cur)
+                    cur, size = [], 0
+        if cur:
+            out.append(cur)
+        return out
+
+
+def _txt(v, n):
+    return " ".join(v.split())[:n] if isinstance(v, str) and v.strip() else None
+
+
+def _ident(v, fallback):
+    v = str(v or "").strip()
+    return v[:40] if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,39}", v) else fallback
+
+
+def clean_map(doc, text, cite_keys, place_text):
+    """Check a proposed map against the paper. -> (map, report). Dropped: quotes not in the paper, claims left without one,
+    unknown cite keys, models the paper never names, references to unknown ids."""
+    if not isinstance(doc, dict):
+        raise BadRequest("the map must be an object; see survey_brief for the format")
+    report = []
+
+    def note(level, where, why):
+        report.append({"level": level, "where": where, "why": why})
+
+    def evs(items, where):
+        ok = []
+        for ev in (items if isinstance(items, list) else [])[:MAX_EV]:
+            got = text.find(ev)
+            if got:
+                if not any(g["path"] == got["path"] and g["line"] == got["line"] for g in ok):
+                    ok.append(got)
+            else:
+                note("dropped", where, "quote not found in the paper: %r" % str((ev or {}).get("quote", "") if isinstance(ev, dict) else ev)[:70])
+        return ok
+
+    out = {"schema": MAP_SCHEMA, "thesis": _txt(doc.get("thesis"), 600), "questions": [], "claims": [], "taxonomy": []}
+    if not out["thesis"]:
+        note("note", "thesis", "no thesis given")
+    qids = set()
+    for k, q in enumerate((doc.get("questions") or [])[:12] if isinstance(doc.get("questions"), list) else []):
+        if not isinstance(q, dict) or not _txt(q.get("text"), 400):
+            note("dropped", "questions[%d]" % k, "a question needs text")
+            continue
+        qid = _ident(q.get("id"), "RQ%d" % (k + 1))
+        while qid in qids:
+            qid += "'"
+        qids.add(qid)
+        out["questions"].append({"id": qid, "text": _txt(q.get("text"), 400), "answer": _txt(q.get("answer"), 800), "where": evs(q.get("where"), qid)})
+    lowtext = place_text.lower()
+    cat_ids = set()
+    for a, ax in enumerate((doc.get("taxonomy") or [])[:MAX_AXES] if isinstance(doc.get("taxonomy"), list) else []):
+        if not isinstance(ax, dict) or not _txt(ax.get("name"), 80):
+            note("dropped", "taxonomy[%d]" % a, "an axis needs a name")
+            continue
+        aid = _ident(ax.get("id"), "A%d" % (a + 1))
+        axis = {"id": aid, "name": _txt(ax.get("name"), 80), "where": evs(ax.get("where"), aid), "categories": []}
+        for c, cat in enumerate((ax.get("categories") or [])[:MAX_CATS] if isinstance(ax.get("categories"), list) else []):
+            if not isinstance(cat, dict) or not _txt(cat.get("name"), 80):
+                note("dropped", "%s.categories[%d]" % (aid, c), "a category needs a name")
+                continue
+            cid = _ident(cat.get("id"), "%s.%d" % (aid, c + 1))
+            while cid in cat_ids:
+                cid += "'"
+            cat_ids.add(cid)
+            models = []
+            for m in (cat.get("models") or [])[:MAX_MODELS] if isinstance(cat.get("models"), list) else []:
+                m = _txt(m, 60) if isinstance(m, str) else None
+                if not m:
+                    continue
+                if not phrase_re(m).search(place_text) and m.lower() not in lowtext:
+                    note("dropped", cid, "model %r is not named in the paper" % m)
+                    continue
+                if m not in models:
+                    models.append(m)
+            axis["categories"].append({"id": cid, "name": _txt(cat.get("name"), 80), "definition": _txt(cat.get("definition"), 500),
+                                       "where": evs(cat.get("where"), cid), "models": models})
+        if axis["categories"]:
+            out["taxonomy"].append(axis)
+        else:
+            note("dropped", aid, "an axis with no category")
+    seen = set()
+    for k, cl in enumerate((doc.get("claims") or [])[:MAX_CLAIMS] if isinstance(doc.get("claims"), list) else []):
+        if not isinstance(cl, dict) or not _txt(cl.get("text"), 500):
+            note("dropped", "claims[%d]" % k, "a claim needs text")
+            continue
+        cid = _ident(cl.get("id"), "C%d" % (k + 1))
+        while cid in seen:
+            cid += "'"
+        seen.add(cid)
+        where = evs(cl.get("where"), cid)
+        if not where:
+            note("dropped", cid, "no quote of this claim was found in the paper, so it was left out")
+            continue
+        kind = cl.get("kind") if cl.get("kind") in CLAIM_KINDS else "finding"
+        if cl.get("kind") not in CLAIM_KINDS:
+            note("note", cid, "kind %r is not one of %s; read as finding" % (cl.get("kind"), ", ".join(CLAIM_KINDS)))
+        cites = []
+        for c in (cl.get("cites") or [])[:40] if isinstance(cl.get("cites"), list) else []:
+            if isinstance(c, str) and c.strip() in cite_keys:
+                cites.append(c.strip())
+            elif isinstance(c, str):
+                note("dropped", cid, "cite key %r is not cited in the paper" % c[:40])
+        q = cl.get("question")
+        if q not in (None, "") and q not in qids:
+            note("note", cid, "question %r is not one of the questions" % str(q)[:20])
+            q = None
+        tax = [t for t in (cl.get("taxonomy") or []) if isinstance(t, str) and t in cat_ids] if isinstance(cl.get("taxonomy"), list) else []
+        out["claims"].append({"id": cid, "text": _txt(cl.get("text"), 500), "kind": kind, "question": q or None, "where": where,
+                              "cites": cites, "taxonomy": tax})
+    if not out["claims"]:
+        raise BadRequest("no claim survived checking; every claim needs at least one quote that really is in the paper. %s" %
+                         "; ".join("%s: %s" % (r["where"], r["why"]) for r in report[:5]))
+    return out, report
+
+
+def load_map(hub):
+    d = hub.read_json(MAP_STORE, None)
+    if not isinstance(d, dict):
+        d = {}
+    for k in ("proposed", "proposed_by", "proposed_at", "report", "confirmed", "confirmed_at", "confirmed_from"):
+        d.setdefault(k, None)
+    d["schema"] = MAP_SCHEMA
+    return d
+
+
+def claims_now(m, text):
+    """Each claim of a confirmed map, and whether the sentences behind it are still in the paper."""
+    out = []
+    for cl in (m or {}).get("claims", []):
+        gone = [ev for ev in cl["where"] if not text.find(ev)]
+        out.append(dict(cl, state="changed" if gone else "in_step", gone=gone))
+    return out
+
+
+def taxonomy_now(m, head_places):
+    """Where the paper places a model differently from the confirmed taxonomy: a place that names this model (and no other
+    model of the taxonomy) and names another category of the same axis, but not the model's own."""
+    rows = []
+    axes = (m or {}).get("taxonomy", [])
+    all_models = {mm for ax in axes for c in ax["categories"] for mm in c["models"]}
+    mres = {mm: phrase_re(mm) for mm in all_models}
+    for ax in axes:
+        cres = {c["id"]: phrase_re(c["name"]) for c in ax["categories"]}
+        for c in ax["categories"]:
+            others = [o for o in ax["categories"] if o["id"] != c["id"]]
+            for mm in c["models"]:
+                for p in head_places:
+                    if p["kind"] not in ("text", "row", "node"):
+                        continue
+                    t = p["plain"]
+                    if not mres[mm].search(t) or any(mres[o].search(t) for o in all_models if o != mm and o.lower() != mm.lower()):
+                        continue
+                    if cres[c["id"]].search(t):
+                        continue
+                    hit = next((o for o in others if cres[o["id"]].search(t)), None)
+                    if hit:
+                        rows.append({"key": sha("tax", ax["id"], mm, p["path"], p.get("n", "")), "status": "differs", "axis": ax["name"], "model": mm,
+                                     "category": c["name"], "said": hit["name"], "path": p["path"], "line": p["line"], "kind": p["kind"], "quote": _quote(p),
+                                     "why": "%s is %s by the taxonomy (%s), but this place says %s." % (mm, c["name"], ax["name"], hit["name"])})
     return rows

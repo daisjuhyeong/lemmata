@@ -172,6 +172,80 @@ class ListCheck(unittest.TestCase):
         self.assertEqual(mentions["OLDM"], 0)
 
 
+class ListNotModels(unittest.TestCase):
+    """Founder (2026-11-23 18:08 KST): "Abdulrahaman et al. (2025)" is a paper and "Annthyroid" a dataset, not models to add."""
+
+    def test_only_tables_of_models_propose_add(self):
+        tex = r"""\begin{table}\caption{Related surveys}
+\begin{tabular}{ll}
+Survey & Focus \\
+Abdulrahaman et al. (2025)~\cite{abdul2025} & drift \\
+\end{tabular}\end{table}
+\begin{table}\caption{Datasets}
+\begin{tabular}{ll}
+Dataset & Size \\
+Annthyroid~\cite{annthyroid} & 7200 \\
+\end{tabular}\end{table}
+\begin{table}\caption{Models}
+\begin{tabular}{ll}
+Model & Base Model \\
+NEWM~\cite{new2025} & AE \\
+Smith et al.~\cite{smith} & AE \\
+NAB~\cite{nab} & AE \\
+\end{tabular}\end{table}
+"""
+        models, datasets, _ = S.read_list({"README.md": README, "Dataset.md": DATASET})
+        rows, _ = S.list_check(models, datasets, S.places_of("t.tex", tex))
+        self.assertEqual([r["model"] for r in rows if r["kind"] == "add"], ["NEWM"])
+
+
+class SurveyMap(unittest.TestCase):
+    def test_clean_map_checks_quotes_cites_models(self):
+        text = S.PaperText({"sec.tex": SEC})
+        places = S.places_of("sec.tex", SEC)
+        cites = {c for p in places for c in p["cites"]}
+        doc = {"thesis": "ODAD needs a base model and a drift detector.",
+               "questions": [{"id": "RQ1", "text": "How are models organised?", "answer": "Two axes.", "where": [{"path": "sec.tex", "line": 3, "quote": "we split the stream into blocks"}]}],
+               "taxonomy": [{"id": "A1", "name": "Concept drift detection", "categories": [
+                   {"id": "A1.err", "name": "Error-based", "models": ["ARCUS", "GHOST"]}, {"id": "A1.dist", "name": "Distribution-based", "models": ["METER"]}]}],
+               "claims": [{"id": "C1", "text": "ARCUS adapts a pool.", "kind": "finding", "question": "RQ1",
+                           "where": [{"path": "sec.tex", "line": 99, "quote": "approach that adapts the model pool"}], "cites": ["yoon2022arcus", "made2020"], "taxonomy": ["A1.err", "A9"]},
+                          {"id": "C2", "text": "Made up.", "where": [{"path": "sec.tex", "quote": "a sentence the paper never wrote at all"}]},
+                          {"id": "C3", "text": "Uses \\emph text.", "kind": "odd", "where": [{"path": "sec.tex", "quote": "Our corpus has 87 papers drawn"}]}]}
+        m, rep = S.clean_map(doc, text, cites, "\n".join(p["plain"] for p in places))
+        self.assertEqual([c["id"] for c in m["claims"]], ["C1", "C3"])
+        c1 = m["claims"][0]
+        self.assertEqual((c1["where"][0]["line"], c1["cites"], c1["taxonomy"], c1["question"]), (4, ["yoon2022arcus"], ["A1.err"], "RQ1"))
+        self.assertEqual(m["claims"][1]["kind"], "finding")
+        self.assertEqual(m["taxonomy"][0]["categories"][0]["models"], ["ARCUS"])
+        why = " ".join(r["why"] for r in rep)
+        for bit in ("GHOST", "made2020", "never wrote", "odd"):
+            self.assertIn(bit, why)
+        with self.assertRaises(Exception):
+            S.clean_map({"claims": [{"text": "x", "where": [{"path": "sec.tex", "quote": "nowhere to be found in it"}]}]}, text, cites, "")
+        with self.assertRaises(Exception):
+            S.clean_map([], text, cites, "")
+
+    def test_quotes_match_the_rendered_text(self):
+        t = S.PaperText({"a.tex": "First, we categorize base models into \\emph{approximative} and\n\\emph{generative}.\n"})
+        self.assertEqual(t.find({"path": "a.tex", "quote": "into approximative and generative"})["line"], 1)
+        self.assertIsNone(t.find({"path": "a.tex", "quote": "short"}))
+
+    def test_pages_cover_every_line(self):
+        big = {"main.tex": "\n".join("line %d %s" % (i, "x" * 60) for i in range(4000)), "b.tex": "one\ntwo"}
+        pages = S.PaperText(big).pages()
+        self.assertGreater(len(pages), 2)
+        got = {}
+        for pg in pages:
+            for f, a, b, _t in pg:
+                got.setdefault(f, []).append((a, b))
+        self.assertEqual(got["main.tex"][0][0], 1)
+        self.assertEqual(got["main.tex"][-1][1], 4000)
+        for (a1, b1), (a2, b2) in zip(got["main.tex"], got["main.tex"][1:]):
+            self.assertEqual(a2, b1 + 1)
+        self.assertTrue(all(len("".join(t for _f, _a, _b, t in pg)) <= S.PAGE_CHARS + 200 for pg in pages))
+
+
 class EngineSurvey(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -256,6 +330,58 @@ class EngineSurvey(unittest.TestCase):
             e.survey_act("mark", row="../x", state="fixed")
         with self.assertRaises(Exception):
             e.survey_act("mark", row="0123456789ab", state="maybe")
+
+    def test_survey_map_flow_and_mcp(self):
+        e = Engine(self.root)
+        e.scan()
+        b = e.survey_brief(1)
+        self.assertEqual((b["pages"], b["next_page"]), (1, None))
+        self.assertIn("yoon2022arcus", b["cite_keys"])
+        self.assertIn("ARCUS", b["github_models"])
+        self.assertIn("ARCUS~\\cite{yoon2022arcus} is an error-based approach", "".join(t["text"] for t in b["text"]))
+        self.assertEqual(e.survey_map()["state"], "none")
+        doc = {"thesis": "T.", "taxonomy": [{"id": "A1", "name": "Concept drift detection", "categories": [
+            {"id": "A1.err", "name": "Error-based", "models": ["ARCUS"]}, {"id": "A1.dist", "name": "Distribution-based", "models": ["METER"]}]}],
+               "claims": [{"id": "C1", "text": "ARCUS is error-based.", "where": [{"path": "sec.tex", "quote": "is an error-based approach that adapts"}]}]}
+        d = e.propose_survey_map(doc, "agent")
+        self.assertEqual((d["state"], d["counts"]["proposed"]), ("proposed", 1))
+        d = e.survey_map_act("confirm")
+        self.assertEqual((d["state"], d["counts"]["claims"], d["counts"]["changed"]), ("confirmed", 1, 0))
+        # the paper already calls METER error-based once, against the taxonomy
+        self.assertEqual([(r["model"], r["said"], r["line"]) for r in d["taxonomy_rows"]], [("METER", "Error-based", 22)])
+        # the paper changes: the claim's sentence is gone and the text now puts ARCUS in the other category
+        (self.paper / "sec.tex").write_text(edit(SEC))
+        e.scan()
+        d = e.survey_map()
+        self.assertEqual(d["claims"][0]["state"], "changed")
+        self.assertEqual(sorted((r["model"], r["said"], r["line"]) for r in d["taxonomy_rows"]), [("ARCUS", "Distribution-based", 4), ("METER", "Error-based", 22)])
+        for r in d["taxonomy_rows"]:
+            e.survey_act("mark", row=r["key"], state="leave")
+        self.assertEqual(e.survey_map()["counts"]["taxonomy"], 0)
+        with self.assertRaises(Exception):
+            e.survey_map_act("discard")        # nothing proposed
+        self.assertEqual(e.survey_map_act("forget")["state"], "none")
+        # the MCP tools
+        from lemmata import mcp
+        tools = {t["name"]: t for t in mcp.TOOLS}
+        self.assertIn("survey_brief", tools)
+        self.assertIn("propose_survey_map", tools)
+        ctx = mcp.LocalCtx(self.root)
+        def call(name, args):
+            _st, r = mcp.handle(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}), ctx)
+            r = json.loads(r)
+            self.assertNotIn("error", r, r)
+            return r["result"]
+        r = call("survey_brief", {"project": "local"})
+        text = r["content"][0]["text"]
+        self.assertIn("propose_survey_map", text)
+        self.assertIn("=== sec.tex, lines 1-", text)
+        doc["claims"][0]["where"] = [{"path": "sec.tex", "quote": "approach that adapts the model pool"}]
+        r = call("propose_survey_map", {"project": "local", "map": doc})
+        self.assertIn("Proposed: 1 claims", r["content"][0]["text"])
+        self.assertEqual(ctx.engine.survey_map()["state"], "proposed")
+        self.assertTrue(tools["survey_brief"]["annotations"]["readOnlyHint"])
+        self.assertFalse(tools["propose_survey_map"]["annotations"]["readOnlyHint"])
 
     def test_paper_in_a_subfolder_of_one_repository(self):
         # paper/ inside a repository that also holds other folders: versions and files come from the paper folder only

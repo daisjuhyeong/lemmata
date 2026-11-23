@@ -34,6 +34,10 @@ Git to the project owner's plan.
    or a symbol only where the same model, paper or symbol appears (text, table rows, forest nodes, the GitHub lists); a number
    before the same word; a removed label still referenced. Each row can be marked fixed or left as is; confirming a version
    moves the comparison forward.
+5a. **For a survey, the claims and the taxonomy come first** (founder, 18:08 KST). The researcher's own agent reads the whole paper
+   (MCP `survey_brief`) and proposes the thesis, the research questions, the key claims with quotes, and the taxonomy
+   (`propose_survey_map`); rules check every quote, cite key and model name; the researcher confirms. For a survey the Thesis page
+   shows this map, which claims rest on sentences that changed, and where the paper places a model in another category.
 5. **VS Code gets a separate Survey panel** focused on the writing (not built yet; S37-01 phase 4). ADR-011 stays as it is
    for method papers and benchmark studies.
 6. (proposed) **The hub's owner may switch Overleaf on and save the Overleaf Git token from the website, also through the

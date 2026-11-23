@@ -2124,7 +2124,7 @@ function renderLeft() {
 }
 
 /* ---------- tab bar, page ---------- */
-function navBadge(k) { return k === 'digest' ? (RX.todo ? rxNeedsList().length : RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0) : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0)
+function navBadge(k) { if (k === 'experiments' && rxSurvey()) { const m = RX.svmap; return m ? (m.state === 'proposed' ? 1 : m.counts.changed + m.counts.taxonomy) : 0; } return k === 'digest' ? (RX.todo ? rxNeedsList().length : RX.tasks && RX.tasks.counts ? RX.tasks.counts.open || 0 : 0) : k === 'experiments' ? (RX.experiments ? RX.experiments.counts.attention + RX.experiments.counts.untested : 0)
     : k === 'setup' ? (RX.setup ? RX.setup.counts.checks : 0) : k === 'review' ? M.todo || 0 : 0; }
 function renderTabbar() {
   const bar = clear($('#topnav')); if (!bar) return;
