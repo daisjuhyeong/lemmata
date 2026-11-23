@@ -15,7 +15,7 @@ sources:
   - "S18-dais-ui.md (the 2026-11-12 spec this page replaces for the website; its VS Code part stays)"
   - "../../decisions/ADR-008-top-down-evidence-spine.md (Home, Thesis, Setup, Review, Trail; the sidebar shell) ; ../../decisions/ADR-011-vscode-is-the-experiment-bench.md (the website is where you read, decide and write)"
   - "https://www.w3.org/TR/WCAG21/#contrast-minimum and #non-text-contrast (4.5:1 for text, 3:1 for large text and for graphics and control edges); every ratio on this page was computed on 2026-11-22 with that document's relative-luminance formula"
-last_reviewed: 2026-11-22
+last_reviewed: 2026-11-23
 ---
 # S36 design system: one question per page, and one colour that means "your turn"
 
@@ -129,7 +129,9 @@ Do not add a second set of classes. Change the ones in `app.css`. Section 8 give
 │ Settings   │        column --col, centred                        │
 └────────────┴─────────────────────────────────────────────────────┘
 ```
-- The shell stays as built: sidebar (`renderLeft()`, app.js:2098), title goes Home, Settings at the bottom left.
+- The shell stays as built: sidebar (`renderLeft()`, app.js:2098) and Settings at the bottom left. The title "Lemmata" goes to the
+  list of projects, and Home is reached from the sidebar (founder, chat 2026-11-23 12:58 KST; task card
+  [S36-03](../../sprints/S36/S36-03-task.md), not built yet). Without a hub there is no list, so the title goes Home there.
 - In the sidebar only Home may carry the sand dot, beside its count of items waiting for the researcher. Every other count
   stays a plain number in `--text-secondary`.
 - The sage band (`--accent`) stays where it is today. Do not put new small text on it: `--on-accent` on `--accent` is 2.93:1 in light.
