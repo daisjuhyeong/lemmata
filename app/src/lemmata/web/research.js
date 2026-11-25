@@ -791,58 +791,77 @@ function rxExpState0(x, X) {
   return { k: g == null ? 'none' : g > 0 ? 'ahead' : g < 0 ? 'behind' : 'tie', g };
 }
 const RX_XSTATE = { ahead: ['▲', 'Ahead'], behind: ['▼', 'Behind'], tie: ['=', 'Level'], none: ['·', 'No comparison'] };
-function rxExpMap(E, renderSec) {
-  const X = E.extends, secs = E.sections, vs = X ? X.base.name : 'the best other method';
-  const exps = [], seen = new Map(), own = new Set();
-  secs.forEach(s => s.experiments.forEach(x => { if (!seen.has(x.id)) { seen.set(x.id, x); exps.push(x); } if (s.scope !== 'base') own.add(x.id); }));
+/* The claim map (S38): the claims as cards under their group, "Claim 1" as the headline, the state and the count on the card.
+   The experiments behind a claim, and why it has its state, open in a pop-up. Used on Home and as Thesis's Map view. */
+function rxClaimName(s) { const m = /^([CH]) ?(\d+)$/.exec(s.short || ''); return m ? (m[1] === 'C' ? 'Claim ' : 'Hypothesis ') + m[2] : s.short || trunc(s.label || 'Claim', 24); }
+function rxMapData(E) {
+  const X = E.extends, exps = [], seen = new Map(), own = new Set();
+  E.sections.forEach(s => s.experiments.forEach(x => { if (!seen.has(x.id)) { seen.set(x.id, x); exps.push(x); } if (s.scope !== 'base') own.add(x.id); }));
   // an experiment that only re-checks the original paper's claim compares that paper's method with the others, as the paper did
-  const rxExpState = (x, X_) => rxExpState0(x, X_ && own.has(x.id) ? X_ : null);
-  const RH = 44, QH = 108, GAP = 14, CX = [0, 225, 555], CW = [195, 290, 245], W = CX[2] + CW[2];
-  const ey = new Map(exps.map((x, i) => [x.id, i * RH]));
-  const qy = new Map(); let bottom = 0, sc0;
-  secs.forEach(s => { if (X && s.kind !== 'other' && s.scope !== sc0) { sc0 = s.scope; bottom += 26; } const ys = s.experiments.map(x => ey.get(x.id) + RH / 2); const want = ys.length ? ys.reduce((a, c) => a + c, 0) / ys.length - QH / 2 : bottom; const y = Math.max(bottom, want); qy.set(s.id, y); bottom = y + QH + GAP; });
-  const H = Math.max(bottom - GAP, exps.length * RH, 200), rootY = H / 2 - 70;
-  const sel = RX.mapSel || '', selQ = sel.startsWith('q:') ? sel.slice(2) : null, selX = sel.startsWith('x:') ? sel.slice(2) : null;
-  const litX = new Set(), litQ = new Set();
-  if (selQ) { litQ.add(selQ); (secs.find(s => s.id === selQ) || { experiments: [] }).experiments.forEach(x => litX.add(x.id)); }
-  if (selX) { litX.add(selX); secs.forEach(s => { if (s.experiments.some(x => x.id === selX)) litQ.add(s.id); }); }
-  const dim = (set, id) => sel && !set.has(id) ? ' dim' : '';
-  const pick = k => { RX.mapSel = RX.mapSel === k ? null : k; RX.exOpen = null; renderPage(true); };
-  const svg = sv('svg', { class: 'rx-m-edges', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, 'aria-hidden': 'true' });
-  const curve = (x1, y1, x2, y2) => 'M' + x1 + ',' + y1 + ' C' + (x1 + x2) / 2 + ',' + y1 + ' ' + (x1 + x2) / 2 + ',' + y2 + ' ' + x2 + ',' + y2;
-  const box = h('div', { class: 'rx-m', style: 'width:' + W + 'px;height:' + H + 'px' }, svg);
-  // tally
-  const tally = list => { const t = { ahead: 0, behind: 0, tie: 0, none: 0, check: 0 }; list.forEach(x => { t[rxExpState(x, X).k]++; if (x.attention) t.check++; }); return t; };
-  const meter = (list, big) => { const t = tally(list), n = list.length || 1; return h('span', { class: 'rx-m-meter' + (big ? ' big' : ''), title: t.ahead + ' ahead, ' + t.behind + ' behind, ' + t.tie + ' level, ' + t.none + ' without a comparison' },
+  const vsOf = x => X && own.has(x.id) ? X.base.name : 'the best other method';
+  const state = x => rxExpState0(x, X && own.has(x.id) ? X : null);
+  const tally = list => { const t = { ahead: 0, behind: 0, tie: 0, none: 0, check: 0 }; list.forEach(x => { t[state(x).k]++; if (x.attention) t.check++; }); return t; };
+  const meter = list => { const t = tally(list); return h('span', { class: 'rx-m-meter', title: t.ahead + ' ahead, ' + t.behind + ' behind, ' + t.tie + ' level, ' + t.none + ' without a comparison' },
     ['ahead', 'tie', 'behind', 'none'].map(k => t[k] ? h('span', { class: 'm-' + k, style: 'flex:' + t[k] }) : null)); };
-  const all = tally(exps), cmp = all.ahead + all.behind + all.tie;
-  box.append(h('button', { class: 'rx-m-root' + (sel ? ' dim' : ''), style: 'left:0;top:' + rootY + 'px;width:' + CW[0] + 'px', onclick: () => { RX.mapSel = null; renderPage(true); }, title: 'Show everything' },
-    E.thesis && E.thesis.text ? h('span', { class: 'rx-m-goal rx-m-thesis serif' }, rxMath(trunc(E.thesis.text, 110))) : null,
-    h('span', { class: 'rx-m-ours' + (E.thesis && E.thesis.text ? ' sub' : '') }, E.study === 'benchmark' ? 'Benchmark study' : (E.map && E.map.method ? E.map.method.name : null) || 'Ours'), X ? h('span', { class: 'rx-m-sub' }, 'extends ' + X.base.name) : null,
-    X && X.goal ? h('span', { class: 'rx-m-goal serif' }, trunc(X.goal, 90)) : null, meter(exps, true),
-    h('span', { class: 'rx-m-sub' }, E.study === 'benchmark' ? plural(exps.length, 'experiment') + ', each claim decided by its test' : cmp ? 'Ahead of ' + trunc(vs, 18) + ' in ' + all.ahead + ' of ' + cmp : 'Nothing to compare yet'), all.check ? h('span', { class: 'rx-m-chk' }, '! ' + all.check + ' to check') : null));
-  let lastScope;
-  secs.forEach(s => {
-    const y = qy.get(s.id), t = tally(s.experiments), c = t.ahead + t.behind + t.tie, st = s.stage ? RX_STAGE[s.stage] : RX_STATUS[s.status];
-    svg.append(sv('path', { d: curve(CW[0], rootY + 70, CX[1], y + QH / 2), class: 'me' + dim(litQ, s.id) }));
-    if (X && s.scope !== lastScope && s.kind !== 'other') { box.append(h('span', { class: 'rx-m-scope', style: 'left:' + CX[1] + 'px;top:' + (y - 24) + 'px' }, s.scope === 'extension' ? 'New claims' : s.scope === 'base' ? 'Original paper, re-checked' : '')); lastScope = s.scope; }
-    box.append(h('button', { class: 'rx-m-q' + (s.stage ? rxSt(s.stage) : ' st-' + s.status) + (selQ === s.id ? ' sel' : '') + dim(litQ, s.id), style: 'left:' + CX[1] + 'px;top:' + y + 'px;width:' + CW[1] + 'px;height:' + QH + 'px', 'aria-pressed': String(selQ === s.id), onclick: () => pick('q:' + s.id) },
-      h('span', { class: 'rx-m-qh' }, h('b', null, s.short || s.label), s.stage ? h('span', { class: 'rx-m-stage ' + st[2], title: s.stage_why || '' }, st[0] + ' ' + st[1]) : null, h('span', { class: 'grow' }), s.stage ? null : h('span', { class: 'sg ' + st[2] }, st[0])),
-      h('span', { class: 'rx-m-qt serif' }, rxMath(trunc(s.text, 96))),
-      s.experiments.length ? h('span', { class: 'rx-m-qf' }, meter(s.experiments), h('span', { class: 'rx-m-sub' }, c ? t.ahead + ' of ' + c + ' ahead' : plural(s.experiments.length, 'experiment'))) : h('span', { class: 'rx-m-qf' }, h('span', { class: 'rx-m-chk bad' }, 'Not tested yet'))));
-    s.experiments.forEach(x => { const es = rxExpState(x, X); svg.append(sv('path', { d: curve(CX[1] + CW[1], y + QH / 2, CX[2], ey.get(x.id) + RH / 2), class: 'me x-' + es.k + (sel && !(litQ.has(s.id) && litX.has(x.id)) ? ' dim' : '') })); });
-  });
-  exps.forEach(x => { const es = rxExpState(x, X), g = RX_XSTATE[es.k];
-    box.append(h('button', { class: 'rx-m-x x-' + es.k + (selX === x.id ? ' sel' : '') + dim(litX, x.id), style: 'left:' + CX[2] + 'px;top:' + (ey.get(x.id) + 4) + 'px;width:' + CW[2] + 'px;height:' + (RH - 8) + 'px', 'aria-pressed': String(selX === x.id), onclick: () => pick('x:' + x.id),
-      title: x.name + ' · ' + (x.tuning ? 'Search: best of ' + x.tuning.runs : g[1] + (es.g != null ? ' of ' + vs + ' by ' + rxFmt(Math.abs(es.g)) : '')) + (x.attention ? ' · something to check' : '') },
-      h('span', { class: 'rx-m-g' }, g[0]), h('span', { class: 'rx-m-xn' }, x.name), x.attention ? h('span', { class: 'rx-m-chk' }, '!') : null,
-      h('span', { class: 'rx-m-xv mono' }, x.tuning ? 'best of ' + x.tuning.runs : es.g != null ? (es.g > 0 ? '+' : es.g < 0 ? '−' : '') + rxFmt(Math.abs(es.g)) : ''))); });
-  const out = [h('div', { class: 'rx-m-wrap' }, box),
-    h('div', { class: 'rx-legend' }, Object.keys(RX_XSTATE).map(k => h('span', null, h('span', { class: 'rx-m-g x-' + k }, RX_XSTATE[k][0]), ' ' + RX_XSTATE[k][1] + (k === 'ahead' || k === 'behind' ? ' ' + (k === 'ahead' ? 'of ' : '') + trunc(vs, 22) : ''))), h('span', null, '! to check'))];
-  if (selQ) { const s = secs.find(q => q.id === selQ); if (s) out.push(renderSec(s)); }
-  else if (selX && seen.has(selX)) { const x = seen.get(selX); out.push(h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-x-h' }, h('b', null, x.name), x.caption ? h('span', { class: 'muted' }, trunc(x.caption, 110)) : null), h('div', { class: 'rx-m-detail' }, rxExpDetail(x.id)))); }
-  else out.push(h('p', { class: 'muted rx-m-hint' }, 'Click a claim or an experiment. ', rxHelp('maphint', 'A claim shows the experiments run for it; an experiment shows why it was run.')));
+  const count = list => { const t = tally(list), c = t.ahead + t.behind + t.tie; return !list.length ? 'Not tested yet' : c ? t.ahead + ' of ' + c + ' ahead' : plural(list.length, 'experiment'); };
+  return { X, exps, seen, vsOf, state, tally, meter, count };
+}
+function rxClaimState(s) { const st = s.stage ? RX_STAGE[s.stage] || RX_STAGE.hypothesis : RX_STATUS[s.status] || RX_STATUS.unsupported; return h('span', { class: 'cm-st ' + st[2] }, h('span', { class: 'cm-sg', 'aria-hidden': 'true' }, st[0]), ' ' + st[1]); }
+function rxClaimMap(E, opts) {
+  opts = opts || {};
+  const D = rxMapData(E), X = D.X, groups = [];
+  const TITLE = { extension: 'New claims', base: 'Original paper, re-checked', all: 'Claims', other: 'Results no claim points to' };
+  E.sections.forEach(s => { const k = s.kind === 'other' ? 'other' : X && TITLE[s.scope] ? s.scope : 'all'; let g = groups.find(q => q.k === k); if (!g) groups.push(g = { k, secs: [] }); g.secs.push(s); });
+  const card = s => { const t = D.tally(s.experiments);
+    return h('button', { class: 'cm-card' + (s.stage ? rxSt(s.stage) : ' st-' + s.status) + (s.kind === 'other' ? ' k-other' : ''), 'aria-haspopup': 'dialog', title: 'See the results and why', onclick: () => rxClaimPop(E, s) },
+      h('span', { class: 'cm-h' }, h('span', { class: 'cm-name' }, rxClaimName(s)), h('span', { class: 'grow' }), t.check ? h('span', { class: 'cm-chk', title: plural(t.check, 'experiment') + ' to check' }, '! ' + t.check) : null),
+      s.kind === 'other' ? null : rxClaimState(s),
+      h('span', { class: 'cm-t' }, rxMath(trunc(s.text, 84))),
+      h('span', { class: 'cm-f' }, s.experiments.length ? D.meter(s.experiments) : null, h('span', { class: 'cm-n' }, D.count(s.experiments)))); };
+  const all = D.tally(D.exps), cmp = all.ahead + all.behind + all.tie, out = [];
+  if (opts.summary) out.push(h('div', { class: 'rx-x-sum cm-sum' }, h('span', null, h('b', null, D.exps.length), D.exps.length === 1 ? ' experiment' : ' experiments'),
+    E.study !== 'benchmark' && cmp ? h('span', null, 'Ahead of ' + trunc(X ? X.base.name : 'the best other method', 24) + ' in ', h('b', null, all.ahead), ' of ' + cmp) : null,
+    all.check ? h('span', { class: 'warn' }, h('b', null, all.check), ' to check') : null));
+  groups.forEach(g => out.push(h('section', { class: 'cm-g' }, h('h2', { class: 'cm-gh' }, TITLE[g.k], h('span', { class: 'hm-n' }, String(g.secs.length))), h('div', { class: 'cm-grid' }, g.secs.map(card)))));
+  out.push(h('p', { class: 'muted small cm-hint' }, 'Click a claim to see its results and why it has its state.'));
   return out;
+}
+function rxClaimPop(E, s) {
+  const D = rxMapData(E), cid = E.unmapped ? s.claim_id : s.id;
+  let close = () => {};
+  const row = x => { const es = D.state(x), g = RX_XSTATE[es.k], vs = D.vsOf(x);
+    const words = x.tuning ? 'Search: best of ' + x.tuning.runs : es.g == null ? (x.summary ? 'No comparison' : 'No results yet') : es.k === 'tie' ? 'Level with ' + trunc(vs, 26) : g[1] + (es.k === 'ahead' ? ' of ' : ' ') + trunc(vs, 26) + ' by ' + rxFmt(Math.abs(es.g));
+    const det = h('div', { class: 'cm-xd', hidden: '' });
+    const btn = h('button', { class: 'cm-x x-' + es.k, 'aria-expanded': 'false', title: 'Show this experiment', onclick: () => { const open = det.hidden; det.hidden = !open; btn.setAttribute('aria-expanded', String(open)); if (open && !det.firstChild) det.append(rxExpDetail(x.id)); } },
+      h('span', { class: 'rx-m-g' }, g[0]), h('span', { class: 'cm-xn' }, x.name), h('span', { class: 'cm-xw' }, words), x.attention ? h('span', { class: 'cm-chk' }, '! to check') : null,
+      h('span', { class: 'cm-xv mono' }, x.tuning || es.g == null ? '' : (es.g > 0 ? '+' : es.g < 0 ? '−' : '') + rxFmt(Math.abs(es.g))));
+    return [btn, det]; };
+  const body = h('div', { class: 'cm-pop' },
+    s.kind === 'other' ? null : h('div', { class: 'cm-pop-st' }, rxClaimState(s), s.experiments.length ? [D.meter(s.experiments), h('span', { class: 'cm-n' }, D.count(s.experiments))] : null),
+    h('p', { class: 'cm-pop-t serif' }, rxMath(s.text)),
+    s.stage_why ? [h('h4', null, 'Why it has this state'), h('p', { class: 'cm-pop-why' }, (s.stage_by === 'you' ? 'Set by you. ' : '') + s.stage_why)] : null,
+    h('h4', null, 'Results', s.experiments.length ? h('span', { class: 'hm-n' }, String(s.experiments.length)) : null),
+    s.experiments.length ? h('div', { class: 'cm-xs' }, s.experiments.map(row)) : h('p', { class: 'muted' }, 'No experiment tests this yet.'));
+  // a link inside an experiment's detail leaves the page: the pop-up closes with it
+  body.addEventListener('click', ev => { if (ev.target.closest && ev.target.closest('.cm-xd .rx-why-r, .cm-xd .rx-node, .cm-xd a.btn')) setTimeout(close, 0); });
+  close = modal(rxClaimName(s), body, [cid ? { label: 'Open the claim', fn: () => { RX.sel = cid; RX.view = 'tree'; openTab('claims'); } } : null, { label: 'Close' }].filter(Boolean), { cls: 'cm-modal' });
+}
+function rxExpMap(E, renderSec) {      // Thesis's Map view: the same cards; a link that names a claim or an experiment (VS Code, "Open this experiment") still shows it under the map
+  const out = rxClaimMap(E), sel = RX.mapSel || '', D = rxMapData(E);
+  const shut = h('button', { class: 'linkbtn small', onclick: () => { RX.mapSel = null; renderPage(true); } }, 'Close');
+  if (sel.startsWith('q:')) { const q = E.sections.find(x => x.id === sel.slice(2)); if (q) out.push(renderSec(q)); }
+  else if (sel.startsWith('x:') && D.seen.has(sel.slice(2))) { const x = D.seen.get(sel.slice(2)); out.push(h('section', { class: 'rx-x-sec' }, h('div', { class: 'rx-x-h' }, h('b', null, x.name), x.caption ? h('span', { class: 'muted' }, trunc(x.caption, 110)) : null, h('span', { class: 'grow' }), shut), h('div', { class: 'rx-m-detail' }, rxExpDetail(x.id)))); }
+  return out;
+}
+/* The goal on top of Home (S38): what the work is for, large; the method and what it extends above it, small. */
+function rxGoalHead(E) {
+  if (!E || rxSurvey()) return null;
+  const X = E.extends, goal = (X && X.goal) || (E.thesis && E.thesis.text) || null;
+  if (!goal) return null;
+  const name = E.study === 'benchmark' ? 'Benchmark study' : (E.map && E.map.method ? E.map.method.name : null);
+  return h('header', { class: 'hm-goal' },
+    h('p', { class: 'hm-goal-k' }, 'Research goal', X ? [' · ', h('b', null, name || 'Ours'), ' extends ', h('b', null, X.base.name)] : name ? [' · ', h('b', null, name)] : null),
+    h('h1', { class: 'hm-goal-t' }, rxMath(goal)));
 }
 function rxThesisAnswer(E) {      // "How many claims are backed, stale, in mismatch, waiting, without an experiment"; a zero is said in words
   const cc = RX.claims.counts, st = cc.stages || {}, total = RX_STAGES.reduce((a, k) => a + (st[k] || 0), 0);
@@ -1174,7 +1193,11 @@ function pageDigest() {      // Home (S24 step 8, S36): the tab key stays 'diges
   if (nd) { const days = Math.round((Date.parse(nd.date) - Date.parse(T.today)) / 864e5); ans.push('Next deadline: ' + nd.title + ', ' + (days === 0 ? 'today' : days === 1 ? 'tomorrow' : 'in ' + days + ' days') + '. '); }
   else if (T) ans.push('No deadline is set. ');
   if (RX.todo) ans.push(h('button', { class: 'linkbtn', id: 'hm-todo-link', 'aria-expanded': String(!!RX.hmTodo), onclick: () => { RX.hmTodo = !RX.hmTodo; renderPage(true); } }, 'All to-do (' + RX.todo.counts.total + ')'));
-  root.append(rxPageHead(RX_Q.digest, ans), rxBehindNote());
+  const E = RX.experiments, goal = EMBED ? null : rxGoalHead(E), hasMap = !EMBED && E && !rxSurvey() && E.sections.some(x => x.kind !== 'other');
+  if (goal) root.append(goal);
+  if (hasMap) root.append(rxClaimMap(E, { summary: true }));
+  // with the goal as the page's heading, the question becomes the heading of the part under the map
+  root.append(goal ? h('header', { class: 'pghead sub' }, h('h2', { class: 'ptitle pq' }, RX_Q.digest), h('p', { class: 'pans' }, ans)) : rxPageHead(RX_Q.digest, ans), rxBehindNote());
   if (rxSurvey() && RX.survey && RX.survey.state === 'ok') {      // S37: a survey's main question sits at the top of Home
     const c = RX.survey.counts, n = c.differs + c.still + c.check;
     root.append(h('div', { class: 'hm-row sv-home' }, h('span', { class: 'hm-turn' }, h('i', { class: 'hm-sd ' + (n ? 'err' : 'ok'), 'aria-hidden': 'true' }), n ? 'to apply' : 'in step'),

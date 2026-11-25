@@ -191,7 +191,7 @@ function modal(title, body, buttons, opts) {
   const close = () => { scrim.remove(); document.removeEventListener('keydown', onKey, true); if (prevFocus && prevFocus.focus) prevFocus.focus(); };
   const acts = h('div', { class: 'acts' }, buttons.map(b => h('button', { class: 'btn' + (b.primary ? ' primary' : ''), onclick: () => { if (b.keep !== true) close(); if (b.fn) b.fn(close); } }, b.label)));
   const scrim = h('div', { class: 'scrim', onclick: ev => { if (ev.target === scrim) close(); } },
-    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: opts.width ? { width: opts.width + 'px' } : null }, h('h3', null, title), body, acts));
+    h('div', { class: 'modal' + (opts.cls ? ' ' + opts.cls : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: opts.width ? { width: opts.width + 'px' } : null }, h('h3', null, title), body, acts));
   function onKey(ev) {
     if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
     if (ev.key === 'Tab') {
